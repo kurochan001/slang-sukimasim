@@ -142,6 +142,12 @@ $assertfailon AssertFailOn
 $assertfailoff AssertFailOff
 $assertnonvacuouson AssertNonvacuousOn
 $assertvacuousoff AssertVacuousOff
+$assertcoveredon AssertCoveredOn
+$assertcoverageoff AssertCoverageOff
+$assertion_coverage AssertionCoverage
+$get_assertion_coverage GetAssertionCoverage
+$get_toggle_coverage GetToggleCoverage
+$system_coverage SystemCoverage
 
 $display Display
 $displayb DisplayB
