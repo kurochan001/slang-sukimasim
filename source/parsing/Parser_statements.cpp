@@ -692,6 +692,7 @@ std::span<SyntaxNode*> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
             //     addDiag(diag::DeclarationsAtStart, loc);
             //     erroredAboutDecls = true;
             // }
+            (void)isStmt; // Suppress unused variable warning after Phase 1 modification
         }
         kind = peek().kind;
     }
