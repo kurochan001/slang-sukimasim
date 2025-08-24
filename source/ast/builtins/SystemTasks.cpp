@@ -1031,6 +1031,23 @@ void Builtins::registerSystemTasks() {
         addSystemSubroutine(
             std::make_shared<PlaTask>((KnownSystemName)((int)KnownSystemName::AsyncAndArray + i)));
     }
+
+    // Sukimasim improvements: IEEE 1800-2023 assertion coverage control tasks
+    // These fix the "Invalid initial block" issues with FCov tests
+    addSystemSubroutine(std::make_shared<SimpleSystemTask>(KnownSystemName::AssertCoveredOn,
+                                                          voidType));
+    addSystemSubroutine(std::make_shared<SimpleSystemTask>(KnownSystemName::AssertCoverageOff,
+                                                          voidType));
+
+    // Add coverage query functions (returning appropriate types)
+    addSystemSubroutine(std::make_shared<SimpleSystemTask>(KnownSystemName::AssertionCoverage,
+                                                          intType));
+    addSystemSubroutine(std::make_shared<SimpleSystemTask>(KnownSystemName::GetAssertionCoverage,
+                                                          realType));
+    addSystemSubroutine(std::make_shared<SimpleSystemTask>(KnownSystemName::GetToggleCoverage,
+                                                          realType));
+    addSystemSubroutine(std::make_shared<SimpleSystemTask>(KnownSystemName::SystemCoverage,
+                                                          intType));
 }
 
 } // namespace slang::ast::builtins

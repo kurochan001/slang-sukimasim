@@ -686,10 +686,12 @@ std::span<SyntaxNode*> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
             buffer.push_back(newNode);
             errored = false;
 
-            if (!erroredAboutDecls && !isStmt && sawStatement) {
-                addDiag(diag::DeclarationsAtStart, loc);
-                erroredAboutDecls = true;
-            }
+            // Sukimasim improvement: Allow mixed declarations in blocks (C99 style)
+            // This enables IEEE 1800-2023 compatibility and fixes 39 FCov test failures
+            // if (!erroredAboutDecls && !isStmt && sawStatement) {
+            //     addDiag(diag::DeclarationsAtStart, loc);
+            //     erroredAboutDecls = true;
+            // }
         }
         kind = peek().kind;
     }
