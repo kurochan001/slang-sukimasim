@@ -16,6 +16,7 @@
 #include "slang/diagnostics/ConstEvalDiags.h"
 #include "slang/diagnostics/SysFuncsDiags.h"
 #include "slang/util/Function.h"
+#include <iostream>
 
 namespace slang::ast::builtins {
 
@@ -383,18 +384,33 @@ public:
             return comp.getErrorType();
         }
 
-        return *comp.emplace<QueueType>(*elemType, 0u);
+        // For min() and max() methods, return the element type, not a queue
+        // This is a sukimasim fix for proper type inference
+        return *elemType;
     }
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo& callInfo) const final {
         ConstantValue arr = args[0]->eval(context);
-        if (!arr)
+        if (!arr) {
             return nullptr;
+        }
 
-        SVQueue result;
-        if (arr.empty())
-            return result;
+        // For min/max, we return the element directly, not a queue
+        if (arr.empty()) {
+            auto elemType = args[0]->type->getArrayElementType();
+            if (elemType->isIntegral())
+                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
+            else if (elemType->isFloating())
+                return elemType->getBitWidth() == 32 ? ConstantValue(shortreal_t(0.0f)) : ConstantValue(real_t(0.0));
+            else
+                return nullptr;
+        }
+
+        // Check if array is a container type (queue, map, or unpacked array)
+        if (!arr.isContainer()) {
+            return nullptr;
+        }
 
         auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
         if (iterExpr) {
@@ -423,25 +439,68 @@ public:
                     }
                 }
             }
-            result.emplace_back(std::move(elem));
+            // Return the element directly, not a queue
+            return elem;
         }
         else {
-            auto it = begin(arr);
-            ConstantValue elem = *it;
-            for (++it; it != end(arr); ++it) {
-                if (isMin) {
-                    if (*it < elem)
-                        elem = *it;
+            // Handle different container types explicitly
+            if (arr.isQueue()) {
+                auto& q = *arr.queue();
+                if (q.empty())
+                    return nullptr;
+                    
+                ConstantValue elem = q[0];
+                for (size_t i = 1; i < q.size(); ++i) {
+                    if (isMin) {
+                        if (q[i] < elem)
+                            elem = q[i];
+                    }
+                    else {
+                        if (elem < q[i])
+                            elem = q[i];
+                    }
                 }
-                else {
-                    if (elem < *it)
-                        elem = *it;
-                }
+                return elem;
             }
-            result.emplace_back(std::move(elem));
+            else if (arr.isMap()) {
+                auto& m = *arr.map();
+                if (m.empty())
+                    return nullptr;
+                    
+                auto it = m.begin();
+                ConstantValue elem = it->second;
+                for (++it; it != m.end(); ++it) {
+                    if (isMin) {
+                        if (it->second < elem)
+                            elem = it->second;
+                    }
+                    else {
+                        if (elem < it->second)
+                            elem = it->second;
+                    }
+                }
+                return elem;
+            }
+            else {
+                // Regular unpacked array
+                auto it = begin(arr);
+                ConstantValue elem = *it;
+                for (++it; it != end(arr); ++it) {
+                    if (isMin) {
+                        if (*it < elem)
+                            elem = *it;
+                    }
+                    else {
+                        if (elem < *it)
+                            elem = *it;
+                    }
+                }
+                return elem;
+            }
         }
 
-        return result;
+        // This line should never be reached
+        return nullptr;
     }
 
 private:

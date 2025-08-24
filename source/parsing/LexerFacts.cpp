@@ -114,9 +114,10 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "input", TokenKind::InputKeyword },\
     { "integer", TokenKind::IntegerKeyword },\
     { "join", TokenKind::JoinKeyword },\
-    { "large", TokenKind::LargeKeyword },\
+    /* Deprecated in SystemVerilog - should not be reserved */ \
+    /* { "large", TokenKind::LargeKeyword },*/ \
     { "macromodule", TokenKind::MacromoduleKeyword },\
-    { "medium", TokenKind::MediumKeyword },\
+    /* { "medium", TokenKind::MediumKeyword },*/ \
     { "module", TokenKind::ModuleKeyword },\
     { "nand", TokenKind::NandKeyword },\
     { "negedge", TokenKind::NegEdgeKeyword },\
@@ -147,11 +148,12 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "rtranif0", TokenKind::RtranIf0Keyword },\
     { "rtranif1", TokenKind::RtranIf1Keyword },\
     { "scalared", TokenKind::ScalaredKeyword },\
-    { "small", TokenKind::SmallKeyword },\
+    /* { "small", TokenKind::SmallKeyword },*/ \
     { "specify", TokenKind::SpecifyKeyword },\
     { "specparam", TokenKind::SpecParamKeyword },\
-    { "strong0", TokenKind::Strong0Keyword },\
-    { "strong1", TokenKind::Strong1Keyword },\
+    /* Drive strength keywords - deprecated in SystemVerilog */ \
+    /* { "strong0", TokenKind::Strong0Keyword },*/ \
+    /* { "strong1", TokenKind::Strong1Keyword },*/ \
     { "supply0", TokenKind::Supply0Keyword },\
     { "supply1", TokenKind::Supply1Keyword },\
     { "table", TokenKind::TableKeyword },\
@@ -169,8 +171,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "vectored", TokenKind::VectoredKeyword },\
     { "wait", TokenKind::WaitKeyword },\
     { "wand", TokenKind::WAndKeyword },\
-    { "weak0", TokenKind::Weak0Keyword },\
-    { "weak1", TokenKind::Weak1Keyword },\
+    /* { "weak0", TokenKind::Weak0Keyword },*/ \
+    /* { "weak1", TokenKind::Weak1Keyword },*/ \
     { "while", TokenKind::WhileKeyword },\
     { "wire", TokenKind::WireKeyword },\
     { "wor", TokenKind::WOrKeyword },\
