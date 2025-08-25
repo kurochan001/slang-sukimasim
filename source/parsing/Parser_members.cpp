@@ -1980,11 +1980,40 @@ MemberSyntax* Parser::parseCoverCrossMember() {
         return nullptr;
 
     auto name = expect(TokenKind::Identifier);
+    
+    // sukimasim: Support array-style bins for cross coverage
+    // e.g., bins sel[] = { ... }
+    // For now, just consume and ignore the brackets
+    if (peek(TokenKind::OpenBracket)) {
+        consume(); // openBracket
+        expect(TokenKind::CloseBracket);
+    }
+    
     auto equals = expect(TokenKind::Equals);
-    auto& expr = parseBinsSelectExpression();
+    
+    // sukimasim: Handle array initialization syntax for bins
+    // bins sel[] = { binsof(...) }
+    BinsSelectExpressionSyntax* expr;
+    if (peek(TokenKind::OpenBrace)) {
+        consume(); // consume opening brace
+        expr = &parseBinsSelectExpression();
+        
+        // Handle comma-separated list
+        while (peek(TokenKind::Comma)) {
+            consume(); // consume comma
+            // For now, just parse and ignore additional expressions
+            parseBinsSelectExpression();
+        }
+        
+        expect(TokenKind::CloseBrace);
+    }
+    else {
+        expr = &parseBinsSelectExpression();
+    }
+    
     auto iff = parseCoverageIffClause();
 
-    return &factory.binsSelection(attributes, bins, name, equals, expr, iff,
+    return &factory.binsSelection(attributes, bins, name, equals, *expr, iff,
                                   expect(TokenKind::Semicolon));
 }
 

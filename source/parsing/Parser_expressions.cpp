@@ -1712,8 +1712,9 @@ PropertyExprSyntax& Parser::parsePropertyPrimary() {
                                                        expr);
             }
 
-            if (current.kind == TokenKind::SAlwaysKeyword ||
-                current.kind == TokenKind::EventuallyKeyword) {
+            // sukimasim: Allow eventually without range (LRM 16.12.7)
+            // Only s_always requires a range
+            if (current.kind == TokenKind::SAlwaysKeyword) {
                 addDiag(diag::InvalidPropertyRange, op.range()) << op.valueText();
             }
 
