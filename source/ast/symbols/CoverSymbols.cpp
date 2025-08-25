@@ -170,6 +170,10 @@ CovergroupBodySymbol::CovergroupBodySymbol(Compilation& comp, SourceLocation loc
     option.addField("at_least"sv, int_t);
     option.addField("auto_bin_max"sv, int_t, VariableFlags::ImmutableCoverageOption);
     option.addField("cross_num_print_missing"sv, int_t);
+    option.addField("cross_auto_delete"sv, bit_t);
+    option.addField("get_cov_cnt"sv, bit_t);
+    option.addField("strobe"sv, bit_t, VariableFlags::ImmutableCoverageOption);
+    option.addField("merge_instances"sv, bit_t);
     if (lv >= LanguageVersion::v1800_2023)
         option.addField("cross_retain_auto_bins"sv, bit_t, VariableFlags::ImmutableCoverageOption);
     option.addField("detect_overlap"sv, bit_t, VariableFlags::ImmutableCoverageOption);
@@ -226,13 +230,12 @@ const CovergroupType& CovergroupType::fromSyntax(const Scope& scope,
 
     if (!syntax.extends) {
         if (syntax.portList) {
-            SmallVector<FormalArgumentSymbol*> args;
+            SmallVector<const FormalArgumentSymbol*> args;
             SubroutineSymbol::buildArguments(*result, scope, *syntax.portList,
                                              VariableLifetime::Automatic, args);
             result->arguments = args.copy(comp);
 
-            for (auto arg : args) {
-                arg->flags |= VariableFlags::Const;
+            for (auto arg : result->arguments) {
                 if (arg->direction == ArgumentDirection::Out ||
                     arg->direction == ArgumentDirection::InOut) {
                     scope.addDiag(diag::CovergroupOutArg, arg->location);
@@ -246,7 +249,7 @@ const CovergroupType& CovergroupType::fromSyntax(const Scope& scope,
         if (syntax.event && syntax.event->kind == SyntaxKind::WithFunctionSample) {
             auto& wfs = syntax.event->as<WithFunctionSampleSyntax>();
             if (wfs.portList) {
-                SmallVector<FormalArgumentSymbol*> args;
+                SmallVector<const FormalArgumentSymbol*> args;
                 SubroutineSymbol::buildArguments(*result, scope, *wfs.portList,
                                                  VariableLifetime::Automatic, args);
 
@@ -256,7 +259,8 @@ const CovergroupType& CovergroupType::fromSyntax(const Scope& scope,
                         scope.addDiag(diag::CovergroupOutArg, arg->location);
                     }
 
-                    arg->flags |= VariableFlags::CoverageSampleFormal;
+                    const_cast<FormalArgumentSymbol*>(arg)->flags |=
+                        VariableFlags::CoverageSampleFormal;
                     sample.copyArg(*arg);
                 }
             }
@@ -911,6 +915,10 @@ CoverCrossSymbol::CoverCrossSymbol(Compilation& comp, std::string_view name, Sou
     option.addField("comment"sv, string_t);
     option.addField("at_least"sv, int_t);
     option.addField("cross_num_print_missing"sv, int_t);
+    option.addField("cross_auto_delete"sv, bit_t);
+    option.addField("get_cov_cnt"sv, bit_t);
+    option.addField("strobe"sv, bit_t, VariableFlags::ImmutableCoverageOption);
+    option.addField("merge_instances"sv, bit_t);
     if (lv >= LanguageVersion::v1800_2023)
         option.addField("cross_retain_auto_bins"sv, bit_t, VariableFlags::ImmutableCoverageOption);
     addProperty(*this, "option"sv, VariableLifetime::Automatic, option);
