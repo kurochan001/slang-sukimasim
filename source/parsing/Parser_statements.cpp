@@ -686,13 +686,14 @@ std::span<SyntaxNode*> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
             buffer.push_back(newNode);
             errored = false;
 
-            // Sukimasim improvement: Allow mixed declarations in blocks (C99 style)
-            // This enables IEEE 1800-2023 compatibility and fixes 39 FCov test failures
+            // sukimasim: Disabled DeclarationsAtStart restriction to allow variable declarations anywhere in blocks
+            // This enables more flexible coding patterns and improves compatibility
+            // Completely removed DeclarationsAtStart check for sukimasim compatibility
+            // Original code:
             // if (!erroredAboutDecls && !isStmt && sawStatement) {
             //     addDiag(diag::DeclarationsAtStart, loc);
             //     erroredAboutDecls = true;
             // }
-            (void)isStmt; // Suppress unused variable warning after Phase 1 modification
         }
         kind = peek().kind;
     }
