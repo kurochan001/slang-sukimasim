@@ -49,7 +49,7 @@ slangを使用できることの例：
 
 ソースからslangをビルドする手順は[こちら](https://sv-lang.com/building.html)。要約すると：
 ```
-git clone https://github.com/bamba351/slang-sukimasim.git
+git clone https://github.com/kurochan001/slang-sukimasim.git
 cd slang-sukimasim
 cmake -B build
 cmake --build build -j32
@@ -75,7 +75,7 @@ pip install -U pyslang
 ```
 または、ローカルビルドをチェックアウトしてインストールするには：
 ```
-git clone https://github.com/bamba351/slang-sukimasim.git
+git clone https://github.com/kurochan001/slang-sukimasim.git
 cd slang-sukimasim
 pip install .
 ```
@@ -171,7 +171,7 @@ upstream/masterと定期的に同期されます。このフォークからの�
 >   Copyright (c) 2015-2025 Michael Popoloski
 
 #### フォークの修正
->   Copyright (c) 2025 bamba351 (sukimasim fork)
+>   Copyright (c) 2025 kurochan001 (sukimasim fork)
 
 slangのオリジナル作者であるMichael Popoloski氏と、slangコミュニティのすべての貢献者に特別な感謝を。
 

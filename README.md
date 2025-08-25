@@ -49,7 +49,7 @@ See documentation in the [docs/](docs/) directory for details.
 
 Instructions on building slang from source are [here](https://sv-lang.com/building.html). The tl;dr is:
 ```
-git clone https://github.com/bamba351/slang-sukimasim.git
+git clone https://github.com/kurochan001/slang-sukimasim.git
 cd slang-sukimasim
 cmake -B build
 cmake --build build -j32
@@ -75,7 +75,7 @@ pip install -U pyslang
 ```
 or, to checkout and install a local build:
 ```
-git clone https://github.com/bamba351/slang-sukimasim.git
+git clone https://github.com/kurochan001/slang-sukimasim.git
 cd slang-sukimasim
 pip install .
 ```
@@ -171,7 +171,7 @@ This fork is provided under the same MIT license as the original slang.
 >   Copyright (c) 2015-2025 Michael Popoloski
 
 #### Fork Modifications
->   Copyright (c) 2025 bamba351 (sukimasim fork)
+>   Copyright (c) 2025 kurochan001 (sukimasim fork)
 
 Special thanks to Michael Popoloski, the original author of slang, and all contributors to the slang community.
 
