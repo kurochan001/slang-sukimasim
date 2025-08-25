@@ -657,7 +657,6 @@ std::span<SyntaxNode*> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
     while (!isEndKeyword(kind) && kind != endKind && kind != TokenKind::EndOfFile) {
         SourceLocation loc = peek().location();
         SyntaxNode* newNode = nullptr;
-        bool isStmt = false;
 
         if (isPortDeclaration(/* inStatement */ true)) {
             newNode = &parsePortDeclaration(parseAttributes());
@@ -673,7 +672,6 @@ std::span<SyntaxNode*> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
                 loc == peek().location()) {
                 skipToken(std::nullopt);
             }
-            isStmt = true;
             sawStatement = true;
         }
         else {
