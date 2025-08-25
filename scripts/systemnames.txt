@@ -153,6 +153,7 @@ $display Display
 $displayb DisplayB
 $displayo DisplayO
 $displayh DisplayH
+$sukimasim_enum_name SukimasimEnumName
 $write Write
 $writeb WriteB
 $writeo WriteO

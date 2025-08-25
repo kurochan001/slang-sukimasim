@@ -49,6 +49,33 @@ public:
     }
 };
 
+// SukimasimEnumName is a system function that returns a string
+class SukimasimEnumNameFunc : public SystemSubroutine {
+public:
+    SukimasimEnumNameFunc() : SystemSubroutine(KnownSystemName::SukimasimEnumName, SubroutineKind::Function) {}
+
+    bool allowEmptyArgument(size_t) const final { return false; }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const override {
+        auto& comp = context.getCompilation();
+        
+        // Check that we have exactly one argument
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+        
+        // Return type is string
+        return comp.getStringType();
+    }
+    
+    ConstantValue eval(EvalContext&, const Args&, SourceRange,
+                      const CallExpression::SystemCallInfo&) const override {
+        // Return a dummy string for constant evaluation
+        // The actual value will be determined at runtime
+        return std::string("ENUM");
+    }
+};
+
 class DisplayTask : public SystemTaskBase {
 public:
     LiteralBase defaultIntFmt;
@@ -892,6 +919,10 @@ void Builtins::registerSystemTasks() {
     REGISTER(DisplayTask, KnownSystemName::DisplayB, LiteralBase::Binary);
     REGISTER(DisplayTask, KnownSystemName::DisplayO, LiteralBase::Octal);
     REGISTER(DisplayTask, KnownSystemName::DisplayH, LiteralBase::Hex);
+    
+    // Add sukimasim custom system functions
+    addSystemSubroutine(std::make_shared<SukimasimEnumNameFunc>());
+    
     REGISTER(DisplayTask, KnownSystemName::Write, LiteralBase::Decimal);
     REGISTER(DisplayTask, KnownSystemName::WriteB, LiteralBase::Binary);
     REGISTER(DisplayTask, KnownSystemName::WriteO, LiteralBase::Octal);
