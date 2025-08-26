@@ -383,9 +383,9 @@ public:
             return comp.getErrorType();
         }
 
-        // For min() and max() methods, return the element type, not a queue
-        // This is a sukimasim fix for proper type inference
-        return *elemType;
+        // Phase 96: Fixed - min() and max() methods should return a queue of the element type
+        // per IEEE 1800-2023 LRM section 7.12.1
+        return *comp.emplace<QueueType>(*elemType, 0u);
     }
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
@@ -394,15 +394,9 @@ public:
         if (!arr)
             return nullptr;
 
-        // For min/max, we return the element directly, not a queue
+        // Phase 96: Return an empty queue for empty arrays
         if (arr.empty()) {
-            auto elemType = args[0]->type->getArrayElementType();
-            if (elemType->isIntegral())
-                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
-            else if (elemType->isFloating())
-                return elemType->getBitWidth() == 32 ? ConstantValue(shortreal_t(0.0f)) : ConstantValue(real_t(0.0));
-            else
-                return nullptr;
+            return SVQueue{};
         }
 
         auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
@@ -432,8 +426,19 @@ public:
                     }
                 }
             }
-            // Return the element directly, not a queue
-            return elem;
+            // Phase 96: Collect all elements equal to min/max and return as queue
+            SVQueue result;
+            
+            // Go through array again to find all elements equal to min/max
+            for (auto it2 = begin(arr); it2 != end(arr); ++it2) {
+                *iterVal = *it2;
+                auto cv = iterExpr->eval(context);
+                if (cv == val) {
+                    result.emplace_back(*it2);
+                }
+            }
+            
+            return result;
         }
         else {
             auto it = begin(arr);
@@ -448,12 +453,18 @@ public:
                         elem = *it;
                 }
             }
-            // Return the element directly, not a queue
-            return elem;
+            // Phase 96: Collect all elements equal to min/max and return as queue
+            SVQueue result;
+            
+            // Go through array again to find all elements equal to min/max
+            for (auto it2 = begin(arr); it2 != end(arr); ++it2) {
+                if (*it2 == elem) {
+                    result.emplace_back(*it2);
+                }
+            }
+            
+            return result;
         }
-
-        // This line should never be reached
-        return nullptr;
     }
 
 private:
