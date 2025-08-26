@@ -8,8 +8,12 @@
 #include "slang/ast/symbols/CoverSymbols.h"
 
 #include "slang/ast/Compilation.h"
+#include "slang/ast/EvalContext.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/LiteralExpressions.h"
+#include "slang/ast/expressions/OperatorExpressions.h"
+#include "slang/ast/expressions/SelectExpressions.h"
 #include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
@@ -18,6 +22,7 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
+#include "slang/numeric/SVInt.h"
 #include "slang/syntax/AllSyntax.h"
 
 namespace {
@@ -630,8 +635,85 @@ void CoverageBinSymbol::resolve() const {
         case SyntaxKind::RangeCoverageBinInitializer: {
             SmallVector<const Expression*> buffer;
             auto& rcbis = init->as<RangeCoverageBinInitializerSyntax>();
-            for (auto elem : rcbis.ranges->valueRanges)
-                buffer.push_back(&bindCovergroupExpr(*elem, context, &type));
+            
+            // Check if this is an array bin with auto_bin_max option
+            bool shouldSplitBins = false;
+            int autoBinMax = 0;
+            
+            if (isArray) {
+                // Check if the parent coverpoint has auto_bin_max option
+                for (auto& opt : coverpoint.options) {
+                    if (opt.getName() == "auto_bin_max") {
+                        auto& optExpr = opt.getExpression();
+                        EvalContext evalCtx(context, EvalFlags::CovergroupExpr);
+                        auto cv = optExpr.eval(evalCtx);
+                        if (cv.isInteger()) {
+                            autoBinMax = cv.integer().as<int32_t>().value_or(0);
+                            if (autoBinMax > 0) {
+                                shouldSplitBins = true;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            if (shouldSplitBins && rcbis.ranges->valueRanges.size() == 1) {
+                // Split the range into auto_bin_max bins
+                auto elem = rcbis.ranges->valueRanges[0];
+                auto& rangeExpr = bindCovergroupExpr(*elem, context, &type);
+                
+                // If this is a range expression like [0:15], split it
+                if (rangeExpr.kind == ExpressionKind::RangeSelect) {
+                    auto& rs = rangeExpr.as<RangeSelectExpression>();
+                    
+                    EvalContext evalCtx(context, EvalFlags::CovergroupExpr);
+                    auto leftVal = rs.left().eval(evalCtx);
+                    auto rightVal = rs.right().eval(evalCtx);
+                    
+                    if (leftVal.isInteger() && rightVal.isInteger()) {
+                        int64_t start = leftVal.integer().as<int64_t>().value_or(0);
+                        int64_t end = rightVal.integer().as<int64_t>().value_or(0);
+                        
+                        if (start <= end) {
+                            int64_t totalRange = end - start + 1;
+                            int64_t binSize = (totalRange + autoBinMax - 1) / autoBinMax;
+                            
+                            // Create split bins
+                            for (int i = 0; i < autoBinMax && start + i * binSize <= end; i++) {
+                                int64_t binStart = start + i * binSize;
+                                int64_t binEnd = std::min(binStart + binSize - 1, end);
+                                
+                                // Create integer literal expressions for the range bounds
+                                auto& startExpr = IntegerLiteral::fromConstant(comp, 
+                                    SVInt(32, static_cast<uint64_t>(binStart), true));
+                                auto& endExpr = IntegerLiteral::fromConstant(comp,
+                                    SVInt(32, static_cast<uint64_t>(binEnd), true));
+                                    
+                                // Create value range expression [binStart:binEnd]
+                                auto& newRange = *comp.emplace<ValueRangeExpression>(
+                                    type, ValueRangeKind::Simple,
+                                    startExpr, endExpr, rangeExpr.sourceRange);
+                                buffer.push_back(&newRange);
+                            }
+                        } else {
+                            // Fallback to original processing
+                            buffer.push_back(&rangeExpr);
+                        }
+                    } else {
+                        // Fallback to original processing
+                        buffer.push_back(&rangeExpr);
+                    }
+                } else {
+                    // Not a range select, use original processing
+                    buffer.push_back(&rangeExpr);
+                }
+            } else {
+                // Original processing for non-auto_bin_max cases
+                for (auto elem : rcbis.ranges->valueRanges)
+                    buffer.push_back(&bindCovergroupExpr(*elem, context, &type));
+            }
+            
             values = buffer.copy(comp);
 
             if (rcbis.withClause)
