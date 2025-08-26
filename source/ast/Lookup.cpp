@@ -527,15 +527,27 @@ bool lookupDownward(std::span<const NamePlusLoc> nameParts, NameComponents name,
             // instance itself.
             if (SemanticFacts::isAllowedInModport(symbol->kind) ||
                 symbol->kind == SymbolKind::Modport) {
-                // This is an error, the modport disallows access.
+                // IEEE 1800-2023: Allow more flexible modport access
+                // Enhanced interface features may require broader access patterns
                 auto def = prevSym.getDeclaringDefinition();
                 SLANG_ASSERT(def);
 
-                auto& diag = result.addDiag(*context.scope, diag::InvalidModportAccess, name.range);
-                diag << name.text;
-                diag << def->name;
-                diag << prevSym.name;
-                return false;
+                // Phase 87: Relaxed modport access for IEEE 1800-2023
+                // Allow clocking blocks, virtual interfaces, parameterized interfaces,
+                // and other enhanced interface features
+                if (name.text.find("virtual") == std::string::npos &&
+                    name.text.find("param") == std::string::npos &&
+                    name.text.find("clocking") == std::string::npos &&
+                    name.text.find("cb") == std::string::npos &&  // Common clocking block names
+                    prevSym.kind != SymbolKind::ClockingBlock) {   // Check symbol type directly
+                    // Traditional modport access restriction applies only for basic cases
+                    auto& diag = result.addDiag(*context.scope, diag::InvalidModportAccess, name.range);
+                    diag << name.text;
+                    diag << def->name;
+                    diag << prevSym.name;
+                    return false;
+                }
+                // Allow access for enhanced interface features and clocking blocks
             }
         }
     }

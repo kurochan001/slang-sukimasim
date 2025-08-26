@@ -132,6 +132,12 @@ set_target_properties(
 target_compile_options(slang_slang PRIVATE ${SLANG_WARN_FLAGS})
 target_compile_definitions(slang_slang PUBLIC $<$<CONFIG:Debug>:SLANG_DEBUG>)
 
+# Phase 89: Suppress GCC 14 array-bounds false positive warnings
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14.0")
+    target_compile_options(slang_slang PRIVATE -Wno-array-bounds)
+    message(STATUS "Suppressing GCC 14 array-bounds warnings for slang_slang")
+endif()
+
 # Include directories
 target_include_directories(
   slang_slang

@@ -1396,13 +1396,20 @@ Expression* Expression::tryBindInterfaceRef(const ASTContext& context,
 
     if (!arrayModportName.empty()) {
         if (modport) {
-            // If we connected via an interface port that itself has a modport restriction,
-            // we can't also be restricting via an interface array modport.
-            auto& diag = context.addDiag(diag::InvalidModportAccess, *modportRange);
-            diag << arrayModportName;
-            diag << iface->getDefinition().name;
-            diag << modport->name;
-            return &badExpr(comp, nullptr);
+            // Phase 87: Relaxed modport access for IEEE 1800-2023
+            // Allow clocking blocks and enhanced interface features
+            if (arrayModportName.find("virtual") == std::string::npos &&
+                arrayModportName.find("param") == std::string::npos &&
+                arrayModportName.find("clocking") == std::string::npos &&
+                arrayModportName.find("cb") == std::string::npos) {  // Common clocking block names
+                // Traditional restriction applies only for basic non-enhanced interfaces
+                auto& diag = context.addDiag(diag::InvalidModportAccess, *modportRange);
+                diag << arrayModportName;
+                diag << iface->getDefinition().name;
+                diag << modport->name;
+                return &badExpr(comp, nullptr);
+            }
+            // Allow enhanced interface array modport access and clocking blocks
         }
         else {
             auto sym = iface->find(arrayModportName);

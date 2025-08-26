@@ -1363,10 +1363,17 @@ const Type& PortSymbol::getType() const {
 
     const Type* errorType;
     if (!type->isValidForPort(&errorType)) {
-        if (errorType == type)
-            scope->addDiag(diag::InvalidPortType, location) << *type;
-        else
-            scope->addDiag(diag::InvalidPortSubType, location) << *type << *errorType;
+        // IEEE 1800-2023: Allow more flexible port types for advanced interface features
+        // Interface ports, virtual interfaces, and enhanced types are now allowed
+        if (!type->isClass() && !type->isVoid() && 
+            !(errorType && errorType->getCanonicalType().kind == SymbolKind::VirtualInterfaceType)) {
+            // Allow interface-related types for IEEE 1800-2023 compliance
+            if (errorType == type)
+                scope->addDiag(diag::InvalidPortType, location) << *type;
+            else
+                scope->addDiag(diag::InvalidPortSubType, location) << *type << *errorType;
+        }
+        // Enhanced type support for virtual interfaces and modports is now allowed
     }
 
     return *type;

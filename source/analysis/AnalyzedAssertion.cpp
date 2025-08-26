@@ -89,8 +89,15 @@ struct AssertionVisitor {
         bool isMulticlockedSeq = false;
 
         VisitResult() = default;
+#if defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
         VisitResult(Clock clock, bool isMulticlockedSeq, Clock endClock) :
             clocks{clock}, endClock(endClock), isMulticlockedSeq(isMulticlockedSeq) {}
+#if defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC diagnostic pop
+#endif
 
         static VisitResult unionWith(const VisitResult& left, const VisitResult& right) {
             VisitResult result;

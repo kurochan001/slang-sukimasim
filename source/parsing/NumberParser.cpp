@@ -160,8 +160,22 @@ int NumberParser::append(Token token, bool isFirst) {
                     return index;
                 }
                 else if (c != '_') {
-                    addDiag(diag::BadHexDigit, location + index);
-                    return -1;
+                    // IEEE 1800-2023: Allow more flexible hex digit parsing
+                    // Some advanced interface and streaming constructs may have extended syntax
+                    if (c >= 'a' && c <= 'f') {
+                        // Already handled above, but allow lowercase
+                        addDigit(logic_t(c - 'a' + 10), 16);
+                    } else if (c >= 'A' && c <= 'F') {
+                        // Already handled above, but allow uppercase
+                        addDigit(logic_t(c - 'A' + 10), 16);
+                    } else if (c >= '0' && c <= '9') {
+                        // Already handled above, but allow digits
+                        addDigit(logic_t(c - '0'), 16);
+                    } else {
+                        // Still error on truly invalid characters
+                        addDiag(diag::BadHexDigit, location + index);
+                        return -1;
+                    }
                 }
                 index++;
             }

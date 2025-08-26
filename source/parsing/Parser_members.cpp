@@ -218,6 +218,25 @@ MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) 
                                 attributes, statement.as<ConcurrentAssertionStatementSyntax>());
                     }
                 }
+                // Phase 86: Support labeled generate constructs (IEEE 1800-2023 27.6)
+                else if (next == TokenKind::ForKeyword || next == TokenKind::IfKeyword ||
+                         next == TokenKind::CaseKeyword || next == TokenKind::BeginKeyword) {
+                    // Consume label  
+                    consume();  // Consume the label identifier
+                    expect(TokenKind::Colon);
+                    
+                    // Parse the generate construct  
+                    if (next == TokenKind::ForKeyword) {
+                        return &parseLoopGenerateConstruct(attributes);
+                    } else if (next == TokenKind::IfKeyword) {
+                        return &parseIfGenerateConstruct(attributes);
+                    } else if (next == TokenKind::CaseKeyword) {
+                        return &parseCaseGenerateConstruct(attributes);
+                    } else if (next == TokenKind::BeginKeyword) {
+                        // For begin...end blocks in generate
+                        return &parseGenerateBlock();
+                    }
+                }
             }
 
             // If there's a hash or parenthesis here this is likely a primitive instantiation.

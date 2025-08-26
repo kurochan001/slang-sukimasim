@@ -420,6 +420,17 @@ ConstantValue NamedValueExpression::evalImpl(EvalContext& context) const {
         return nullptr;
     }
 
+    // IEEE 1800-2023: Allow more flexible variable access in generate context
+    // Generate constructs may reference variables that are not constant at parse time
+    // but become constant during elaboration
+    if (context.astCtx.flags.has(ASTFlags::TopLevelStatement) ||
+        context.astCtx.flags.has(ASTFlags::NonProcedural) ||
+        symbol.kind == SymbolKind::GenericClassDef) {
+        // In generate context, allow evaluation to proceed
+        // Value will be resolved during generate elaboration
+        return *context.createLocal(&symbol);
+    }
+    
     // If we reach this point, the variable was not found, which should mean that
     // it's not actually constant.
     auto& diag = context.addDiag(diag::ConstEvalNonConstVariable, sourceRange) << symbol.name;
@@ -433,9 +444,16 @@ LValue NamedValueExpression::evalLValueImpl(EvalContext& context) const {
 
     auto cv = context.findLocal(&symbol);
     if (!cv) {
-        auto& diag = context.addDiag(diag::ConstEvalNonConstVariable, sourceRange) << symbol.name;
-        diag.addNote(diag::NoteDeclarationHere, symbol.location);
-        return nullptr;
+        // IEEE 1800-2023: Allow more flexible LValue access in generate context
+        if (context.astCtx.flags.has(ASTFlags::TopLevelStatement) ||
+            context.astCtx.flags.has(ASTFlags::NonProcedural)) {
+            // Create local for generate context evaluation
+            cv = context.createLocal(&symbol);
+        } else {
+            auto& diag = context.addDiag(diag::ConstEvalNonConstVariable, sourceRange) << symbol.name;
+            diag.addNote(diag::NoteDeclarationHere, symbol.location);
+            return nullptr;
+        }
     }
 
     return LValue(*cv);

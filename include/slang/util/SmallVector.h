@@ -613,7 +613,14 @@ public:
     }
 
     /// Constructs the SmallVector from an initializer list.
+#if defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
     SmallVector(std::initializer_list<T> list) { this->append(list.begin(), list.end()); }
+#if defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC diagnostic pop
+#endif
 
     /// Copy constructs from another vector.
     SmallVector(const SmallVector& other) : SmallVector(static_cast<const Base&>(other)) {}
