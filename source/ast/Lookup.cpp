@@ -2260,6 +2260,12 @@ void Lookup::reportUndeclared(const Scope& initialScope, std::string_view name, 
     if (result.flags.has(LookupResultFlags::SuppressUndeclared))
         return;
 
+    // If this is a token pasting context, issue a warning instead of an error
+    if (flags.has(LookupFlags::TokenPastingContext)) {
+        result.addDiag(initialScope, diag::TokenPastingUndeclaredIdentifier, range) << name;
+        return;
+    }
+
     // The symbol wasn't found, so this is an error. The only question is how helpful we can
     // make that error. Let's try to find the closest named symbol in all reachable scopes,
     // including package imports, to provide a "did you mean" diagnostic. If along the way
