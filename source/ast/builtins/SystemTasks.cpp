@@ -76,6 +76,89 @@ public:
     }
 };
 
+// Phase 75-3: Enum extension methods
+class SukimasimEnumFirstFunc : public SystemSubroutine {
+public:
+    SukimasimEnumFirstFunc() : SystemSubroutine(KnownSystemName::SukimasimEnumFirst, SubroutineKind::Function) {}
+
+    bool allowEmptyArgument(size_t) const final { return false; }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const override {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+        
+        // Return type should be the same as the input enum type
+        return args[0]->type->getCanonicalType();
+    }
+    
+    ConstantValue eval(EvalContext&, const Args&, SourceRange,
+                      const CallExpression::SystemCallInfo&) const override {
+        return nullptr;  // Runtime evaluation only
+    }
+};
+
+class SukimasimEnumLastFunc : public SystemSubroutine {
+public:
+    SukimasimEnumLastFunc() : SystemSubroutine(KnownSystemName::SukimasimEnumLast, SubroutineKind::Function) {}
+
+    bool allowEmptyArgument(size_t) const final { return false; }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const override {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+        return args[0]->type->getCanonicalType();
+    }
+    
+    ConstantValue eval(EvalContext&, const Args&, SourceRange,
+                      const CallExpression::SystemCallInfo&) const override {
+        return nullptr;  // Runtime evaluation only
+    }
+};
+
+class SukimasimEnumNextFunc : public SystemSubroutine {
+public:
+    SukimasimEnumNextFunc() : SystemSubroutine(KnownSystemName::SukimasimEnumNext, SubroutineKind::Function) {}
+
+    bool allowEmptyArgument(size_t) const final { return false; }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const override {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+        return args[0]->type->getCanonicalType();
+    }
+    
+    ConstantValue eval(EvalContext&, const Args&, SourceRange,
+                      const CallExpression::SystemCallInfo&) const override {
+        return nullptr;  // Runtime evaluation only
+    }
+};
+
+class SukimasimEnumPrevFunc : public SystemSubroutine {
+public:
+    SukimasimEnumPrevFunc() : SystemSubroutine(KnownSystemName::SukimasimEnumPrev, SubroutineKind::Function) {}
+
+    bool allowEmptyArgument(size_t) const final { return false; }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const override {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+        return args[0]->type->getCanonicalType();
+    }
+    
+    ConstantValue eval(EvalContext&, const Args&, SourceRange,
+                      const CallExpression::SystemCallInfo&) const override {
+        return nullptr;  // Runtime evaluation only
+    }
+};
+
 class DisplayTask : public SystemTaskBase {
 public:
     LiteralBase defaultIntFmt;
@@ -922,6 +1005,10 @@ void Builtins::registerSystemTasks() {
     
     // Add sukimasim custom system functions
     addSystemSubroutine(std::make_shared<SukimasimEnumNameFunc>());
+    addSystemSubroutine(std::make_shared<SukimasimEnumFirstFunc>());
+    addSystemSubroutine(std::make_shared<SukimasimEnumLastFunc>());
+    addSystemSubroutine(std::make_shared<SukimasimEnumNextFunc>());
+    addSystemSubroutine(std::make_shared<SukimasimEnumPrevFunc>());
     
     REGISTER(DisplayTask, KnownSystemName::Write, LiteralBase::Decimal);
     REGISTER(DisplayTask, KnownSystemName::WriteB, LiteralBase::Binary);
