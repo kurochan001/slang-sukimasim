@@ -644,6 +644,66 @@ public:
     }
 };
 
+// General array exists method for dynamic and fixed arrays
+class ArrayExistsMethod : public SystemSubroutine {
+public:
+    ArrayExistsMethod() :
+        SystemSubroutine(KnownSystemName::Exists, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, true, args, range, 1, 1))
+            return comp.getErrorType();
+
+        if (!args[1]->type->isIntegral()) {
+            context.addDiag(diag::ArrayMethodIntegral, args[1]->sourceRange) << name;
+            return comp.getErrorType();
+        }
+
+        return comp.getIntType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
+                       const CallExpression::SystemCallInfo&) const final {
+        auto arr = args[0]->eval(context);
+        auto index = args[1]->eval(context);
+        if (!arr || !index)
+            return nullptr;
+
+        // For fixed and dynamic arrays, check if index is within bounds
+        auto& type = *args[0]->type;
+        if (type.kind == SymbolKind::DynamicArrayType) {
+            // Dynamic array - check against actual size
+            if (arr.isQueue()) {
+                size_t size = arr.queue()->size();
+                int64_t idx = index.integer().as<int64_t>().value();
+                return SVInt(32, idx >= 0 && idx < (int64_t)size ? 1 : 0, true);
+            } else if (!arr.empty()) {
+                size_t size = arr.size();
+                int64_t idx = index.integer().as<int64_t>().value();
+                return SVInt(32, idx >= 0 && idx < (int64_t)size ? 1 : 0, true);
+            }
+            return SVInt(32, 0, true);
+        } else if (type.kind == SymbolKind::FixedSizeUnpackedArrayType) {
+            // Fixed array - check against declared bounds
+            auto& fixedType = type.as<FixedSizeUnpackedArrayType>();
+            auto range = fixedType.range;
+            int64_t idx = index.integer().as<int64_t>().value();
+            if (range.isLittleEndian()) {
+                return SVInt(32, idx >= range.lower() && idx <= range.upper() ? 1 : 0, true);
+            } else {
+                return SVInt(32, idx <= range.lower() && idx >= range.upper() ? 1 : 0, true);
+            }
+        }
+
+        // Default case
+        return SVInt(32, 0, true);
+    }
+
+    std::optional<bitwidth_t> getEffectiveWidth() const final { return 1; }
+};
+
 class AssocArrayExistsMethod : public SystemSubroutine {
 public:
     AssocArrayExistsMethod() :
@@ -1127,6 +1187,10 @@ void Builtins::registerArrayMethods() {
     REGISTER(SymbolKind::AssociativeArrayType, AssocArrayDelete, );
     REGISTER(SymbolKind::QueueType, QueueDelete, );
 
+    // exists() method for all array types
+    REGISTER(SymbolKind::DynamicArrayType, ArrayExists, );
+    REGISTER(SymbolKind::FixedSizeUnpackedArrayType, ArrayExists, );
+    
     // Associative array methods.
     REGISTER(SymbolKind::AssociativeArrayType, AssocArrayExists, );
     REGISTER(SymbolKind::AssociativeArrayType, AssocArrayTraversal, KnownSystemName::First);
