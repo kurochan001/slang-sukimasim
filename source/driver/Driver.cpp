@@ -14,6 +14,7 @@
 #include "slang/ast/SemanticFacts.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/diagnostics/CompilationDiags.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/JsonDiagnosticClient.h"
@@ -630,15 +631,20 @@ bool Driver::processOptions() {
         diagEngine.setSeverity(diag::NonstandardDist, DiagnosticSeverity::Ignored);
     }
     else {
-        // These warnings are set to Error severity by default, unless we're in vcs compat mode.
-        // The user can always downgrade via warning options, which get set after this.
-        diagEngine.setSeverity(diag::IndexOOB, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::RangeOOB, DiagnosticSeverity::Error);
-        diagEngine.setSeverity(diag::RangeWidthOOB, DiagnosticSeverity::Error);
+        // Phase 151: Changed to warnings for LRM compliance
+        // Many commercial simulators allow x/z index access with warnings rather than errors
+        // SystemVerilog LRM allows implementation-defined behavior for out-of-bounds access
+        diagEngine.setSeverity(diag::IndexOOB, DiagnosticSeverity::Warning);
+        diagEngine.setSeverity(diag::RangeOOB, DiagnosticSeverity::Warning);
+        diagEngine.setSeverity(diag::RangeWidthOOB, DiagnosticSeverity::Warning);
         diagEngine.setSeverity(diag::ImplicitNamedPortTypeMismatch, DiagnosticSeverity::Error);
         diagEngine.setSeverity(diag::SplitDistWeightOp, DiagnosticSeverity::Error);
         diagEngine.setSeverity(diag::DPIPureTask, DiagnosticSeverity::Error);
         diagEngine.setSeverity(diag::SpecifyPathConditionExpr, DiagnosticSeverity::Error);
+        
+        // Phase 151: Relax timescale mismatch to warning for better compatibility
+        // Many designs mix modules with and without timescale directives
+        diagEngine.setSeverity(diag::MissingTimeScale, DiagnosticSeverity::Warning);
     }
 
     Diagnostics optionDiags = diagEngine.setWarningOptions(options.warningOptions);
