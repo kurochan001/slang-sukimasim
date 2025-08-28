@@ -575,6 +575,7 @@ static std::pair<const Type*, bool> resolveNewClassTarget(const NameSyntax& name
     // Otherwise, the target must come from the expression context.
     bool isSuperClass = false;
     const Type* targetType = nullptr;
+    const ClassType* classType = nullptr;
     if (nameSyntax.kind == SyntaxKind::ConstructorName) {
         if (!assignmentTarget || (!assignmentTarget->isClass() && !assignmentTarget->isCovergroup())) {
             if (!assignmentTarget || !assignmentTarget->isError())
@@ -583,6 +584,8 @@ static std::pair<const Type*, bool> resolveNewClassTarget(const NameSyntax& name
         }
 
         targetType = &assignmentTarget->getCanonicalType();
+        if (targetType->isClass())
+            classType = &targetType->as<ClassType>();
     }
     else {
         auto& scoped = nameSyntax.as<ScopedNameSyntax>();
@@ -620,17 +623,21 @@ static std::pair<const Type*, bool> resolveNewClassTarget(const NameSyntax& name
         }
     }
 
-    if (!isSuperClass && classType->isAbstract) {
-        context.addDiag(diag::NewVirtualClass, range) << classType->name;
-        return {nullptr, false};
+    if (classType) {
+        if (!isSuperClass && classType->isAbstract) {
+            context.addDiag(diag::NewVirtualClass, range) << classType->name;
+            return {nullptr, false};
+        }
+
+        if (!isSuperClass && classType->isInterface) {
+            context.addDiag(diag::NewInterfaceClass, range) << classType->name;
+            return {nullptr, false};
+        }
+
+        targetType = classType;
     }
 
-    if (!isSuperClass && classType->isInterface) {
-        context.addDiag(diag::NewInterfaceClass, range) << classType->name;
-        return {nullptr, false};
-    }
-
-    return {classType, isSuperClass};
+    return {targetType, isSuperClass};
 }
 
 Expression& NewClassExpression::fromSyntax(Compilation& comp,
@@ -644,16 +651,19 @@ Expression& NewClassExpression::fromSyntax(Compilation& comp,
     }
 
     SourceRange range = syntax.sourceRange();
-    auto [classType, isSuperClass] = resolveNewClassTarget(*syntax.scopedNew, context,
+    auto [targetType, isSuperClass] = resolveNewClassTarget(*syntax.scopedNew, context,
                                                            assignmentTarget, range);
-    if (!classType)
+    if (!targetType)
         return badExpr(comp, nullptr);
 
     Expression* constructorCall = nullptr;
-    if (auto constructor = classType->getConstructor()) {
-        Lookup::ensureVisible(*constructor, context, range);
-        constructorCall = &CallExpression::fromArgs(comp, &constructor->as<SubroutineSymbol>(),
-                                                    nullptr, syntax.argList, range, context);
+    if (targetType->isClass()) {
+        auto& classType = targetType->as<ClassType>();
+        if (auto constructor = classType.getConstructor()) {
+            Lookup::ensureVisible(*constructor, context, range);
+            constructorCall = &CallExpression::fromArgs(comp, &constructor->as<SubroutineSymbol>(),
+                                                        nullptr, syntax.argList, range, context);
+        }
     }
     else if (syntax.argList && !syntax.argList->parameters.empty()) {
         auto& diag = context.addDiag(diag::TooManyArguments, syntax.argList->sourceRange());
@@ -671,9 +681,9 @@ Expression& NewClassExpression::fromSyntax(Compilation& comp,
                                            const ASTContext& context,
                                            const Type* assignmentTarget) {
     SourceRange range = syntax.sourceRange();
-    auto [classType, isSuperClass] = resolveNewClassTarget(*syntax.scopedNew, context,
+    auto [targetType, isSuperClass] = resolveNewClassTarget(*syntax.scopedNew, context,
                                                            assignmentTarget, range);
-    if (!classType)
+    if (!targetType)
         return badExpr(comp, nullptr);
 
     SLANG_ASSERT(isSuperClass);
@@ -708,7 +718,10 @@ Expression& NewCovergroupExpression::fromSyntax(Compilation& compilation,
     auto& coverType = assignmentTarget.getCanonicalType().as<CovergroupType>();
 
     SmallVector<const Expression*> args;
-    if (!CallExpression::bindArgs(syntax.argList, coverType.getArguments(), "new"sv, range, context,
+    // Phase 145: Covergroup formal arguments are for sample(), not for new()
+    // According to LRM, covergroup constructor doesn't take the formal arguments
+    // They are only used when sample() is called
+    if (!CallExpression::bindArgs(syntax.argList, {}, "new"sv, range, context,
                                   args)) {
         return badExpr(compilation, nullptr);
     }

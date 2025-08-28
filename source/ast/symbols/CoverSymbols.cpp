@@ -251,7 +251,7 @@ const CovergroupType& CovergroupType::fromSyntax(const Scope& scope,
         MethodBuilder sample(comp, "sample"sv, comp.getVoidType(), SubroutineKind::Function);
         
         // Phase 145: Add covergroup arguments to sample method according to LRM
-        if (result->arguments) {
+        if (!result->arguments.empty()) {
             for (auto arg : result->arguments) {
                 sample.copyArg(*arg);
             }
