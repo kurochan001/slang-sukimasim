@@ -566,22 +566,23 @@ void NewArrayExpression::serializeTo(ASTSerializer& serializer) const {
         serializer.write("initExpr", *initExpr());
 }
 
-static std::pair<const ClassType*, bool> resolveNewClassTarget(const NameSyntax& nameSyntax,
-                                                               const ASTContext& context,
-                                                               const Type*& assignmentTarget,
-                                                               SourceRange range) {
+static std::pair<const Type*, bool> resolveNewClassTarget(const NameSyntax& nameSyntax,
+                                                          const ASTContext& context,
+                                                          const Type*& assignmentTarget,
+                                                          SourceRange range) {
+    // Phase 145: Support both ClassType and CovergroupType for new expressions
     // If the new expression is typed, look up that type as the target.
     // Otherwise, the target must come from the expression context.
     bool isSuperClass = false;
-    const ClassType* classType = nullptr;
+    const Type* targetType = nullptr;
     if (nameSyntax.kind == SyntaxKind::ConstructorName) {
-        if (!assignmentTarget || !assignmentTarget->isClass()) {
+        if (!assignmentTarget || (!assignmentTarget->isClass() && !assignmentTarget->isCovergroup())) {
             if (!assignmentTarget || !assignmentTarget->isError())
                 context.addDiag(diag::NewClassTarget, range);
             return {nullptr, false};
         }
 
-        classType = &assignmentTarget->getCanonicalType().as<ClassType>();
+        targetType = &assignmentTarget->getCanonicalType();
     }
     else {
         auto& scoped = nameSyntax.as<ScopedNameSyntax>();

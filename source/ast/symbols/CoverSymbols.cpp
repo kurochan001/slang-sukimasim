@@ -249,6 +249,14 @@ const CovergroupType& CovergroupType::fromSyntax(const Scope& scope,
         }
 
         MethodBuilder sample(comp, "sample"sv, comp.getVoidType(), SubroutineKind::Function);
+        
+        // Phase 145: Add covergroup arguments to sample method according to LRM
+        if (result->arguments) {
+            for (auto arg : result->arguments) {
+                sample.copyArg(*arg);
+            }
+        }
+        
         body->addMember(sample.symbol);
 
         if (syntax.event && syntax.event->kind == SyntaxKind::WithFunctionSample) {

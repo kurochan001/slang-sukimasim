@@ -220,6 +220,42 @@ public:
     }
 };
 
+// Phase 143: Support for constraint_mode on named constraints
+class ConstraintModeFunction : public SystemSubroutine {
+public:
+    ConstraintModeFunction() :
+        SystemSubroutine(KnownSystemName::Unknown, SubroutineKind::Function) {
+        name = "constraint_mode";
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression* thisExpr) const final {
+        auto& comp = context.getCompilation();
+        
+        // constraint_mode takes 0 or 1 argument (on_off bit)
+        if (!checkArgCount(context, false, args, range, 0, 1))
+            return comp.getErrorType();
+        
+        // If argument is provided, check it's a bit type
+        if (args.size() == 1) {
+            if (!args[0]->type->isSimpleBitVector()) {
+                context.addDiag(diag::BadSystemSubroutineArg, args[0]->sourceRange)
+                    << *args[0]->type << std::string_view("bit type");
+                return comp.getErrorType();
+            }
+        }
+        
+        // constraint_mode returns void
+        return comp.getVoidType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+};
+
 class GlobalClockFunction : public SystemSubroutine {
 public:
     GlobalClockFunction() :
@@ -429,6 +465,11 @@ void Builtins::registerMiscSystemFuncs() {
                     std::make_shared<SequenceMethod>(KnownSystemName::Triggered, false));
     addSystemMethod(SymbolKind::SequenceType,
                     std::make_shared<SequenceMethod>(KnownSystemName::Matched, true));
+    
+    // Phase 143: Add constraint_mode support for named constraints (LRM compliance)
+    // This allows constraint_mode() to be called on void-typed MemberAccessExpression
+    // that references a ConstraintBlock
+    addSystemMethod(SymbolKind::VoidType, std::make_shared<ConstraintModeFunction>());
 }
 
 } // namespace slang::ast::builtins
