@@ -171,6 +171,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "vectored", TokenKind::VectoredKeyword },\
     { "wait", TokenKind::WaitKeyword },\
     { "wand", TokenKind::WAndKeyword },\
+    { "weak", TokenKind::WeakKeyword },\
     /* { "weak0", TokenKind::Weak0Keyword },*/ \
     /* { "weak1", TokenKind::Weak1Keyword },*/ \
     { "while", TokenKind::WhileKeyword },\
@@ -288,6 +289,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "solve", TokenKind::SolveKeyword },\
     { "static", TokenKind::StaticKeyword },\
     { "string", TokenKind::StringKeyword },\
+    { "strong", TokenKind::StrongKeyword },\
     { "struct", TokenKind::StructKeyword },\
     { "super", TokenKind::SuperKeyword },\
     { "tagged", TokenKind::TaggedKeyword },\
@@ -510,7 +512,6 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::JoinKeyword:
         case TokenKind::JoinAnyKeyword:
         case TokenKind::JoinNoneKeyword:
-        case TokenKind::LargeKeyword:
         case TokenKind::LetKeyword:
         case TokenKind::LibListKeyword:
         case TokenKind::LibraryKeyword:
@@ -520,7 +521,6 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::LongIntKeyword:
         case TokenKind::MacromoduleKeyword:
         case TokenKind::MatchesKeyword:
-        case TokenKind::MediumKeyword:
         case TokenKind::ModPortKeyword:
         case TokenKind::ModuleKeyword:
         case TokenKind::NandKeyword:
@@ -584,7 +584,6 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::ShortRealKeyword:
         case TokenKind::ShowCancelledKeyword:
         case TokenKind::SignedKeyword:
-        case TokenKind::SmallKeyword:
         case TokenKind::SoftKeyword:
         case TokenKind::SolveKeyword:
         case TokenKind::SpecifyKeyword:
@@ -592,8 +591,6 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::StaticKeyword:
         case TokenKind::StringKeyword:
         case TokenKind::StrongKeyword:
-        case TokenKind::Strong0Keyword:
-        case TokenKind::Strong1Keyword:
         case TokenKind::StructKeyword:
         case TokenKind::SuperKeyword:
         case TokenKind::Supply0Keyword:
@@ -636,8 +633,6 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::WaitOrderKeyword:
         case TokenKind::WAndKeyword:
         case TokenKind::WeakKeyword:
-        case TokenKind::Weak0Keyword:
-        case TokenKind::Weak1Keyword:
         case TokenKind::WhileKeyword:
         case TokenKind::WildcardKeyword:
         case TokenKind::WireKeyword:
@@ -912,7 +907,6 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::JoinKeyword: return "join";
         case TokenKind::JoinAnyKeyword: return "join_any";
         case TokenKind::JoinNoneKeyword: return "join_none";
-        case TokenKind::LargeKeyword: return "large";
         case TokenKind::LetKeyword: return "let";
         case TokenKind::LibListKeyword: return "liblist";
         case TokenKind::LibraryKeyword: return "library";
@@ -922,7 +916,6 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::LongIntKeyword: return "longint";
         case TokenKind::MacromoduleKeyword: return "macromodule";
         case TokenKind::MatchesKeyword: return "matches";
-        case TokenKind::MediumKeyword: return "medium";
         case TokenKind::ModPortKeyword: return "modport";
         case TokenKind::ModuleKeyword: return "module";
         case TokenKind::NandKeyword: return "nand";
@@ -986,7 +979,6 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::ShortRealKeyword: return "shortreal";
         case TokenKind::ShowCancelledKeyword: return "showcancelled";
         case TokenKind::SignedKeyword: return "signed";
-        case TokenKind::SmallKeyword: return "small";
         case TokenKind::SoftKeyword: return "soft";
         case TokenKind::SolveKeyword: return "solve";
         case TokenKind::SpecifyKeyword: return "specify";
@@ -994,8 +986,6 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::StaticKeyword: return "static";
         case TokenKind::StringKeyword: return "string";
         case TokenKind::StrongKeyword: return "strong";
-        case TokenKind::Strong0Keyword: return "strong0";
-        case TokenKind::Strong1Keyword: return "strong1";
         case TokenKind::StructKeyword: return "struct";
         case TokenKind::SuperKeyword: return "super";
         case TokenKind::Supply0Keyword: return "supply0";
@@ -1038,8 +1028,6 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::WaitOrderKeyword: return "wait_order";
         case TokenKind::WAndKeyword: return "wand";
         case TokenKind::WeakKeyword: return "weak";
-        case TokenKind::Weak0Keyword: return "weak0";
-        case TokenKind::Weak1Keyword: return "weak1";
         case TokenKind::WhileKeyword: return "while";
         case TokenKind::WildcardKeyword: return "wildcard";
         case TokenKind::WireKeyword: return "wire";

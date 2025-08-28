@@ -203,7 +203,6 @@ IntersectKeyword
 JoinKeyword
 JoinAnyKeyword
 JoinNoneKeyword
-LargeKeyword
 LetKeyword
 LibListKeyword
 LibraryKeyword
@@ -213,7 +212,6 @@ LogicKeyword
 LongIntKeyword
 MacromoduleKeyword
 MatchesKeyword
-MediumKeyword
 ModPortKeyword
 ModuleKeyword
 NandKeyword
@@ -277,7 +275,6 @@ ShortIntKeyword
 ShortRealKeyword
 ShowCancelledKeyword
 SignedKeyword
-SmallKeyword
 SoftKeyword
 SolveKeyword
 SpecifyKeyword
@@ -285,8 +282,6 @@ SpecParamKeyword
 StaticKeyword
 StringKeyword
 StrongKeyword
-Strong0Keyword
-Strong1Keyword
 StructKeyword
 SuperKeyword
 Supply0Keyword
@@ -329,8 +324,6 @@ WaitKeyword
 WaitOrderKeyword
 WAndKeyword
 WeakKeyword
-Weak0Keyword
-Weak1Keyword
 WhileKeyword
 WildcardKeyword
 WireKeyword
