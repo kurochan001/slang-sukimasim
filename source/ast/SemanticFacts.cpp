@@ -113,12 +113,10 @@ PulseStyleKind SemanticFacts::getPulseStyleKind(TokenKind kind) {
 }
 
 ChargeStrength SemanticFacts::getChargeStrength(TokenKind kind) {
-    switch (kind) {
-        case TokenKind::SmallKeyword: return ChargeStrength::Small;
-        case TokenKind::MediumKeyword: return ChargeStrength::Medium;
-        case TokenKind::LargeKeyword: return ChargeStrength::Large;
-        default: SLANG_UNREACHABLE;
-    }
+    // Phase 154: Obsolete Verilog keywords removed
+    // small, medium, large are no longer keywords
+    (void)kind;
+    return ChargeStrength::Small;  // Default to Small for now
 }
 // clang-format on
 
@@ -156,11 +154,11 @@ static DriveStrength getDriveStrengthVal(TokenKind kind) {
         case TokenKind::Supply0Keyword:
         case TokenKind::Supply1Keyword:
             return DriveStrength::Supply;
-        case TokenKind::Strong0Keyword:
-        case TokenKind::Strong1Keyword:
+        // Phase 154: Strong0/Strong1/Weak0/Weak1 removed, using default Strong for compatibility
+        // These were obsolete Verilog keywords
+        case TokenKind::StrongKeyword:
             return DriveStrength::Strong;
-        case TokenKind::Weak0Keyword:
-        case TokenKind::Weak1Keyword:
+        case TokenKind::WeakKeyword:
             return DriveStrength::Weak;
         case TokenKind::Pull0Keyword:
         case TokenKind::Pull1Keyword:

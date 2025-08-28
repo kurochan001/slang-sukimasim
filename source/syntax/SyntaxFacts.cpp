@@ -1009,14 +1009,10 @@ bool SyntaxFacts::isConstraintQualifier(TokenKind kind) {
 bool SyntaxFacts::isDriveStrength(TokenKind kind) {
     switch (kind) {
         case TokenKind::Supply0Keyword:
-        case TokenKind::Strong0Keyword:
         case TokenKind::Pull0Keyword:
-        case TokenKind::Weak0Keyword:
         case TokenKind::HighZ0Keyword:
         case TokenKind::Supply1Keyword:
-        case TokenKind::Strong1Keyword:
         case TokenKind::Pull1Keyword:
-        case TokenKind::Weak1Keyword:
         case TokenKind::HighZ1Keyword:
             return true;
         default:
@@ -1025,14 +1021,10 @@ bool SyntaxFacts::isDriveStrength(TokenKind kind) {
 }
 
 bool SyntaxFacts::isChargeStrength(TokenKind kind) {
-    switch (kind) {
-        case TokenKind::SmallKeyword:
-        case TokenKind::MediumKeyword:
-        case TokenKind::LargeKeyword:
-            return true;
-        default:
-            return false;
-    }
+    // Phase 154: Obsolete Verilog keywords removed
+    // small, medium, large are no longer keywords
+    (void)kind;
+    return false;
 }
 
 bool SyntaxFacts::isGateType(TokenKind kind) {
@@ -1462,8 +1454,6 @@ bool SyntaxFacts::isAllowedInChecker(SyntaxKind kind) {
 
 bool SyntaxFacts::isStrength0(TokenKind kind) {
     switch (kind) {
-        case TokenKind::Strong0Keyword:
-        case TokenKind::Weak0Keyword:
         case TokenKind::Pull0Keyword:
         case TokenKind::Supply0Keyword:
         case TokenKind::HighZ0Keyword:
@@ -1475,8 +1465,6 @@ bool SyntaxFacts::isStrength0(TokenKind kind) {
 
 bool SyntaxFacts::isStrength1(TokenKind kind) {
     switch (kind) {
-        case TokenKind::Strong1Keyword:
-        case TokenKind::Weak1Keyword:
         case TokenKind::Pull1Keyword:
         case TokenKind::Supply1Keyword:
         case TokenKind::HighZ1Keyword:

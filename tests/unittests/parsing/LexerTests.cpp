@@ -935,7 +935,7 @@ TEST_CASE("All Keywords") {
     testKeyword(TokenKind::JoinKeyword);
     testKeyword(TokenKind::JoinAnyKeyword);
     testKeyword(TokenKind::JoinNoneKeyword);
-    testKeyword(TokenKind::LargeKeyword);
+    // testKeyword(TokenKind::LargeKeyword);  // Phase 154: Obsolete Verilog keyword removed
     testKeyword(TokenKind::LetKeyword);
     testKeyword(TokenKind::LibListKeyword);
     testKeyword(TokenKind::LibraryKeyword);
@@ -945,7 +945,7 @@ TEST_CASE("All Keywords") {
     testKeyword(TokenKind::LongIntKeyword);
     testKeyword(TokenKind::MacromoduleKeyword);
     testKeyword(TokenKind::MatchesKeyword);
-    testKeyword(TokenKind::MediumKeyword);
+    // testKeyword(TokenKind::MediumKeyword);  // Phase 154: Obsolete Verilog keyword removed
     testKeyword(TokenKind::ModPortKeyword);
     testKeyword(TokenKind::ModuleKeyword);
     testKeyword(TokenKind::NandKeyword);
@@ -1009,7 +1009,7 @@ TEST_CASE("All Keywords") {
     testKeyword(TokenKind::ShortRealKeyword);
     testKeyword(TokenKind::ShowCancelledKeyword);
     testKeyword(TokenKind::SignedKeyword);
-    testKeyword(TokenKind::SmallKeyword);
+    // testKeyword(TokenKind::SmallKeyword);  // Phase 154: Obsolete Verilog keyword removed
     testKeyword(TokenKind::SoftKeyword);
     testKeyword(TokenKind::SolveKeyword);
     testKeyword(TokenKind::SpecifyKeyword);
@@ -1017,8 +1017,8 @@ TEST_CASE("All Keywords") {
     testKeyword(TokenKind::StaticKeyword);
     testKeyword(TokenKind::StringKeyword);
     testKeyword(TokenKind::StrongKeyword);
-    testKeyword(TokenKind::Strong0Keyword);
-    testKeyword(TokenKind::Strong1Keyword);
+    // testKeyword(TokenKind::Strong0Keyword);  // Phase 154: Obsolete Verilog keyword removed
+    // testKeyword(TokenKind::Strong1Keyword);  // Phase 154: Obsolete Verilog keyword removed
     testKeyword(TokenKind::StructKeyword);
     testKeyword(TokenKind::SuperKeyword);
     testKeyword(TokenKind::Supply0Keyword);
@@ -1061,8 +1061,8 @@ TEST_CASE("All Keywords") {
     testKeyword(TokenKind::WaitOrderKeyword);
     testKeyword(TokenKind::WAndKeyword);
     testKeyword(TokenKind::WeakKeyword);
-    testKeyword(TokenKind::Weak0Keyword);
-    testKeyword(TokenKind::Weak1Keyword);
+    // testKeyword(TokenKind::Weak0Keyword);  // Phase 154: Obsolete Verilog keyword removed
+    // testKeyword(TokenKind::Weak1Keyword);  // Phase 154: Obsolete Verilog keyword removed
     testKeyword(TokenKind::WhileKeyword);
     testKeyword(TokenKind::WildcardKeyword);
     testKeyword(TokenKind::WireKeyword);

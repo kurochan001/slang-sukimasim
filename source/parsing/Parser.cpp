@@ -626,9 +626,9 @@ DriveStrengthSyntax* Parser::parseDriveStrength() {
     };
 
     auto openParen = consume();
-    auto strength0 = expectStrength(TokenKind::Strong1Keyword);
+    auto strength0 = expectStrength(TokenKind::Pull1Keyword); // Phase 154: Use Pull1 as default
     auto comma = expect(TokenKind::Comma);
-    auto strength1 = expectStrength(TokenKind::Strong0Keyword);
+    auto strength1 = expectStrength(TokenKind::Pull0Keyword); // Phase 154: Use Pull0 as default
     auto closeParen = expect(TokenKind::CloseParenthesis);
 
     if (isStrength0(strength0.kind) == isStrength0(strength1.kind))
