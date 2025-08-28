@@ -942,6 +942,12 @@ Expression& MemberAccessExpression::fromSelector(
                     scope = &sym->as<CoverCrossSymbol>();
                     break;
                 }
+                else if (sym->kind == SymbolKind::ConstraintBlock) {
+                    // Phase 143: Handle constraint_mode() on named constraints
+                    // ConstraintBlock is also a Scope, so we can look up methods in it
+                    scope = &sym->as<ConstraintBlockSymbol>();
+                    break;
+                }
             }
             [[fallthrough]];
         default: {
@@ -999,7 +1005,19 @@ Expression& MemberAccessExpression::fromSelector(
             return CallExpression::fromLookup(compilation, &sub, &expr, invocation, withClause,
                                               range, context);
         }
-        case SymbolKind::ConstraintBlock:
+        case SymbolKind::ConstraintBlock: {
+            // Phase 143: Support constraint_mode() calls on named constraints
+            if (errorIfNotProcedural())
+                return badExpr(compilation, &expr);
+            
+            // Create a MemberAccessExpression for the constraint block
+            auto& constraintAccess = *compilation.emplace<MemberAccessExpression>(
+                compilation.getVoidType(), expr, *member, range);
+            
+            // Note: The constraint_mode() method will be handled when this 
+            // MemberAccessExpression is used as the left side of another member access
+            return constraintAccess;
+        }
         case SymbolKind::Coverpoint:
         case SymbolKind::CoverCross:
         case SymbolKind::CoverageBin: {
