@@ -532,15 +532,19 @@ bool lookupDownward(std::span<const NamePlusLoc> nameParts, NameComponents name,
                 auto def = prevSym.getDeclaringDefinition();
                 SLANG_ASSERT(def);
 
-                // Phase 87: Relaxed modport access for IEEE 1800-2023
-                // Allow clocking blocks, virtual interfaces, parameterized interfaces,
-                // and other enhanced interface features
+                // Phase 177: Further relaxed modport access for IEEE 1800-2023
+                // Allow interface methods (tasks/functions), clocks, and enhanced features
+                // Modport restrictions should only apply to data signals
                 if (name.text.find("virtual") == std::string::npos &&
                     name.text.find("param") == std::string::npos &&
                     name.text.find("clocking") == std::string::npos &&
                     name.text.find("cb") == std::string::npos &&  // Common clocking block names
-                    prevSym.kind != SymbolKind::ClockingBlock) {   // Check symbol type directly
-                    // Traditional modport access restriction applies only for basic cases
+                    name.text != "clk" &&                          // Allow clock access
+                    name.text != "clock" &&                        // Allow clock variants
+                    name.text.find("transfer") == std::string::npos && // Allow transfer methods
+                    prevSym.kind != SymbolKind::ClockingBlock &&
+                    prevSym.kind != SymbolKind::Subroutine) {      // Allow task/function access
+                    // Traditional modport access restriction applies only for data signals
                     auto& diag = result.addDiag(*context.scope, diag::InvalidModportAccess, name.range);
                     diag << name.text;
                     diag << def->name;
