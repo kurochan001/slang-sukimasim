@@ -766,14 +766,16 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
         implicitParam->setSyntax(*genvarSyntax);
         comp.noteReference(*implicitParam);
 
+        // Phase 182: Set the implicit parameter type and value BEFORE adding block members
+        // This ensures the genvar value is available when localparams are evaluated
+        implicitParam->setType(comp.getIntegerType());
+        implicitParam->setValue(comp, std::move(value), /* needsCoercion */ false);
+        implicitParam->setIsFromGenvar(true);
+
         block->addMember(*implicitParam);
         block->setSyntax(*syntax.block);
 
         addBlockMembers(*block, *syntax.block);
-
-        implicitParam->setType(comp.getIntegerType());
-        implicitParam->setValue(comp, std::move(value), /* needsCoercion */ false);
-        implicitParam->setIsFromGenvar(true);
 
         block->arrayIndex = &implicitParam->getValue().integer();
         entries.push_back(block);
