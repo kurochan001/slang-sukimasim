@@ -223,10 +223,7 @@ public:
 // Phase 143: Support for constraint_mode on named constraints
 class ConstraintModeFunction : public SystemSubroutine {
 public:
-    ConstraintModeFunction() :
-        SystemSubroutine(KnownSystemName::Unknown, SubroutineKind::Function) {
-        name = "constraint_mode";
-    }
+    ConstraintModeFunction() : SystemSubroutine("constraint_mode", SubroutineKind::Function) {}
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression* thisExpr) const final {

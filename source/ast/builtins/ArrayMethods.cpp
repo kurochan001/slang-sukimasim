@@ -363,6 +363,11 @@ public:
         withClauseMode = WithClauseMode::Iterator;
     }
 
+    static bool isLRMStrict() {
+        const char* e = std::getenv("SUKIMASIM_STRICT_LRM");
+        return e && std::string_view(e) == "1";
+    }
+
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression* iterExpr) const final {
         auto& comp = context.getCompilation();
@@ -383,13 +388,26 @@ public:
             return comp.getErrorType();
         }
 
-        // Phase 176: Changed - min() and max() methods return a single element
-        // While LRM 7.12.1 suggests returning a queue, practical implementations
-        // typically return a single value for convenience and compatibility
-        if (iterExpr) {
-            // Return the iterator expression type for min/max with "with" clause
-            return *iterExpr->type;
+        // Strict LRM: return a queue of elements achieving min/max
+        if (isLRMStrict()) {
+            auto& arrayType = *args[0]->type;
+            switch (arrayType.kind) {
+                case SymbolKind::FixedSizeUnpackedArrayType:
+                case SymbolKind::DynamicArrayType:
+                case SymbolKind::QueueType:
+                    return *comp.emplace<QueueType>(*elemType, 0u);
+                case SymbolKind::AssociativeArrayType: {
+                    auto& aat = arrayType.as<AssociativeArrayType>();
+                    (void)aat;
+                    return *comp.emplace<QueueType>(*elemType, 0u);
+                }
+                default:
+                    return *comp.emplace<QueueType>(*elemType, 0u);
+            }
         }
+        // Non-strict: return a single element (compatibility)
+        if (iterExpr)
+            return *iterExpr->type;
         return *elemType;
     }
 
@@ -413,50 +431,221 @@ public:
         }
 
         auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
-        if (iterExpr) {
-            SLANG_ASSERT(iterVar);
-
-            auto it = begin(arr);
-            auto guard = context.disableCaching();
-            auto iterVal = context.createLocal(iterVar, *it);
-            ConstantValue elem = *it;
-            ConstantValue val = iterExpr->eval(context);
-
-            for (++it; it != end(arr); ++it) {
-                *iterVal = *it;
-                auto cv = iterExpr->eval(context);
-
-                if (isMin) {
-                    if (cv < val) {
-                        val = cv;
-                        elem = *it;
+        // Strict LRM: return queue of all min/max; Non-strict: single element / value
+        auto guard = context.disableCaching();
+        if (isLRMStrict()) {
+            SVQueue results;
+            ConstantValue bestMetric;
+            bool haveBest = false;
+            if (iterExpr) {
+                SLANG_ASSERT(iterVar);
+                auto iterVal = context.createLocal(iterVar);
+                for (auto it = begin(arr); it != end(arr); ++it) {
+                    *iterVal = *it;
+                    ConstantValue cv = iterExpr->eval(context);
+                    if (!cv)
+                        return nullptr;
+                    if (!haveBest || (isMin ? (cv < bestMetric) : (bestMetric < cv))) {
+                        haveBest = true;
+                        bestMetric = cv;
+                        results.clear();
+                        results.emplace_back(*it);
+                    }
+                    else if (!(bestMetric < cv) && !(cv < bestMetric)) {
+                        results.emplace_back(*it);
                     }
                 }
-                else {
-                    if (val < cv) {
-                        val = cv;
-                        elem = *it;
+            } else {
+                for (auto it = begin(arr); it != end(arr); ++it) {
+                    if (!haveBest || (isMin ? (*it < bestMetric) : (bestMetric < *it))) {
+                        haveBest = true;
+                        bestMetric = *it;
+                        results.clear();
+                        results.emplace_back(*it);
+                    }
+                    else if (!(bestMetric < *it) && !(*it < bestMetric)) {
+                        results.emplace_back(*it);
                     }
                 }
             }
-            // Phase 176: Return the single min/max value
-            return val;
+            return results;
+        } else {
+            if (iterExpr) {
+                SLANG_ASSERT(iterVar);
+                auto it = begin(arr);
+                auto iterVal = context.createLocal(iterVar, *it);
+                ConstantValue elem = *it;
+                ConstantValue val = iterExpr->eval(context);
+                for (++it; it != end(arr); ++it) {
+                    *iterVal = *it;
+                    auto cv = iterExpr->eval(context);
+                    if (isMin ? (cv < val) : (val < cv)) {
+                        val = cv;
+                        elem = *it;
+                    }
+                }
+                return val;
+            } else {
+                auto it = begin(arr);
+                ConstantValue elem = *it;
+                for (++it; it != end(arr); ++it) {
+                    if (isMin ? (*it < elem) : (elem < *it))
+                        elem = *it;
+                }
+                return elem;
+            }
+        }
+    }
+
+private:
+    bool isMin;
+};
+
+class ArrayMinMaxIndexMethod : public SystemSubroutine {
+public:
+    ArrayMinMaxIndexMethod(KnownSystemName knownNameId, bool isMin) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), isMin(isMin) {
+        withClauseMode = WithClauseMode::Iterator;
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression* iterExpr) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, true, args, range, 0, 0))
+            return comp.getErrorType();
+
+        auto& arrayType = *args[0]->type;
+        auto elemType = arrayType.getArrayElementType();
+        SLANG_ASSERT(elemType);
+
+        if (iterExpr) {
+            if (!isComparable(*iterExpr->type)) {
+                context.addDiag(diag::ArrayMethodComparable, iterExpr->sourceRange) << name;
+                return comp.getErrorType();
+            }
+        }
+        else if (!isComparable(*elemType)) {
+            context.addDiag(diag::ArrayMethodComparable, args[0]->sourceRange) << name;
+            return comp.getErrorType();
+        }
+
+        // Return queue of indices: int queue for fixed/dynamic/queue; key-type queue for AA
+        if (arrayType.isAssociativeArray()) {
+            auto indexType = arrayType.getAssociativeIndexType();
+            if (!indexType) {
+                context.addDiag(diag::AssociativeWildcardNotAllowed, range) << name;
+                return comp.getErrorType();
+            }
+            return *comp.emplace<QueueType>(*indexType, 0u);
+        }
+
+        return *comp.emplace<QueueType>(comp.getIntType(), 0u);
+    }
+
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
+                       const CallExpression::SystemCallInfo& callInfo) const final {
+        ConstantValue arr = args[0]->eval(context);
+        if (!arr)
+            return nullptr;
+
+        // Empty arrays: return empty queue
+        if (arr.empty())
+            return SVQueue{};
+
+        auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
+        auto guard = context.disableCaching();
+
+        if (arr.isMap()) {
+            // Associative array: return queue of keys that achieve min/max
+            SVQueue results;
+            ConstantValue bestMetric;
+            bool haveBest = false;
+            auto iterVal = iterExpr ? context.createLocal(iterVar) : nullptr;
+            for (auto& [key, val] : *arr.map()) {
+                ConstantValue metric;
+                if (iterExpr) {
+                    *iterVal = val;
+                    metric = iterExpr->eval(context);
+                    if (!metric)
+                        return nullptr;
+                }
+                else {
+                    metric = val;
+                }
+                if (!haveBest || (isMin ? (metric < bestMetric) : (bestMetric < metric))) {
+                    haveBest = true;
+                    bestMetric = metric;
+                    results.clear();
+                    results.emplace_back(key);
+                }
+                else if (!(bestMetric < metric) && !(metric < bestMetric)) {
+                    // equal
+                    results.emplace_back(key);
+                }
+            }
+            return results;
+        }
+        else if (arr.isQueue()) {
+            // Queue: return queue of integer indices
+            SVQueue results;
+            ConstantValue bestMetric;
+            bool haveBest = false;
+            auto iterVal = iterExpr ? context.createLocal(iterVar) : nullptr;
+            uint32_t idx = 0;
+            for (auto& elem : *arr.queue()) {
+                ConstantValue metric;
+                if (iterExpr) {
+                    *iterVal = elem;
+                    metric = iterExpr->eval(context);
+                    if (!metric)
+                        return nullptr;
+                }
+                else {
+                    metric = elem;
+                }
+                if (!haveBest || (isMin ? (metric < bestMetric) : (bestMetric < metric))) {
+                    haveBest = true;
+                    bestMetric = metric;
+                    results.clear();
+                    results.emplace_back(SVInt(32, idx, true));
+                }
+                else if (!(bestMetric < metric) && !(metric < bestMetric)) {
+                    results.emplace_back(SVInt(32, idx, true));
+                }
+                ++idx;
+            }
+            return results;
         }
         else {
-            auto it = begin(arr);
-            ConstantValue elem = *it;
-            for (++it; it != end(arr); ++it) {
-                if (isMin) {
-                    if (*it < elem)
-                        elem = *it;
+            // Fixed-size unpacked array or dynamic array: queue of integer indices
+            SVQueue results;
+            ConstantValue bestMetric;
+            bool haveBest = false;
+            auto iterVal = iterExpr ? context.createLocal(iterVar) : nullptr;
+            uint32_t idx = 0;
+            for (auto& elem : std::get<ConstantValue::Elements>(arr.getVariant())) {
+                ConstantValue metric;
+                if (iterExpr) {
+                    *iterVal = elem;
+                    metric = iterExpr->eval(context);
+                    if (!metric)
+                        return nullptr;
                 }
                 else {
-                    if (elem < *it)
-                        elem = *it;
+                    metric = elem;
                 }
+                if (!haveBest || (isMin ? (metric < bestMetric) : (bestMetric < metric))) {
+                    haveBest = true;
+                    bestMetric = metric;
+                    results.clear();
+                    results.emplace_back(SVInt(32, idx, true));
+                }
+                else if (!(bestMetric < metric) && !(metric < bestMetric)) {
+                    results.emplace_back(SVInt(32, idx, true));
+                }
+                ++idx;
             }
-            // Phase 176: Return the single min/max element
-            return elem;
+            return results;
         }
     }
 
@@ -1149,6 +1338,8 @@ void Builtins::registerArrayMethods() {
 
         REGISTER(kind, ArrayMinMax, KnownSystemName::Min, true);
         REGISTER(kind, ArrayMinMax, KnownSystemName::Max, false);
+        REGISTER(kind, ArrayMinMaxIndex, KnownSystemName::MinIndex, true);
+        REGISTER(kind, ArrayMinMaxIndex, KnownSystemName::MaxIndex, false);
 
         REGISTER(kind, ArrayUnique, KnownSystemName::Unique, false);
         REGISTER(kind, ArrayUnique, KnownSystemName::UniqueIndex, true);

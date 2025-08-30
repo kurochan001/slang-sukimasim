@@ -277,6 +277,8 @@ find_last FindLast
 find_last_index FindLastIndex
 min Min
 max Max
+min_index MinIndex
+max_index MaxIndex
 unique Unique
 unique_index UniqueIndex
 sort Sort
