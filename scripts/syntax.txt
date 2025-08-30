@@ -2156,6 +2156,7 @@ NamedBlockClause? endBlockName
 CheckerDeclaration base=Member
 token keyword
 token name
+ParameterPortList? parameterList
 AssertionItemPortList? portList
 token semi
 list<Member> members

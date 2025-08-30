@@ -1976,8 +1976,10 @@ void createCheckers(const CheckerSymbol& checker, const TSyntax& syntax, const A
                     SmallVectorBase<const Symbol*>& results,
                     SmallVectorBase<const Symbol*>& implicitNets, bool isProcedural,
                     bitmask<InstanceFlags> flags) {
-    if (syntax.parameters)
-        context.addDiag(diag::CheckerParameterAssign, syntax.parameters->sourceRange());
+    // Phase 203: Enable parameter assignments for checkers (SystemVerilog LRM compliant)
+    // Checkers CAN have parameter assignments according to IEEE 1800-2023
+    // if (syntax.parameters)
+    //     context.addDiag(diag::CheckerParameterAssign, syntax.parameters->sourceRange());
 
     SmallSet<std::string_view, 8> implicitNetNames;
     SmallVector<uint32_t> path;
