@@ -2605,6 +2605,13 @@ SequenceDeclarationSyntax& Parser::parseSequenceDeclaration(AttrList attributes)
 CheckerDeclarationSyntax& Parser::parseCheckerDeclaration(AttrList attributes) {
     auto keyword = consume();
     auto name = expect(TokenKind::Identifier);
+    
+    // Phase 203: Support parameterized checkers
+    ParameterPortListSyntax* parameterList = nullptr;
+    if (peek(TokenKind::Hash)) {
+        parameterList = parseParameterPortList();
+    }
+    
     auto portList = parseAssertionItemPortList(SyntaxKind::CheckerDeclaration);
     auto semi = expect(TokenKind::Semicolon);
 
@@ -2623,8 +2630,8 @@ CheckerDeclarationSyntax& Parser::parseCheckerDeclaration(AttrList attributes) {
     auto blockName = parseNamedBlockClause();
     checkBlockNames(name, blockName);
 
-    return factory.checkerDeclaration(attributes, keyword, name, portList, semi, members, end,
-                                      blockName);
+    return factory.checkerDeclaration(attributes, keyword, name, parameterList, portList, semi, 
+                                      members, end, blockName);
 }
 
 Token Parser::parseEdgeKeyword() {

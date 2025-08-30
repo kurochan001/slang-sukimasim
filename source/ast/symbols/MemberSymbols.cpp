@@ -1711,6 +1711,14 @@ CheckerSymbol& CheckerSymbol::fromSyntax(const Scope& scope,
     result->setSyntax(syntax);
     result->setAttributes(scope, syntax.attributes);
 
+    // Phase 203: Add parameter support for checkers
+    if (syntax.parameterList) {
+        // Add parameters as members of the checker scope
+        for (auto declaration : syntax.parameterList->declarations) {
+            result->addMembers(*declaration);
+        }
+    }
+
     SmallVector<const AssertionPortSymbol*> ports;
     if (syntax.portList) {
         // Checker port symbols differ enough in their rules that we
