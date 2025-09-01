@@ -35,6 +35,38 @@ public:
     }
 };
 
+// SukimaSim vendor-specific system task stub
+class SukimaSimSystemTask : public SystemTaskBase {
+public:
+    explicit SukimaSimSystemTask(KnownSystemName knownNameId) :
+        SystemTaskBase(knownNameId) {}
+    
+    const Type& checkArguments(const ASTContext& context, const Args&, SourceRange,
+                               const Expression*) const override {
+        // Allow any arguments for SukimaSim tasks (handled at runtime)
+        return context.getCompilation().getVoidType();
+    }
+};
+
+// SukimaSim vendor-specific system function stub (returns integer)
+class SukimaSimSystemFunc : public SystemSubroutine {
+public:
+    explicit SukimaSimSystemFunc(KnownSystemName knownNameId) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function) {}
+    
+    const Type& checkArguments(const ASTContext& context, const Args&, SourceRange,
+                               const Expression*) const override {
+        // Return integer type for file handles and other functions
+        return context.getCompilation().getIntType();
+    }
+    
+    ConstantValue eval(EvalContext&, const Args&, SourceRange,
+                       const CallExpression::SystemCallInfo&) const override {
+        // Return a non-zero value for file handles during constant evaluation
+        return SVInt(32, 1, true);  // Return 1 as a dummy file handle
+    }
+};
+
 class SimpleSystemTask : public SimpleSystemSubroutine {
 public:
     SimpleSystemTask(KnownSystemName knownNameId, const Type& returnType, size_t requiredArgs = 0,
@@ -1009,6 +1041,56 @@ void Builtins::registerSystemTasks() {
     addSystemSubroutine(std::make_shared<SukimasimEnumLastFunc>());
     addSystemSubroutine(std::make_shared<SukimasimEnumNextFunc>());
     addSystemSubroutine(std::make_shared<SukimasimEnumPrevFunc>());
+    
+    // Add SukimaSim Phase 1 system tasks (32 tasks)
+    // Note: These are vendor-specific extensions that are processed at runtime
+    // We only need slang to recognize them as valid system tasks
+    
+    // Phase 1.1: Debug and Diagnostic Tasks (SukimaSim vendor extensions)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::MemoryUsage));
+    // These return time values, so they are functions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SimTimeNs));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SimTimePs));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NClkInfo));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmDumpvars));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NcQuery));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NcBreak));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmTraceOn));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmTraceOff));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmAssertOn));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmAssertOff));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmDebug));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::XmLog));
+    
+    // Phase 1.2: Coverage Extension Tasks (SukimaSim vendor extensions)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NcSetSeed));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ToggleStart));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ToggleStop));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ToggleReport));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::FsmStart));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::FsmStop));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::FsmReport));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::GlitchCount));
+    
+    // Phase 1.3: Performance Monitoring Tasks (SukimaSim vendor extensions)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CpuUsage));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ProfileStart));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ProfileStop));
+    
+    // Phase 1.4: File I/O Extension Tasks (SukimaSim vendor extensions)
+    // $fopen_compress returns a file handle (integer), so it's a function
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::FopenCompress));
+    // These are tasks that don't return values
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::FwriteBinary));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::FreadBinary));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::FflushAll));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::Fsync));
+    
+    // Phase 1.5: Other Extensions (SukimaSim vendor extensions)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimVersionInfo));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NcGetHostname));
+    // $socket_open returns a socket handle (integer), so it's a function
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SocketOpen));
     
     REGISTER(DisplayTask, KnownSystemName::Write, LiteralBase::Decimal);
     REGISTER(DisplayTask, KnownSystemName::WriteB, LiteralBase::Binary);
