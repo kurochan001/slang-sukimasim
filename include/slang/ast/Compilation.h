@@ -755,6 +755,11 @@ public:
 
     /// @}
 
+    /// Gets the list of DPI export directives encountered during elaboration.
+    const std::vector<std::pair<const syntax::DPIExportSyntax*, const Scope*>>& getDPIExports() const {
+        return dpiExports;
+    }
+
 private:
     friend class Lookup;
     friend class Scope;
