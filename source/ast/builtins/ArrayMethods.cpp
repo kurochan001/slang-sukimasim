@@ -364,8 +364,11 @@ public:
     }
 
     static bool isLRMStrict() {
-        const char* e = std::getenv("SUKIMASIM_STRICT_LRM");
-        return e && std::string_view(e) == "1";
+        // Phase 217: Always use strict LRM mode for IEEE 1800-2023 compliance
+        // Array min/max methods should return a queue as per Section 7.12
+        return true;  // Always return queue for LRM compliance
+        // const char* e = std::getenv("SUKIMASIM_STRICT_LRM");
+        // return e && std::string_view(e) == "1";
     }
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
