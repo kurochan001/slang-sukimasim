@@ -92,17 +92,22 @@ void Builtins::registerCoverageFuncs() {
     using parsing::KnownSystemName;
 
 #define REGISTER(name, ...) addSystemSubroutine(std::make_shared<name>(__VA_ARGS__))
-    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageControl, intType, 3, 4,
-             std::vector<const Type*>{&intType, &intType, &intType, &stringType});
-    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageGetMax, intType, 2, 3,
-             std::vector<const Type*>{&intType, &intType, &stringType});
-    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageGet, intType, 2, 3,
-             std::vector<const Type*>{&intType, &intType, &stringType});
+    // $coverage_control(operation [, scope]) - operation is required, scope is optional
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageControl, intType, 1,
+             std::vector<const Type*>{&intType, &stringType});
+    // $coverage_get_max([hierarchy]) - hierarchy is optional
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageGetMax, realType, 0,
+             std::vector<const Type*>{&stringType});
+    // $coverage_get(coverage_type [, scope]) - coverage_type is required, scope is optional
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageGet, realType, 1,
+             std::vector<const Type*>{&intType, &stringType});
 
+    // $coverage_merge(db1, db2) - both arguments are required
     REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 2,
-             std::vector<const Type*>{&intType, &stringType});
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 2,
-             std::vector<const Type*>{&intType, &stringType});
+             std::vector<const Type*>{&stringType, &stringType});
+    // $coverage_save(filename) - filename is required
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 1,
+             std::vector<const Type*>{&stringType});
     REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType);
     REGISTER(NonConstantFunction, KnownSystemName::SetCoverageDbName, voidType, 1,
              std::vector<const Type*>{&stringType});

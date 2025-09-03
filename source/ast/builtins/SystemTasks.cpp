@@ -739,8 +739,16 @@ public:
 
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
                                    const ExpressionSyntax& syntax, const Args& args) const final {
-        if ((isFullMethod && argIndex < 4) || (!isFullMethod && argIndex == 0) ||
-            !NameSyntax::isKind(syntax.kind)) {
+        if ((isFullMethod && argIndex < 4) || (!isFullMethod && argIndex == 0)) {
+            return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
+        }
+
+        // Accept string literals as scope names
+        if (syntax.kind == SyntaxKind::StringLiteralExpression) {
+            return Expression::bind(syntax, context);
+        }
+
+        if (!NameSyntax::isKind(syntax.kind)) {
             return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
         }
 
@@ -764,6 +772,12 @@ public:
                     return badArg(context, *args[i]);
             }
             else {
+                // Allow string literals (treated as scope names in runtime)
+                if (args[i]->kind == ExpressionKind::StringLiteral) {
+                    // Accept string literals as scope names for runtime resolution
+                    continue;
+                }
+
                 auto isScope = [](const Symbol& symbol) {
                     return symbol.isScope() || symbol.kind == SymbolKind::Instance;
                 };
