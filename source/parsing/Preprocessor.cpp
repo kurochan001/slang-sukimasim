@@ -914,7 +914,12 @@ Trivia Preprocessor::handleLineDirective(Token directive) {
         auto levNum = level.intValue().as<uint8_t>();
         auto lineNum = lineNumber.intValue().as<size_t>();
 
-        if (!levNum.has_value() || (*levNum != 0 && *levNum != 1 && *levNum != 2)) {
+        // Check for negative line numbers (which would be invalid)
+        // The intValue() should handle this, but add explicit check
+        if (!lineNum.has_value() || *lineNum == 0) {
+            addDiag(diag::InvalidLineDirectiveLevel, lineNumber.range());
+        }
+        else if (!levNum.has_value() || (*levNum != 0 && *levNum != 1 && *levNum != 2)) {
             // We don't actually use the level for anything, but the spec allows
             // only the values 0,1,2
             addDiag(diag::InvalidLineDirectiveLevel, level.range());
@@ -924,6 +929,16 @@ Trivia Preprocessor::handleLineDirective(Token directive) {
             // is well formed, to avoid very strange line number issues.
             sourceManager.addLineDirective(directive.location(), *lineNum, fileName.valueText(),
                                            *levNum);
+        }
+    }
+    else {
+        // Handle case where level is missing (only 2 parameters provided)
+        if (!lineNumber.isMissing() && !fileName.isMissing() && level.isMissing()) {
+            auto lineNum = lineNumber.intValue().as<size_t>();
+            if (lineNum && *lineNum > 0) {
+                // Default level to 0 when not provided
+                sourceManager.addLineDirective(directive.location(), *lineNum, fileName.valueText(), 0);
+            }
         }
     }
     return Trivia(TriviaKind::Directive, result);
