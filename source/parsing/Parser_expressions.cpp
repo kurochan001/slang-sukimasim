@@ -734,6 +734,13 @@ NameSyntax& Parser::parseName(bitmask<NameOptions> options) {
                 }
                 break;
             case SyntaxKind::RootScope:
+                // $root can be used standalone in certain contexts (e.g., function arguments)
+                // Only require a dot if we're continuing the path
+                if (kind == TokenKind::DoubleColon) {
+                    addDiag(diag::InvalidAccessDotColon, separator.location()) << "::"sv
+                                                                               << "."sv;
+                }
+                break;
             case SyntaxKind::ThisHandle:
             case SyntaxKind::SuperHandle:
                 if (kind != TokenKind::Dot) {
