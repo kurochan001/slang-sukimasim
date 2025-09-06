@@ -32,3 +32,11 @@ CMakeUserPresets.json
 .vs/
 *.code-workspace
 .claude
+
+# Generated files (should be built, not committed)
+# These files are automatically generated during build
+# Keeping them in VCS increases merge conflicts and repo size
+AllSyntax.cpp
+TokenKind.cpp
+KnownSystemName.cpp
+SyntaxClone.cpp
