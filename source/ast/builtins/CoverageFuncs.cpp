@@ -92,22 +92,29 @@ void Builtins::registerCoverageFuncs() {
     using parsing::KnownSystemName;
 
 #define REGISTER(name, ...) addSystemSubroutine(std::make_shared<name>(__VA_ARGS__))
-    // $coverage_control(operation [, scope]) - operation is required, scope is optional
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageControl, intType, 1,
-             std::vector<const Type*>{&intType, &stringType});
-    // $coverage_get_max([hierarchy]) - hierarchy is optional
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageGetMax, realType, 0,
-             std::vector<const Type*>{&stringType});
-    // $coverage_get(coverage_type [, scope]) - coverage_type is required, scope is optional
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageGet, realType, 1,
-             std::vector<const Type*>{&intType, &stringType});
+    // IEEE 1800-2023 Section 20.11: Coverage control functions
+    // $coverage_control(control_constant, coverage_type, scope_def, modules_or_instance)
+    // All 4 arguments are required per LRM
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageControl, intType, 4,
+             std::vector<const Type*>{&intType, &intType, &intType, &stringType});
+    
+    // $coverage_get_max(coverage_type, scope_def, modules_or_instance)
+    // All 3 arguments are required per LRM
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageGetMax, intType, 3,
+             std::vector<const Type*>{&intType, &intType, &stringType});
+    
+    // $coverage_get(coverage_type, scope_def, modules_or_instance)
+    // All 3 arguments are required per LRM
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageGet, realType, 3,
+             std::vector<const Type*>{&intType, &intType, &stringType});
 
-    // $coverage_merge(db1, db2) - both arguments are required
+    // $coverage_merge(coverage_type, filename) - both arguments are required
     REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 2,
-             std::vector<const Type*>{&stringType, &stringType});
-    // $coverage_save(filename) - filename is required
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 1,
-             std::vector<const Type*>{&stringType});
+             std::vector<const Type*>{&intType, &stringType});
+    
+    // $coverage_save(coverage_type, filename) - both arguments are required
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 2,
+             std::vector<const Type*>{&intType, &stringType});
     REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType);
     REGISTER(NonConstantFunction, KnownSystemName::SetCoverageDbName, voidType, 1,
              std::vector<const Type*>{&stringType});
