@@ -122,6 +122,7 @@ static bool checkFormatString(const ASTContext& context, const StringLiteral& ar
             switch (charToLower(spec)) {
                 case 'l':
                 case 'm':
+                case 'p':  // P2-6: %p (hierarchical path) doesn't consume arguments
                     return;
                 default:
                     break;
@@ -213,6 +214,9 @@ static bool formatSpecialArg(char spec, const Scope& scope, std::string& result)
             return true;
         }
         case 'm':
+            scope.asSymbol().appendHierarchicalPath(result);
+            return true;
+        case 'p':  // P2-6: %p (hierarchical path) - same as %m for slang
             scope.asSymbol().appendHierarchicalPath(result);
             return true;
         default:
