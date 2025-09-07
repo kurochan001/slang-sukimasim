@@ -236,7 +236,7 @@ public:
 class DistributionFunc : public SystemSubroutine {
 public:
     DistributionFunc(KnownSystemName knownNameId, size_t numArgs) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function), numArgs(numArgs) {
+        SystemSubroutine(knownNameId, SubroutineKind::Function), numArgs(numArgs), distKind(knownNameId) {
         hasOutputArgs = true;
     }
 
@@ -253,12 +253,24 @@ public:
         if (!checkArgCount(context, false, args, range, numArgs, numArgs))
             return comp.getErrorType();
 
-        for (size_t i = 0; i < numArgs; i++) {
-            if (!args[i]->type->isIntegral())
+        // P3-13: First argument (seed) must be integral (inout)
+        if (!args[0]->type->isIntegral())
+            return badArg(context, *args[0]);
+
+        // P3-13: Other arguments can be integral or real depending on the distribution
+        for (size_t i = 1; i < numArgs; i++) {
+            // Allow both integral and floating point types
+            if (!args[i]->type->isIntegral() && !args[i]->type->isFloating())
                 return badArg(context, *args[i]);
         }
 
-        return comp.getIntType();
+        // P3-13: Return type depends on the distribution
+        // $dist_uniform and $dist_poisson return int, others return real
+        if (distKind == KnownSystemName::DistUniform || distKind == KnownSystemName::DistPoisson) {
+            return comp.getIntType();
+        } else {
+            return comp.getRealType();
+        }
     }
 
     ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
@@ -269,6 +281,7 @@ public:
 
 private:
     size_t numArgs;
+    KnownSystemName distKind;
 };
 
 class SampledFunc : public SystemSubroutine {
