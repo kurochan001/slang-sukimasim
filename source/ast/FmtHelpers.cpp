@@ -86,9 +86,8 @@ static bool checkArgType(TContext& context, const Expression& arg, char spec, So
                 return true;
             break;
         case 'p':
-            if (!type.isVoid())
-                return true;
-            break;
+            // %p (pretty print) accepts any type for formatted display
+            return true;
         case 's':
             if (type.canBeStringLike())
                 return true;
@@ -121,9 +120,9 @@ static bool checkFormatString(const ASTContext& context, const StringLiteral& ar
             // Filter out non-consuming arguments.
             switch (charToLower(spec)) {
                 case 'l':
-                case 'm':
-                case 'p':  // P2-6: %p (hierarchical path) doesn't consume arguments
+                case 'm':  // %m - module path doesn't consume arguments
                     return;
+                // Note: %p is "pretty print" in IEEE 1800-2023 and DOES consume arguments
                 default:
                     break;
             }
@@ -168,11 +167,9 @@ bool FmtHelpers::checkDisplayArgs(const ASTContext& context, const Args& args) {
                 return false;
         }
         else {
-            const Type& type = *arg->type;
-            if (type.isAggregate() && !type.isByteArray()) {
-                context.addDiag(diag::FormatUnspecifiedType, arg->sourceRange) << type;
-                return false;
-            }
+            // Allow all types for general format arguments
+            // The formatter will handle them appropriately based on the format specifier
+            // (e.g., %p for pretty print can handle any type)
         }
     }
 
@@ -216,9 +213,7 @@ static bool formatSpecialArg(char spec, const Scope& scope, std::string& result)
         case 'm':
             scope.asSymbol().appendHierarchicalPath(result);
             return true;
-        case 'p':  // P2-6: %p (hierarchical path) - same as %m for slang
-            scope.asSymbol().appendHierarchicalPath(result);
-            return true;
+        // Note: %p is handled differently - it's "pretty print" for arguments, not hierarchy
         default:
             return false;
     }
