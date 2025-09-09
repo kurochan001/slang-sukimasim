@@ -896,6 +896,25 @@ Expression& MemberAccessExpression::fromSelector(
     // This might look like a member access but actually be a built-in type method.
     const Type& type = expr.type->getCanonicalType();
     const Scope* scope = nullptr;
+    
+    // Phase 18.3: Special handling for string literals
+    // String literals have IntegralType but should be treated like StringType for method access
+    if (expr.kind == ExpressionKind::StringLiteral) {
+        // Try string methods using StringType instead of IntegralType
+        auto& stringType = compilation.getStringType();
+        if (auto result = CallExpression::fromBuiltInMethod(compilation, stringType.kind, expr,
+                                                           selector.name, invocation, withClause, context)) {
+            return *result;
+        }
+        
+        if (auto result = tryBindSpecialMethod(compilation, expr, selector, invocation,
+                                               withClause, context)) {
+            return *result;
+        }
+
+        // If no method found, fall through to normal type processing
+    }
+    
     switch (type.kind) {
         case SymbolKind::PackedStructType:
         case SymbolKind::UnpackedStructType:
