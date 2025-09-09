@@ -1,6 +1,6 @@
 // Fixed UVM property test with absolute paths
-`include "/mnt/c/Work/slang-sukimasim/include/uvm/uvm_stubs.svh"
-`include "/mnt/c/Work/slang-sukimasim/include/uvm/uvm_macros.svh"
+`include "uvm/uvm_stubs.svh"
+`include "uvm/uvm_macros.svh"
 
 import uvm_pkg::*;
 
