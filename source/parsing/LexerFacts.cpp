@@ -105,8 +105,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "forever", TokenKind::ForeverKeyword },\
     { "fork", TokenKind::ForkKeyword },\
     { "function", TokenKind::FunctionKeyword },\
-    { "highz0", TokenKind::HighZ0Keyword },\
-    { "highz1", TokenKind::HighZ1Keyword },\
+    /* { "highz0", TokenKind::HighZ0Keyword },*/ \
+    /* { "highz1", TokenKind::HighZ1Keyword },*/ \
     { "if", TokenKind::IfKeyword },\
     { "ifnone", TokenKind::IfNoneKeyword },\
     { "initial", TokenKind::InitialKeyword },\
@@ -132,8 +132,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "pmos", TokenKind::PmosKeyword },\
     { "posedge", TokenKind::PosEdgeKeyword },\
     { "primitive", TokenKind::PrimitiveKeyword },\
-    { "pull0", TokenKind::Pull0Keyword },\
-    { "pull1", TokenKind::Pull1Keyword },\
+    /* { "pull0", TokenKind::Pull0Keyword },*/ \
+    /* { "pull1", TokenKind::Pull1Keyword },*/ \
     { "pulldown", TokenKind::PullDownKeyword },\
     { "pullup", TokenKind::PullUpKeyword },\
     { "rcmos", TokenKind::RcmosKeyword },\
@@ -147,7 +147,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "rtran", TokenKind::RtranKeyword },\
     { "rtranif0", TokenKind::RtranIf0Keyword },\
     { "rtranif1", TokenKind::RtranIf1Keyword },\
-    { "scalared", TokenKind::ScalaredKeyword },\
+    /* { "scalared", TokenKind::ScalaredKeyword },*/ \
     /* { "small", TokenKind::SmallKeyword },*/ \
     { "specify", TokenKind::SpecifyKeyword },\
     { "specparam", TokenKind::SpecParamKeyword },\
@@ -168,7 +168,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "triand", TokenKind::TriAndKeyword },\
     { "trior", TokenKind::TriOrKeyword },\
     { "trireg", TokenKind::TriRegKeyword },\
-    { "vectored", TokenKind::VectoredKeyword },\
+    /* { "vectored", TokenKind::VectoredKeyword },*/ \
     { "wait", TokenKind::WaitKeyword },\
     { "wand", TokenKind::WAndKeyword },\
     { "weak", TokenKind::WeakKeyword },\
