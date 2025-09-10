@@ -132,8 +132,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "pmos", TokenKind::PmosKeyword },\
     { "posedge", TokenKind::PosEdgeKeyword },\
     { "primitive", TokenKind::PrimitiveKeyword },\
-    /* { "pull0", TokenKind::Pull0Keyword },*/ \
-    /* { "pull1", TokenKind::Pull1Keyword },*/ \
+    { "pull0", TokenKind::Pull0Keyword }, \
+    { "pull1", TokenKind::Pull1Keyword }, \
     { "pulldown", TokenKind::PullDownKeyword },\
     { "pullup", TokenKind::PullUpKeyword },\
     { "rcmos", TokenKind::RcmosKeyword },\
