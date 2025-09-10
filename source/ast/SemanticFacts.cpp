@@ -373,6 +373,7 @@ bool SemanticFacts::isAllowedInModport(SymbolKind kind) {
         case SymbolKind::Modport:           // Phase 210: Allow hierarchical modport references
         case SymbolKind::ModportPort:       // Phase 210: Allow modport port references
         case SymbolKind::InterfacePort:     // Phase 210: Allow interface port references
+        case SymbolKind::Instance:          // Phase 206: Allow interface instances for hierarchical modport references
             return true;
         default:
             return false;
