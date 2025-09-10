@@ -125,8 +125,10 @@ ModuleHeaderSyntax& Parser::parseModuleHeader() {
         std::optional<SourceRange> errorRange;
         if (!imports.empty())
             errorRange = imports[0]->sourceRange();
-        else if (parameterList)
-            errorRange = parameterList->sourceRange();
+        // Phase 206: Allow parameterized packages (LRM Section 26.2)
+        // Parameterized packages are allowed in SystemVerilog IEEE 1800-2023
+        // else if (parameterList)
+        //     errorRange = parameterList->sourceRange();
         else if (ports)
             errorRange = ports->sourceRange();
 

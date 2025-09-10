@@ -673,6 +673,7 @@ bool SyntaxFacts::isPossibleModportPort(TokenKind kind) {
         case TokenKind::ImportKeyword:
         case TokenKind::ExportKeyword:
         case TokenKind::Comma:
+        case TokenKind::Identifier:  // Phase 206: Allow hierarchical modport references (e.g., ctrl.controller)
             return true;
         default:
             return false;
