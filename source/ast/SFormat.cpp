@@ -133,6 +133,13 @@ bool parse(std::string_view str, function_ref<void(std::string_view)> onText,
             case 'l':
             case 'm':
                 break;
+            case ',':
+                // SystemVerilog LRM: comma is used for thousands separator in some contexts
+                // But here it's likely part of normal text like "100%,"
+                // Treat it as a literal character, not a format specifier
+                text.push_back('%');
+                text.push_back(c);
+                continue;
             default:
                 err(diag::UnknownFormatSpecifier, start, c);
                 return false;
