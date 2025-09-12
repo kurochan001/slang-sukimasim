@@ -210,10 +210,12 @@ LocalKeyword
 LocalParamKeyword
 LogicKeyword
 LongIntKeyword
+LargeKeyword
 MacromoduleKeyword
 MatchesKeyword
 ModPortKeyword
 ModuleKeyword
+MediumKeyword
 NandKeyword
 NegEdgeKeyword
 NetTypeKeyword
@@ -279,9 +281,12 @@ SoftKeyword
 SolveKeyword
 SpecifyKeyword
 SpecParamKeyword
+SmallKeyword
 StaticKeyword
 StringKeyword
 StrongKeyword
+Strong0Keyword
+Strong1Keyword
 StructKeyword
 SuperKeyword
 Supply0Keyword
@@ -324,6 +329,8 @@ WaitKeyword
 WaitOrderKeyword
 WAndKeyword
 WeakKeyword
+Weak0Keyword
+Weak1Keyword
 WhileKeyword
 WildcardKeyword
 WireKeyword
