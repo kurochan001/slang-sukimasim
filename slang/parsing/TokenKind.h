@@ -247,10 +247,12 @@ enum class SLANG_EXPORT TokenKind : uint16_t {
     LocalParamKeyword,
     LogicKeyword,
     LongIntKeyword,
+    LargeKeyword,
     MacromoduleKeyword,
     MatchesKeyword,
     ModPortKeyword,
     ModuleKeyword,
+    MediumKeyword,
     NandKeyword,
     NegEdgeKeyword,
     NetTypeKeyword,
@@ -316,9 +318,12 @@ enum class SLANG_EXPORT TokenKind : uint16_t {
     SolveKeyword,
     SpecifyKeyword,
     SpecParamKeyword,
+    SmallKeyword,
     StaticKeyword,
     StringKeyword,
     StrongKeyword,
+    Strong0Keyword,
+    Strong1Keyword,
     StructKeyword,
     SuperKeyword,
     Supply0Keyword,
@@ -361,6 +366,8 @@ enum class SLANG_EXPORT TokenKind : uint16_t {
     WaitOrderKeyword,
     WAndKeyword,
     WeakKeyword,
+    Weak0Keyword,
+    Weak1Keyword,
     WhileKeyword,
     WildcardKeyword,
     WireKeyword,
@@ -387,7 +394,7 @@ SLANG_EXPORT std::string_view toString(TokenKind kind);
 
 class SLANG_EXPORT TokenKind_traits {
 public:
-    static const std::array<TokenKind, 345> values;
+    static const std::array<TokenKind, 352> values;
 };
 
 }

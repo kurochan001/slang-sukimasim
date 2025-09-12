@@ -315,6 +315,9 @@ std::string_view Token::rawText() const {
         case TokenKind::MacroUsage:
         case TokenKind::EmptyMacroArgument:
         case TokenKind::LineContinuation:
+            // Check for null info before dereferencing
+            if (!info)
+                return "";
             return std::string_view(info->rawTextPtr, rawLen);
         case TokenKind::Unknown:
             if (info)
@@ -329,6 +332,9 @@ std::string_view Token::rawText() const {
 }
 
 SourceRange Token::range() const {
+    // Check if token is valid before accessing rawText()
+    if (!info)
+        return SourceRange(SourceLocation::NoLocation, SourceLocation::NoLocation);
     return SourceRange(location(), location() + rawText().length());
 }
 
@@ -535,11 +541,13 @@ Token Token::createExpected(BumpAllocator& alloc, Diagnostics& diagnostics, Toke
     // Figure out the best place to report this error based on the current
     // token as well as the last real token we consumed.
     SourceLocation location;
-    if (!lastConsumed)
+    if (!lastConsumed || !lastConsumed.valid())
         location = actual.location();
     else {
         location = lastConsumed.location();
-        location = location + lastConsumed.rawText().length();
+        // Check if lastConsumed is valid before accessing rawText()
+        if (lastConsumed.valid())
+            location = location + lastConsumed.rawText().length();
     }
 
     // If there is already a diagnostic issued for this location, don't report this

@@ -125,8 +125,13 @@ void ParserBase::skipToken(std::optional<DiagCode> diagCode) {
     skippedTokens.push_back(token);
     window.moveToNext();
 
-    if (diagCode && !haveDiag)
-        addDiag(*diagCode, token.range());
+    if (diagCode && !haveDiag) {
+        // Check if token is valid before calling range()
+        if (token.valid())
+            addDiag(*diagCode, token.range());
+        else
+            addDiag(*diagCode, SourceRange(token.location(), token.location()));
+    }
 
     // If the token we're skipping is an opening paren / bracket / brace,
     // skip everything up to the corresponding closing token, otherwise we're
@@ -191,8 +196,10 @@ Token ParserBase::getLastConsumed() const {
 }
 
 SourceLocation ParserBase::getLastLocation() {
-    if (window.lastConsumed)
+    if (window.lastConsumed && window.lastConsumed.valid()) {
+        // Only access rawText() if token is valid
         return window.lastConsumed.location() + window.lastConsumed.rawText().length();
+    }
 
     return peek().location();
 }
@@ -200,8 +207,11 @@ SourceLocation ParserBase::getLastLocation() {
 bool ParserBase::haveDiagAtCurrentLoc() {
     Diagnostics& diags = getDiagnostics();
     auto location = getLastLocation();
+    // Check if peek() returns a valid token before accessing location
+    auto peekToken = peek();
+    auto peekLoc = peekToken.valid() ? peekToken.location() : SourceLocation::NoLocation;
     return !diags.empty() && diags.back().isError() &&
-           (diags.back().location == location || diags.back().location == peek().location());
+           (diags.back().location == location || diags.back().location == peekLoc);
 }
 
 void ParserBase::reportMissingList(Token current, TokenKind closeKind, Token& closeToken,

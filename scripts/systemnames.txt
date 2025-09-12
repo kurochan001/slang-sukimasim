@@ -95,6 +95,7 @@ $rising_gclk RisingGclk
 $falling_gclk FallingGclk
 $steady_gclk SteadyGclk
 $changing_gclk ChangingGclk
+$sampled_gclk SampledGclk
 $sampled Sampled
 $past Past
 
