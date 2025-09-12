@@ -515,12 +515,14 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::LetKeyword:
         case TokenKind::LibListKeyword:
         case TokenKind::LibraryKeyword:
+        case TokenKind::LargeKeyword:
         case TokenKind::LocalKeyword:
         case TokenKind::LocalParamKeyword:
         case TokenKind::LogicKeyword:
         case TokenKind::LongIntKeyword:
         case TokenKind::MacromoduleKeyword:
         case TokenKind::MatchesKeyword:
+        case TokenKind::MediumKeyword:
         case TokenKind::ModPortKeyword:
         case TokenKind::ModuleKeyword:
         case TokenKind::NandKeyword:
@@ -584,6 +586,7 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::ShortRealKeyword:
         case TokenKind::ShowCancelledKeyword:
         case TokenKind::SignedKeyword:
+        case TokenKind::SmallKeyword:
         case TokenKind::SoftKeyword:
         case TokenKind::SolveKeyword:
         case TokenKind::SpecifyKeyword:
@@ -907,6 +910,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::JoinKeyword: return "join";
         case TokenKind::JoinAnyKeyword: return "join_any";
         case TokenKind::JoinNoneKeyword: return "join_none";
+        case TokenKind::LargeKeyword: return "large";
         case TokenKind::LetKeyword: return "let";
         case TokenKind::LibListKeyword: return "liblist";
         case TokenKind::LibraryKeyword: return "library";
@@ -916,6 +920,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::LongIntKeyword: return "longint";
         case TokenKind::MacromoduleKeyword: return "macromodule";
         case TokenKind::MatchesKeyword: return "matches";
+        case TokenKind::MediumKeyword: return "medium";
         case TokenKind::ModPortKeyword: return "modport";
         case TokenKind::ModuleKeyword: return "module";
         case TokenKind::NandKeyword: return "nand";
@@ -979,6 +984,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::ShortRealKeyword: return "shortreal";
         case TokenKind::ShowCancelledKeyword: return "showcancelled";
         case TokenKind::SignedKeyword: return "signed";
+        case TokenKind::SmallKeyword: return "small";
         case TokenKind::SoftKeyword: return "soft";
         case TokenKind::SolveKeyword: return "solve";
         case TokenKind::SpecifyKeyword: return "specify";

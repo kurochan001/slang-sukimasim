@@ -444,6 +444,50 @@ private:
     bool isFuture;
 };
 
+// SukimaSim-specific global clock functions with relaxed checking
+class SukimaSimGclkFunc : public SystemSubroutine {
+public:
+    SukimaSimGclkFunc(KnownSystemName knownNameId, bool acceptsOptionalArg) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), 
+        acceptsOptionalArg(acceptsOptionalArg) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        
+        // Check argument count - 1 required, optionally 2 for past/future
+        size_t minArgs = 1;
+        size_t maxArgs = acceptsOptionalArg ? 2 : 1;
+        if (!checkArgCount(context, false, args, range, minArgs, maxArgs))
+            return comp.getErrorType();
+
+        // Skip global clocking check for SukimaSim functions
+        // These will be handled at runtime
+        
+        // Return appropriate type based on function
+        if (knownNameId == KnownSystemName::RoseGclk || knownNameId == KnownSystemName::FellGclk ||
+            knownNameId == KnownSystemName::StableGclk || knownNameId == KnownSystemName::ChangedGclk ||
+            knownNameId == KnownSystemName::RisingGclk || knownNameId == KnownSystemName::FallingGclk ||
+            knownNameId == KnownSystemName::SteadyGclk || knownNameId == KnownSystemName::ChangingGclk) {
+            return comp.getBitType();  // Returns boolean
+        } else {
+            // past_gclk, future_gclk, sampled_gclk return the signal type
+            if (!args.empty() && args[0]->type)
+                return *args[0]->type;
+            return comp.getIntType();
+        }
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+
+private:
+    bool acceptsOptionalArg;
+};
+
 class TimeScaleFunc : public SystemSubroutine {
 public:
     TimeScaleFunc(KnownSystemName knownNameId, bool isOptional) :
@@ -642,19 +686,21 @@ void Builtins::registerNonConstFuncs() {
     FUNC(KnownSystemName::Changed);
 #undef FUNC
 
-#define FUNC(name, isFuture) \
-    addSystemSubroutine(std::make_shared<GlobalValueChangeFunc>(name, isFuture))
-    FUNC(KnownSystemName::PastGclk, false);
-    FUNC(KnownSystemName::RoseGclk, false);
-    FUNC(KnownSystemName::FellGclk, false);
-    FUNC(KnownSystemName::StableGclk, false);
-    FUNC(KnownSystemName::ChangedGclk, false);
-    FUNC(KnownSystemName::FutureGclk, true);
-    FUNC(KnownSystemName::RisingGclk, true);
-    FUNC(KnownSystemName::FallingGclk, true);
-    FUNC(KnownSystemName::SteadyGclk, true);
-    FUNC(KnownSystemName::ChangingGclk, true);
-#undef FUNC
+// Use SukimaSimGclkFunc for runtime-handled _gclk functions
+#define GCLK_FUNC(name, acceptsOptional) \
+    addSystemSubroutine(std::make_shared<SukimaSimGclkFunc>(name, acceptsOptional))
+    GCLK_FUNC(KnownSystemName::PastGclk, true);     // accepts optional cycles argument
+    GCLK_FUNC(KnownSystemName::RoseGclk, false);
+    GCLK_FUNC(KnownSystemName::FellGclk, false);
+    GCLK_FUNC(KnownSystemName::StableGclk, false);
+    GCLK_FUNC(KnownSystemName::ChangedGclk, false);
+    GCLK_FUNC(KnownSystemName::FutureGclk, true);   // accepts optional cycles argument
+    GCLK_FUNC(KnownSystemName::RisingGclk, false);
+    GCLK_FUNC(KnownSystemName::FallingGclk, false);
+    GCLK_FUNC(KnownSystemName::SteadyGclk, false);
+    GCLK_FUNC(KnownSystemName::ChangingGclk, false);
+    GCLK_FUNC(KnownSystemName::SampledGclk, false);
+#undef GCLK_FUNC
 
     addSystemSubroutine(std::make_shared<FErrorFunc>());
     addSystemSubroutine(std::make_shared<FGetsFunc>());

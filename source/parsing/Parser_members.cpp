@@ -1706,7 +1706,23 @@ MemberSyntax* Parser::parseCoverpointMember() {
     if (!wildcard && !bins && attributes.empty())
         return nullptr;
 
-    Token name = expect(TokenKind::Identifier);
+    // Allow deprecated Verilog keywords to be used as bin names
+    // These keywords (small, large, medium, etc.) are reserved for backward compatibility
+    // but should be allowed as identifiers in coverage bin contexts
+    Token name;
+    auto peekToken = peek();
+    switch (peekToken.kind) {
+        case TokenKind::SmallKeyword:
+        case TokenKind::LargeKeyword:
+        case TokenKind::MediumKeyword:
+            // Consume the keyword and treat it as an identifier
+            name = consume();
+            break;
+        default:
+            // Normal identifier expected
+            name = expect(TokenKind::Identifier);
+            break;
+    }
 
     CoverageBinsArraySizeSyntax* size = nullptr;
     if (peek(TokenKind::OpenBracket)) {
@@ -1735,9 +1751,12 @@ MemberSyntax* Parser::parseCoverpointMember() {
             auto sequenceKeyword = consumeIf(TokenKind::SequenceKeyword);
             initializer = &factory.defaultCoverageBinInitializer(defaultKeyword, sequenceKeyword);
 
-            if (wildcard) {
-                addDiag(diag::CoverageBinDefaultWildcard, wildcard.location())
-                    << defaultKeyword.range();
+            if (wildcard && wildcard.valid()) {
+                if (defaultKeyword.valid())
+                    addDiag(diag::CoverageBinDefaultWildcard, wildcard.location())
+                        << defaultKeyword.range();
+                else
+                    addDiag(diag::CoverageBinDefaultWildcard, wildcard.location());
             }
 
             if (sequenceKeyword && size) {
@@ -1745,8 +1764,11 @@ MemberSyntax* Parser::parseCoverpointMember() {
                     << size->sourceRange();
             }
 
-            if (bins.kind == TokenKind::IgnoreBinsKeyword) {
-                addDiag(diag::CoverageBinDefaultIgnore, defaultKeyword.location()) << bins.range();
+            if (bins.valid() && bins.kind == TokenKind::IgnoreBinsKeyword) {
+                if (bins.valid())
+                    addDiag(diag::CoverageBinDefaultIgnore, defaultKeyword.location()) << bins.range();
+                else
+                    addDiag(diag::CoverageBinDefaultIgnore, defaultKeyword.location());
             }
             break;
         }
