@@ -105,8 +105,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "forever", TokenKind::ForeverKeyword },\
     { "fork", TokenKind::ForkKeyword },\
     { "function", TokenKind::FunctionKeyword },\
-    /* { "highz0", TokenKind::HighZ0Keyword },*/ \
-    /* { "highz1", TokenKind::HighZ1Keyword },*/ \
+    { "highz0", TokenKind::HighZ0Keyword },\
+    { "highz1", TokenKind::HighZ1Keyword },\
     { "if", TokenKind::IfKeyword },\
     { "ifnone", TokenKind::IfNoneKeyword },\
     { "initial", TokenKind::InitialKeyword },\
@@ -114,10 +114,10 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "input", TokenKind::InputKeyword },\
     { "integer", TokenKind::IntegerKeyword },\
     { "join", TokenKind::JoinKeyword },\
-    /* Deprecated in SystemVerilog - should not be reserved */ \
-    /* { "large", TokenKind::LargeKeyword },*/ \
+    /* IEEE 1800-2023 backward compatibility - these keywords must remain reserved */ \
+    { "large", TokenKind::LargeKeyword },\
     { "macromodule", TokenKind::MacromoduleKeyword },\
-    /* { "medium", TokenKind::MediumKeyword },*/ \
+    { "medium", TokenKind::MediumKeyword }, \
     { "module", TokenKind::ModuleKeyword },\
     { "nand", TokenKind::NandKeyword },\
     { "negedge", TokenKind::NegEdgeKeyword },\
@@ -148,12 +148,12 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "rtranif0", TokenKind::RtranIf0Keyword },\
     { "rtranif1", TokenKind::RtranIf1Keyword },\
     { "scalared", TokenKind::ScalaredKeyword }, \
-    /* { "small", TokenKind::SmallKeyword },*/ \
+    { "small", TokenKind::SmallKeyword },\
     { "specify", TokenKind::SpecifyKeyword },\
     { "specparam", TokenKind::SpecParamKeyword },\
-    /* Drive strength keywords - deprecated in SystemVerilog */ \
-    /* { "strong0", TokenKind::Strong0Keyword },*/ \
-    /* { "strong1", TokenKind::Strong1Keyword },*/ \
+    /* Drive strength keywords - IEEE 1800-2023 backward compatibility */ \
+    { "strong0", TokenKind::Strong0Keyword },\
+    { "strong1", TokenKind::Strong1Keyword }, \
     { "supply0", TokenKind::Supply0Keyword },\
     { "supply1", TokenKind::Supply1Keyword },\
     { "table", TokenKind::TableKeyword },\
@@ -172,8 +172,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "wait", TokenKind::WaitKeyword },\
     { "wand", TokenKind::WAndKeyword },\
     { "weak", TokenKind::WeakKeyword },\
-    /* { "weak0", TokenKind::Weak0Keyword },*/ \
-    /* { "weak1", TokenKind::Weak1Keyword },*/ \
+    { "weak0", TokenKind::Weak0Keyword },\
+    { "weak1", TokenKind::Weak1Keyword },\
     { "while", TokenKind::WhileKeyword },\
     { "wire", TokenKind::WireKeyword },\
     { "wor", TokenKind::WOrKeyword },\
