@@ -439,6 +439,33 @@ void DeclaredType::resolveAt(const ASTContext& context) const {
         extraFlags = ASTFlags::AllowUnboundedLiteral;
     }
 
+    // Phase 1 Fix: Check if we're in a procedural context and should defer evaluation
+    if (std::getenv("SUKIMASIM_DEFER_PROCEDURAL_INIT")) {
+        // Check if parent is a variable declaration inside a procedural block
+        bool inProceduralContext = false;
+        const Scope* currScope = context.scope;
+        while (currScope) {
+            auto kind = currScope->asSymbol().kind;
+            if (kind == SymbolKind::ProceduralBlock ||
+                kind == SymbolKind::StatementBlock) {
+                // We're inside a procedural block (initial, always, etc.)
+                inProceduralContext = true;
+                break;
+            }
+            // Stop at module/interface boundaries
+            if (kind == SymbolKind::InstanceBody ||
+                kind == SymbolKind::GenerateBlock) {
+                break;
+            }
+            currScope = currScope->asSymbol().getParentScope();
+        }
+
+        if (inProceduralContext) {
+            // Mark as unevaluated to prevent constant evaluation of function calls
+            extraFlags |= ASTFlags::UnevaluatedBranch;
+        }
+    }
+
     initializer = &Expression::bindRValue(*targetType, *initializerSyntax,
                                           {initializerLocation, initializerLocation + 1}, context,
                                           extraFlags);
