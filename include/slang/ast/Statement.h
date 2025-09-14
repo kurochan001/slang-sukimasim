@@ -302,6 +302,9 @@ public:
     /// The kind of statement block.
     StatementBlockKind blockKind;
 
+    /// Optional label for the block (for fork-join blocks)
+    std::string_view blockLabel;
+
     BlockStatement(const Statement& body, StatementBlockKind blockKind, SourceRange sourceRange) :
         Statement(StatementKind::Block, sourceRange), body(body), blockKind(blockKind) {}
 
