@@ -224,15 +224,21 @@ public:
 /// Represents a `disable fork` statement.
 class SLANG_EXPORT DisableForkStatement final : public Statement {
 public:
+    /// Optional label for targeted disable fork
+    std::string_view label;
+
     explicit DisableForkStatement(SourceRange sourceRange) :
         Statement(StatementKind::DisableFork, sourceRange) {}
+
+    DisableForkStatement(std::string_view label, SourceRange sourceRange) :
+        Statement(StatementKind::DisableFork, sourceRange), label(label) {}
 
     EvalResult evalImpl(EvalContext& context) const;
 
     static Statement& fromSyntax(Compilation& compilation,
                                  const syntax::DisableForkStatementSyntax& syntax);
 
-    void serializeTo(const ASTSerializer&) const {}
+    void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(StatementKind kind) { return kind == StatementKind::DisableFork; }
 };

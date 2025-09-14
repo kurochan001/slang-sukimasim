@@ -400,6 +400,11 @@ ER DisableForkStatement::evalImpl(EvalContext& context) const {
     return ER::Fail;
 }
 
+void DisableForkStatement::serializeTo(ASTSerializer& serializer) const {
+    if (!label.empty())
+        serializer.write("label", label);
+}
+
 Statement& WaitStatement::fromSyntax(Compilation& compilation, const WaitStatementSyntax& syntax,
                                      const ASTContext& context, StatementContext& stmtCtx) {
     auto& cond = Expression::bind(*syntax.expr, context);
