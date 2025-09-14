@@ -740,6 +740,12 @@ Statement& BlockStatement::fromSyntax(Compilation& comp, const BlockStatementSyn
     }
 
     auto result = createBlockStatement(comp, buffer, syntax, blockKind);
+
+    // Extract label if present (for fork-join blocks)
+    if (syntax.label) {
+        result->blockLabel = syntax.label->name.valueText();
+    }
+
     if (anyBad)
         return badStmt(comp, result);
 
