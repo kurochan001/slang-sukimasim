@@ -1011,7 +1011,8 @@ public:
 
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
                                    const ExpressionSyntax& syntax, const Args&) const final {
-        if (argIndex == 0)
+        // Second argument (memory array) needs to be an lvalue
+        if (argIndex == 1)
             return Expression::bindLValue(syntax, context);
         return Expression::bind(syntax, context);
     }
@@ -1019,22 +1020,26 @@ public:
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
         auto& comp = context.getCompilation();
-        if (!checkArgCount(context, false, args, range, 4, INT32_MAX))
+        // $sreadmemb/$sreadmemh need at least 2 args: string data and memory array
+        // Optional args: start address, finish address
+        if (!checkArgCount(context, false, args, range, 2, 4))
             return comp.getErrorType();
 
-        if (!args[0]->type->isUnpackedArray())
+        // First argument must be a string (the data to read)
+        if (!args[0]->type->canBeStringLike())
+            return badArg(context, *args[0]);
+
+        // Second argument must be an unpacked array (memory array)
+        if (!args[1]->type->isUnpackedArray())
             return badArg(context, *args[1]);
 
-        if (!args[1]->type->isNumeric())
-            return badArg(context, *args[1]);
-
-        if (!args[2]->type->isNumeric())
+        // Optional third argument (start address) must be numeric
+        if (args.size() >= 3 && !args[2]->type->isNumeric())
             return badArg(context, *args[2]);
 
-        for (size_t i = 3; i < args.size(); i++) {
-            if (!args[i]->type->canBeStringLike())
-                return badArg(context, *args[i]);
-        }
+        // Optional fourth argument (finish address) must be numeric
+        if (args.size() >= 4 && !args[3]->type->isNumeric())
+            return badArg(context, *args[3]);
 
         return comp.getVoidType();
     }
