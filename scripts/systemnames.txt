@@ -31,6 +31,7 @@ $load_coverage_db LoadCoverageDb
 $clog2 Clog2
 $countbits CountBits
 $countones CountOnes
+$reversebits ReverseBits
 $onehot OneHot
 $onehot0 OneHot0
 $isunknown IsUnknown
@@ -109,6 +110,8 @@ $realtime RealTime
 $random Random
 $urandom URandom
 $urandom_range URandomRange
+$get_randstate GetRandstate
+$set_randstate SetRandstate
 $reset_count ResetCount
 $reset_value ResetValue
 $timeunit TimeUnit
