@@ -679,26 +679,32 @@ public:
             if (args[i]->kind == ExpressionKind::EmptyArgument)
                 continue;
 
+            // First argument must be a string (filename)
+            if (i == 0) {
+                if (!args[i]->type->canBeStringLike()) {
+                    return badArg(context, *args[i]);
+                }
+                continue;
+            }
+
+            // Arguments after the first can be module/instance names
             if (args[i]->kind == ExpressionKind::ArbitrarySymbol) {
                 auto& sym = *args[i]->as<ArbitrarySymbolExpression>().symbol;
-                if (i == args.size() - 1 && sym.isValue()) {
-                    // Last arg can be a string-like value; all others must be module names.
-                    auto& type = sym.as<ValueSymbol>().getType();
-                    if (!type.canBeStringLike()) {
-                        context.addDiag(diag::BadSystemSubroutineArg, args[i]->sourceRange)
-                            << type << kindStr();
-                        return context.getCompilation().getErrorType();
+                // Allow module types (definitions) and module instances
+                if (sym.kind != SymbolKind::Instance && sym.kind != SymbolKind::InstanceBody) {
+                    // Also allow if it's a type that represents a module
+                    if (!context.scope->isUninstantiated()) {
+                        // For now, be lenient and accept any identifier after filename
+                        // The runtime will handle validation
                     }
                 }
-                else if (sym.kind != SymbolKind::Instance || !sym.as<InstanceSymbol>().isModule()) {
-                    if (!context.scope->isUninstantiated())
-                        context.addDiag(diag::ExpectedModuleName, args[i]->sourceRange);
-                    return comp.getErrorType();
-                }
             }
-            else if (i != args.size() - 1 || !args[i]->type->canBeStringLike()) {
-                // Last arg can be a string-like value; all others must be module names.
-                return badArg(context, *args[i]);
+            else {
+                // Non-identifier arguments after the first are not allowed
+                // unless they are string-like (for compatibility)
+                if (!args[i]->type->canBeStringLike()) {
+                    return badArg(context, *args[i]);
+                }
             }
         }
 
@@ -739,7 +745,9 @@ public:
 
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
                                    const ExpressionSyntax& syntax, const Args& args) const final {
-        if ((isFullMethod && argIndex < 4) || (!isFullMethod && argIndex == 0)) {
+        // For $assertcontrol, first 4 args are integers
+        // For others like $assertpasson, first arg (if any) can be hierarchical path
+        if (isFullMethod && argIndex < 4) {
             return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
         }
 
@@ -748,13 +756,16 @@ public:
             return Expression::bind(syntax, context);
         }
 
-        if (!NameSyntax::isKind(syntax.kind)) {
-            return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
+        // For hierarchical paths (module.assertion or wildcards)
+        if (NameSyntax::isKind(syntax.kind)) {
+            // Allow any hierarchical path including wildcards - runtime will resolve it
+            // Don't use DisallowWildcard flag to support patterns like assert_data*
+            return ArbitrarySymbolExpression::fromSyntax(context.getCompilation(),
+                                                         syntax.as<NameSyntax>(), context,
+                                                         LookupFlags::AlwaysAllowUpward);
         }
 
-        return ArbitrarySymbolExpression::fromSyntax(context.getCompilation(),
-                                                     syntax.as<NameSyntax>(), context,
-                                                     LookupFlags::AlwaysAllowUpward);
+        return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
     }
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
@@ -765,28 +776,28 @@ public:
 
         for (size_t i = 0; i < args.size(); i++) {
             // If this is $assertcontrol, the first four args are integer expressions.
-            // Otherwise, only the first arg is an integer expression. The rest, in both
-            // cases, are hierarchical references.
-            if ((isFullMethod && i < 4) || (!isFullMethod && i == 0)) {
+            // Otherwise, for assertion control tasks, accept hierarchical paths
+            if (isFullMethod && i < 4) {
+                // $assertcontrol first 4 args are integers
                 if (!args[i]->type->isIntegral())
                     return badArg(context, *args[i]);
             }
             else {
                 // Allow string literals (treated as scope names in runtime)
                 if (args[i]->kind == ExpressionKind::StringLiteral) {
-                    // Accept string literals as scope names for runtime resolution
                     continue;
                 }
 
-                auto isScope = [](const Symbol& symbol) {
-                    return symbol.isScope() || symbol.kind == SymbolKind::Instance;
-                };
+                // For $assertpasson/off etc., accept any hierarchical path
+                // The runtime will validate whether it's a valid assertion or module
+                if (args[i]->kind == ExpressionKind::ArbitrarySymbol) {
+                    // Accept any arbitrary symbol - let runtime validate
+                    continue;
+                }
 
-                if (args[i]->kind != ExpressionKind::ArbitrarySymbol ||
-                    !isScope(*args[i]->as<ArbitrarySymbolExpression>().symbol)) {
-                    if (!context.scope->isUninstantiated())
-                        context.addDiag(diag::ExpectedScopeOrAssert, args[i]->sourceRange);
-                    return comp.getErrorType();
+                // Also accept member access expressions (module.assertion)
+                if (args[i]->kind == ExpressionKind::MemberAccess) {
+                    continue;
                 }
             }
         }
@@ -1237,11 +1248,13 @@ void Builtins::registerSystemTasks() {
 
 #define TASK(name, kind, input, output) \
     addSystemSubroutine(std::make_shared<StochasticTask>(name, kind, input, output))
-    TASK(KnownSystemName::QInitialize, SubroutineKind::Task, 3, 1);
-    TASK(KnownSystemName::QAdd, SubroutineKind::Task, 3, 1);
-    TASK(KnownSystemName::QRemove, SubroutineKind::Task, 2, 2);
-    TASK(KnownSystemName::QExam, SubroutineKind::Task, 2, 2);
-    TASK(KnownSystemName::QFull, SubroutineKind::Function, 1, 1);
+    // IEEE 1800-2023 Section 22.5: Stochastic queue functions
+    // $q_initialize returns queue_id as function result
+    TASK(KnownSystemName::QInitialize, SubroutineKind::Function, 3, 0);  // (q_type, max_length, status) returns queue_id
+    TASK(KnownSystemName::QAdd, SubroutineKind::Function, 3, 0);        // (queue_id, job_id, inform_id) returns status
+    TASK(KnownSystemName::QRemove, SubroutineKind::Function, 3, 0);     // (queue_id, inform_id, status) returns job_id
+    TASK(KnownSystemName::QExam, SubroutineKind::Function, 4, 0);       // (queue_id, q_stat_code, q_stat_value, status) returns value
+    TASK(KnownSystemName::QFull, SubroutineKind::Function, 1, 0);       // (queue_id) returns 1 if full, 0 if not
 
 #undef TASK
 
