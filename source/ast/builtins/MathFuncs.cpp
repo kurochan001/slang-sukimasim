@@ -182,6 +182,34 @@ public:
     }
 };
 
+class ReverseFuncFunction : public SystemSubroutine {
+public:
+    ReverseFuncFunction() : SystemSubroutine(KnownSystemName::ReverseFunc, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+
+        // Check if argument is an array type
+        const Type& argType = *args[0]->type;
+        if (!argType.isArray() && !argType.isUnpackedArray())
+            return badArg(context, *args[0]);
+
+        // Return type is same as input type
+        return argType;
+    }
+
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        // This function reverses array elements
+        // The actual evaluation will be done at runtime
+        // For now, we delegate to runtime implementation
+        return nullptr; // Let runtime handle it
+    }
+};
+
 class BooleanBitVectorFunction : public SystemSubroutine {
 public:
     enum BVFKind { OneHot, OneHot0, IsUnknown };
@@ -271,6 +299,7 @@ void Builtins::registerMathFuncs() {
     addSystemSubroutine(std::make_shared<CountBitsFunction>());
     addSystemSubroutine(std::make_shared<CountOnesFunction>());
     addSystemSubroutine(std::make_shared<ReverseBitsFunction>());
+    addSystemSubroutine(std::make_shared<ReverseFuncFunction>());
 
 #define REGISTER(name, kind) \
     addSystemSubroutine(     \

@@ -32,6 +32,7 @@ $clog2 Clog2
 $countbits CountBits
 $countones CountOnes
 $reversebits ReverseBits
+$reverse ReverseFunc
 $onehot OneHot
 $onehot0 OneHot0
 $isunknown IsUnknown
@@ -145,9 +146,10 @@ $assertpassoff AssertPassOff
 $assertfailon AssertFailOn
 $assertfailoff AssertFailOff
 $assertnonvacuouson AssertNonvacuousOn
+$assertnonvacuousoff AssertNonvacuousOff
 $assertvacuousoff AssertVacuousOff
 $assertcoveredon AssertCoveredOn
-$assertcoverageoff AssertCoverageOff
+$assertcoveredoff AssertCoveredOff
 $assertion_coverage AssertionCoverage
 $get_assertion_coverage GetAssertionCoverage
 $get_toggle_coverage GetToggleCoverage
