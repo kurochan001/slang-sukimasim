@@ -651,6 +651,9 @@ void Builtins::registerNonConstFuncs() {
     REGISTER(KnownSystemName::URandom, uintType, 0, intArg);
     REGISTER(KnownSystemName::URandomRange, uintType, 1,
              std::vector<const Type*>{&uintType, &uintType});
+    REGISTER(KnownSystemName::GetRandstate, stringType);
+    REGISTER(KnownSystemName::SetRandstate, voidType, 1,
+             std::vector<const Type*>{&stringType});
 
     REGISTER(KnownSystemName::FOpen, intType, 1,
              std::vector<const Type*>{&stringType, &stringType});

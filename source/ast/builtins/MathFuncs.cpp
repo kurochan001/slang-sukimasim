@@ -149,6 +149,39 @@ public:
     }
 };
 
+class ReverseBitsFunction : public SystemSubroutine {
+public:
+    ReverseBitsFunction() : SystemSubroutine(KnownSystemName::ReverseBits, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+
+        if (!args[0]->type->isBitstreamType())
+            return badArg(context, *args[0]);
+
+        if (!Bitstream::checkClassAccess(*args[0]->type, context, args[0]->sourceRange))
+            return comp.getErrorType();
+
+        // Return type is same as input type
+        return *args[0]->type;
+    }
+
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        auto value = Bitstream::convertToBitVector(args[0]->eval(context), range, context);
+        if (!value)
+            return nullptr;
+
+        // Reverse the bits
+        SVInt result = value.integer();
+        SVInt reversed = result.reverse();
+        return reversed;
+    }
+};
+
 class BooleanBitVectorFunction : public SystemSubroutine {
 public:
     enum BVFKind { OneHot, OneHot0, IsUnknown };
@@ -237,6 +270,7 @@ void Builtins::registerMathFuncs() {
     addSystemSubroutine(std::make_shared<Clog2Function>());
     addSystemSubroutine(std::make_shared<CountBitsFunction>());
     addSystemSubroutine(std::make_shared<CountOnesFunction>());
+    addSystemSubroutine(std::make_shared<ReverseBitsFunction>());
 
 #define REGISTER(name, kind) \
     addSystemSubroutine(     \
