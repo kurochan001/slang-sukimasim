@@ -611,13 +611,28 @@ public:
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
         auto& comp = context.getCompilation();
-        if (!checkArgCount(context, false, args, range, 1, 1))
+        // IEEE 1800-2023 LRM: $getpattern(memory, start_addr, end_addr, pattern_string)
+        // Returns an integer status code
+        if (!checkArgCount(context, false, args, range, 4, 4))
             return comp.getErrorType();
 
-        if (!args[0]->type->isIntegral())
+        // First argument should be a memory array
+        if (!args[0]->type->isUnpackedArray() && !args[0]->type->isAssociativeArray())
             return badArg(context, *args[0]);
 
-        return comp.getType(args[0]->type->getBitWidth(), {});
+        // Second and third arguments should be integral (addresses)
+        if (!args[1]->type->isIntegral())
+            return badArg(context, *args[1]);
+
+        if (!args[2]->type->isIntegral())
+            return badArg(context, *args[2]);
+
+        // Fourth argument should be a string variable
+        if (!args[3]->type->isString())
+            return badArg(context, *args[3]);
+
+        // Return type is int (status code)
+        return comp.getIntType();
     }
 
     ConstantValue eval(EvalContext& context, const Args&, SourceRange range,

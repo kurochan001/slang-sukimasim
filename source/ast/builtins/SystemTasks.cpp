@@ -434,6 +434,38 @@ public:
     }
 };
 
+// Phase 6: $input task with variable arguments for terminal I/O
+class InputTask : public SystemTaskBase {
+public:
+    using SystemTaskBase::SystemTaskBase;
+
+    bool allowEmptyArgument(size_t) const final { return false; }
+
+    const Expression& bindArgument(size_t argIndex, const ASTContext& context,
+                                   const ExpressionSyntax& syntax, const Args&) const final {
+        // First argument is the format string, rest are lvalues for assignment
+        if (argIndex == 0)
+            return Expression::bind(syntax, context);
+        return Expression::bindLValue(syntax, context);
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        // Require at least format string and one variable
+        if (!checkArgCount(context, false, args, range, 2, INT32_MAX))
+            return comp.getErrorType();
+
+        // First argument must be string
+        if (!args[0]->type->canBeStringLike())
+            return badArg(context, *args[0]);
+
+        // Other arguments are lvalues - bindLValue handles validation
+
+        return comp.getVoidType();
+    }
+};
+
 class StringOutputTask : public SystemTaskBase {
 public:
     explicit StringOutputTask(KnownSystemName knownNameId) : SystemTaskBase(knownNameId) {
@@ -1221,7 +1253,8 @@ void Builtins::registerSystemTasks() {
     TASK(KnownSystemName::DumpPortsLimit, 1, &intType, &stringType);
     TASK(KnownSystemName::DumpPortsFlush, 0, &stringType);
 
-    TASK(KnownSystemName::Input, 1, &stringType);
+    // Phase 6: Register InputTask with variable arguments
+    addSystemSubroutine(std::make_shared<InputTask>(KnownSystemName::Input));
     TASK(KnownSystemName::Key, 0, &stringType);
     TASK(KnownSystemName::NoKey, 0, );
     TASK(KnownSystemName::Log, 0, &stringType);
