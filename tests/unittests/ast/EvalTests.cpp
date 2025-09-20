@@ -1499,6 +1499,11 @@ TEST_CASE("Eval string methods") {
     CHECK(session.eval("asdf.getc(4)").integer() == 0);
     CHECK(session.eval("asdf.getc(0)").integer() == 'B');
 
+    CHECK(session.eval("\"HELLO\".tolower()").str() == "hello");
+    CHECK(session.eval("\"hello\".toupper()").str() == "HELLO");
+    CHECK(session.eval("\"abc\".len()").integer() == 3);
+    CHECK(session.eval("\"ABCDE\".substr(1, 3)").str() == "BCD");
+
     CHECK(session.eval("asdf.compare(\"BaG2\")").integer() == -1);
     CHECK(session.eval("asdf.compare(\"BaG0\")").integer() == 1);
     CHECK(session.eval("asdf.compare(\"BaG1\")").integer() == 0);
