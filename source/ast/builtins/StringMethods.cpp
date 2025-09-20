@@ -13,6 +13,23 @@
 
 namespace slang::ast::builtins {
 
+namespace {
+
+// Ensures that the given constant value is represented as a string. For string
+// literals evaluated as integers, this will perform the conversion described in
+// [6.16]. Returns false if the value cannot be treated as a string.
+static bool ensureStringValue(ConstantValue& value) {
+    if (!value)
+        return false;
+
+    if (!value.isString())
+        value = value.convertToStr();
+
+    return value.isString();
+}
+
+} // namespace
+
 class StringLenMethod : public SimpleSystemSubroutine {
 public:
     explicit StringLenMethod(const Builtins& builtins) :
@@ -21,8 +38,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto val = args[0]->eval(context);
-        if (!val)
+        ConstantValue val = args[0]->eval(context);
+        if (!ensureStringValue(val))
             return nullptr;
 
         return SVInt(32, val.str().length(), true);
@@ -65,9 +82,9 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto strCv = args[0]->eval(context);
+        ConstantValue strCv = args[0]->eval(context);
         auto indexCv = args[1]->eval(context);
-        if (!strCv || !indexCv)
+        if (!ensureStringValue(strCv) || !indexCv)
             return nullptr;
 
         const std::string& str = strCv.str();
@@ -88,8 +105,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto val = args[0]->eval(context);
-        if (!val)
+        ConstantValue val = args[0]->eval(context);
+        if (!ensureStringValue(val))
             return nullptr;
 
         std::string& str = val.str();
@@ -113,9 +130,9 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto lhsCv = args[0]->eval(context);
-        auto rhsCv = args[1]->eval(context);
-        if (!lhsCv || !rhsCv)
+        ConstantValue lhsCv = args[0]->eval(context);
+        ConstantValue rhsCv = args[1]->eval(context);
+        if (!ensureStringValue(lhsCv) || !ensureStringValue(rhsCv))
             return nullptr;
 
         std::string& lhs = lhsCv.str();
@@ -154,10 +171,10 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto strCv = args[0]->eval(context);
+        ConstantValue strCv = args[0]->eval(context);
         auto leftCv = args[1]->eval(context);
         auto rightCv = args[2]->eval(context);
-        if (!strCv || !leftCv || !rightCv)
+        if (!ensureStringValue(strCv) || !leftCv || !rightCv)
             return nullptr;
 
         const std::string& str = strCv.str();
@@ -180,8 +197,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto cv = args[0]->eval(context);
-        if (!cv)
+        ConstantValue cv = args[0]->eval(context);
+        if (!ensureStringValue(cv))
             return nullptr;
 
         std::string str = cv.str();
@@ -203,8 +220,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto cv = args[0]->eval(context);
-        if (!cv)
+        ConstantValue cv = args[0]->eval(context);
+        if (!ensureStringValue(cv))
             return nullptr;
 
         std::string str = cv.str();
