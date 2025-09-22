@@ -10,6 +10,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
 #include "slang/ast/symbols/BlockSymbols.h"
+#include "slang/ast/symbols/CheckerSymbols.h"
 #include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/CoverSymbols.h"
@@ -914,17 +915,17 @@ void Scope::elaborate() const {
     if (hasModportExports)
         handleExportedMethods();
 
-    if (thisSym->kind == SymbolKind::ClassType) {
-        // If this is a class type being elaborated, let it inherit members from parent classes.
-        thisSym->as<ClassType>().inheritMembers(
-            [this](const Symbol& member) { insertMember(&member, nullptr, true, true); });
-    }
-    else if (thisSym->kind == SymbolKind::CovergroupType) {
-        // If this is a covergroup type being elaborated, let it inherit members from parent
-        // classes.
-        thisSym->as<CovergroupType>().inheritMembers(
-            [this](const Symbol& member) { insertMember(&member, nullptr, true, true); });
-    }
+    // If this is a class type or covergroup type being elaborated let it inherit
+    // members from parent classes. Inherited members get inserted at the beginning
+    // of the scope with an overridden index of zero so everything can reference them.
+    auto inheritMemberCB = [this](const Symbol& member) {
+        insertMember(&member, nullptr, true, false);
+        member.indexInScope = SymbolIndex{0};
+    };
+    if (thisSym->kind == SymbolKind::ClassType)
+        thisSym->as<ClassType>().inheritMembers(inheritMemberCB);
+    else if (thisSym->kind == SymbolKind::CovergroupType)
+        thisSym->as<CovergroupType>().inheritMembers(inheritMemberCB);
 
     // Go through deferred instances and elaborate them now.
     SmallVector<const ModuleDeclarationSyntax*> nestedDefs;

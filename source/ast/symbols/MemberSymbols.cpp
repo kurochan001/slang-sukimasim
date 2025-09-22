@@ -439,31 +439,6 @@ const Expression& ContinuousAssignSymbol::getAssignment() const {
     return *assign;
 }
 
-struct ExpressionVarVisitor {
-    bool anyVars = false;
-
-    template<typename T>
-    void visit(const T& expr) {
-        if constexpr (std::is_base_of_v<Expression, T>) {
-            switch (expr.kind) {
-                case ExpressionKind::NamedValue:
-                case ExpressionKind::HierarchicalValue: {
-                    if (auto sym = expr.getSymbolReference()) {
-                        if (VariableSymbol::isKind(sym->kind))
-                            anyVars = true;
-                    }
-                    break;
-                }
-                default:
-                    if constexpr (HasVisitExprs<T, ExpressionVarVisitor>) {
-                        expr.visitExprs(*this);
-                    }
-                    break;
-            }
-        }
-    }
-};
-
 const TimingControl* ContinuousAssignSymbol::getDelay() const {
     if (delay)
         return *delay;
@@ -492,9 +467,14 @@ const TimingControl* ContinuousAssignSymbol::getDelay() const {
             auto& expr = getAssignment();
             if (expr.kind == ExpressionKind::Assignment) {
                 auto& left = expr.as<AssignmentExpression>().left();
-                ExpressionVarVisitor visitor;
-                left.visit(visitor);
-                if (visitor.anyVars)
+
+                bool anyVars = false;
+                left.visitSymbolReferences([&](const Expression&, const Symbol& sym) {
+                    if (VariableSymbol::isKind(sym.kind))
+                        anyVars = true;
+                });
+
+                if (anyVars)
                     context.addDiag(diag::Delay3OnVar, left.sourceRange);
             }
         }
@@ -1697,99 +1677,6 @@ LetDeclSymbol& LetDeclSymbol::fromSyntax(const Scope& scope, const LetDeclaratio
 
 void LetDeclSymbol::makeDefaultInstance() const {
     AssertionInstanceExpression::makeDefault(*this);
-}
-
-CheckerSymbol::CheckerSymbol(Compilation& compilation, std::string_view name, SourceLocation loc) :
-    Symbol(SymbolKind::Checker, name, loc), Scope(compilation, this) {
-}
-
-CheckerSymbol& CheckerSymbol::fromSyntax(const Scope& scope,
-                                         const CheckerDeclarationSyntax& syntax) {
-    auto& comp = scope.getCompilation();
-    auto result = comp.emplace<CheckerSymbol>(comp, syntax.name.valueText(),
-                                              syntax.name.location());
-    result->setSyntax(syntax);
-    result->setAttributes(scope, syntax.attributes);
-
-    // Phase 203: Add parameter support for checkers
-    if (syntax.parameterList) {
-        // Add parameters as members of the checker scope
-        for (auto declaration : syntax.parameterList->declarations) {
-            result->addMembers(*declaration);
-        }
-    }
-
-    SmallVector<const AssertionPortSymbol*> ports;
-    if (syntax.portList) {
-        // Checker port symbols differ enough in their rules that we
-        // don't try to reuse buildPorts here.
-        auto& untyped = comp.getType(SyntaxKind::Untyped);
-        const DataTypeSyntax* lastType = nullptr;
-        ArgumentDirection lastDir = ArgumentDirection::In;
-
-        for (auto item : syntax.portList->ports) {
-            if (item->previewNode)
-                result->addMembers(*item->previewNode);
-
-            auto port = comp.emplace<AssertionPortSymbol>(item->name.valueText(),
-                                                          item->name.location());
-            port->setSyntax(*item);
-            port->setAttributes(scope, item->attributes);
-
-            if (!item->dimensions.empty())
-                port->declaredType.setDimensionSyntax(item->dimensions);
-
-            if (item->local)
-                scope.addDiag(diag::LocalNotAllowed, item->local.range());
-
-            if (item->direction) {
-                port->direction = SemanticFacts::getDirection(item->direction.kind);
-
-                // If we have a direction we can never inherit the previous type.
-                lastType = nullptr;
-            }
-            else {
-                port->direction = lastDir;
-            }
-
-            if (isEmptyType(*item->type)) {
-                if (lastType)
-                    port->declaredType.setTypeSyntax(*lastType);
-                else {
-                    port->declaredType.setType(untyped);
-                    if (!item->dimensions.empty()) {
-                        scope.addDiag(diag::InvalidArrayElemType, item->dimensions.sourceRange())
-                            << untyped;
-                    }
-
-                    if (item->direction)
-                        scope.addDiag(diag::CheckerPortDirectionType, item->direction.range());
-                }
-            }
-            else {
-                port->declaredType.setTypeSyntax(*item->type);
-                lastType = item->type;
-
-                auto itemKind = item->type->kind;
-                if (port->direction == ArgumentDirection::Out &&
-                    (itemKind == SyntaxKind::PropertyType || itemKind == SyntaxKind::SequenceType ||
-                     itemKind == SyntaxKind::Untyped)) {
-                    scope.addDiag(diag::CheckerOutputBadType, item->type->sourceRange());
-                    port->declaredType.setType(comp.getErrorType());
-                }
-            }
-
-            lastDir = *port->direction;
-            if (item->defaultValue)
-                port->defaultValueSyntax = item->defaultValue->expr;
-
-            result->addMember(*port);
-            ports.push_back(port);
-        }
-    }
-    result->ports = ports.copy(comp);
-
-    return *result;
 }
 
 ClockingBlockSymbol::ClockingBlockSymbol(Compilation& compilation, std::string_view name,
