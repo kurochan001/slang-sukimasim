@@ -12,6 +12,7 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/LSPUtilities.h"
+#include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/diagnostics/AnalysisDiags.h"
 
 namespace slang::analysis {
@@ -130,7 +131,7 @@ void DriverTracker::noteNonCanonicalInstance(AnalysisContext& context, DriverAll
     auto canonical = instance.getCanonicalBody();
     SLANG_ASSERT(canonical);
 
-    std::vector<InstanceState::IfacePortDriver> ifacePortDrivers;
+    std::vector<InstanceDriverState::IfacePortDriver> ifacePortDrivers;
     auto updater = [&](auto& item) {
         auto& state = item.second;
         state.nonCanonicalInstances.push_back(&instance);
@@ -239,6 +240,13 @@ DriverList DriverTracker::getDrivers(const ValueSymbol& symbol) const {
             drivers.emplace_back(*it, it.bounds());
     });
     return drivers;
+}
+
+std::optional<InstanceDriverState> DriverTracker::getInstanceState(
+    const InstanceBodySymbol& symbol) const {
+    std::optional<InstanceDriverState> state;
+    instanceMap.cvisit(&symbol, [&state](auto& item) { state = item.second; });
+    return state;
 }
 
 static std::string getLSPName(const ValueSymbol& symbol, const ValueDriver& driver) {
@@ -396,10 +404,15 @@ const HierarchicalReference* DriverTracker::addDriver(
             });
     }
 
-    // Keep track of modport ports so we can revisit them at the end of analysis.
+    // Keep track of modport ports separately so we can revisit them at the end of analysis.
     if (symbol.kind == SymbolKind::ModportPort) {
         auto updater = [&](auto& item) { item.second.emplace_back(&driver, bounds); };
         modportPortDrivers.try_emplace_and_visit(&symbol, updater, updater);
+
+        // We don't do overlap detection for modport ports (the drivers apply to the underlying
+        // connection) but we will still track them for downstream users to query later.
+        driverMap.insert(bounds, &driver, driverAlloc);
+
         return result;
     }
 
@@ -457,8 +470,7 @@ const HierarchicalReference* DriverTracker::addDriver(
 
     const bool checkOverlap = (VariableSymbol::isKind(symbol.kind) &&
                                symbol.as<VariableSymbol>().lifetime == VariableLifetime::Static) ||
-                              isUWire || isSingleDriverUDNT ||
-                              symbol.kind == SymbolKind::LocalAssertionVar;
+                              isUWire || isSingleDriverUDNT;
 
     const bool allowDupInitialDrivers = context.manager->hasFlag(
         AnalysisFlags::AllowDupInitialDrivers);
@@ -487,8 +499,6 @@ const HierarchicalReference* DriverTracker::addDriver(
         //        always_comb / always_ff procedures.
         //          - If the allowDupInitialDrivers option is set, allow an initial
         //            block to overlap even if the other block is an always_comb/ff.
-        // - Assertion local variable formal arguments can't drive more than
-        //   one output to the same local variable.
         bool isProblem = false;
         auto curr = *it;
 
@@ -532,7 +542,7 @@ void DriverTracker::noteInterfacePortDriver(AnalysisContext& context, DriverAllo
     auto& symbol = scope->asSymbol();
     SLANG_ASSERT(symbol.kind == SymbolKind::InstanceBody);
 
-    InstanceState::IfacePortDriver ifacePortDriver{&ref, &driver};
+    InstanceDriverState::IfacePortDriver ifacePortDriver{&ref, &driver};
     std::vector<const ast::InstanceSymbol*> nonCanonicalInstances;
     auto updater = [&](auto& item) {
         auto& state = item.second;
@@ -671,9 +681,9 @@ static const Symbol* retargetIfacePort(const HierarchicalReference& ref,
     return symbol;
 }
 
-void DriverTracker::applyInstanceSideEffect(AnalysisContext& context, DriverAlloc& driverAlloc,
-                                            const InstanceState::IfacePortDriver& ifacePortDriver,
-                                            const InstanceSymbol& instance) {
+void DriverTracker::applyInstanceSideEffect(
+    AnalysisContext& context, DriverAlloc& driverAlloc,
+    const InstanceDriverState::IfacePortDriver& ifacePortDriver, const InstanceSymbol& instance) {
     auto& ref = *ifacePortDriver.ref;
     if (auto target = retargetIfacePort(ref, instance)) {
         auto driver = context.alloc.emplace<ValueDriver>(*ifacePortDriver.driver);

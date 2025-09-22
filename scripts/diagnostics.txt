@@ -231,7 +231,6 @@ error Delay3NotAllowed "'{}' gates can have a maximum of two delay values"
 error Delay3UdpNotAllowed "instances of user-defined primitives can have a maximum of two delay values"
 error RandOnPackedMember "packed members cannot have random modifiers"
 error RandOnUnionMember "members of unions cannot have random modifiers"
-error SolveBeforeDisallowed "constraint ordering directive is not allowed within a nested constraint block"
 error InvalidPackageDecl "invalid package declaration"
 error InvalidRepeatRange "invalid repetition range"
 error InvalidPropertyIndex "only a single count of cycles is allowed for '{}' expression"
@@ -313,6 +312,7 @@ warning lifetime-prototype LifetimeForPrototype "lifetime specifier is not allow
 warning nonstandard-dist NonstandardDist "use of parentheses around 'dist' expression is non-standard"
 warning empty-body EmptyBody "{} has empty body (put the semicolon on a separate line to silence this warning)"
 warning split-distweight-op SplitDistWeightOp "split dist weight operator is not allowed; SystemVerilog requires that they be joined together"
+warning nested-solve-before SolveBeforeDisallowed "constraint ordering directive is not allowed within a nested constraint block"
 note NoteToMatchThis "to match this '{}'"
 note NoteLastBlockStarted "last complete block started here"
 note NoteLastBlockEnded "and ended here"
@@ -684,6 +684,9 @@ error UnboundedNotAllowed "unbounded literal '$' not allowed here"
 error DynamicNotProcedural "cannot refer to an element or member of a dynamic type outside of a procedural context"
 error DynamicFromChecker "cannot refer to an element or member of a dynamic type from within a checker"
 error CheckerForkJoinRef "checkers cannot refer to members of fork-join blocks from their enclosing scopes"
+error CheckerAutoVarRef "cannot refer to automatic variable '{}' from procedural code in a checker"
+error CheckerConstCast "checker arguments containing a const cast can only be used in assertions within the checker body"
+error CheckerCovergroupProc "checker procedures cannot reference covergroups"
 error SpecparamInConstant "specparams cannot be used in general constant expressions"
 error TaskFromFunction "cannot invoke a task from within a function"
 error TaskFromFinal "cannot invoke a task from within a final block"
@@ -884,6 +887,7 @@ warning pointless-void-cast PointlessVoidCast "cast to void for void-returning f
 warning unused-result UnusedResult "ignoring return value of '{}', cast to void to suppress"
 warning bad-procedural-force BadProceduralForce "lvalue of force/release must be a net, a variable, a constant select of a net, or a concatenation of these"
 warning multibit-edge MultiBitEdge "edge of expression of type {} will only trigger on changes to the first bit"
+warning vacuous-cover VacuousCover "cover property can succeed vacuously, which can cause confusing coverage results"
 note NoteWhileExpanding "while expanding {} '{}'"
 note NoteAlwaysFalse "expression is always false"
 
@@ -1156,10 +1160,10 @@ error MultipleUWireDrivers "'uwire' net '{}' cannot have multiple drivers"
 error MultipleUDNTDrivers "net '{}' with user-defined nettype '{}' cannot have multiple drivers because it does not specify a resolution function"
 error InputPortAssign "cannot assign to input port '{}'"
 error ClockVarTargetAssign "cannot write to '{}' with a continuous assignment since it's associated with an output clocking signal"
-error LocalFormalVarMultiAssign "cannot bind local variable '{}' to more than one output or inout local variable formal argument"
 error AlwaysWithoutTimingControl "'always' procedure does not advance time and so will create a simulation deadlock"
 error AssertionLocalUnassigned "cannot reference local variable '{}' because it is unassigned at this point in the sequence"
 error AssertionFormalUnassigned "output formal argument '{}' is not definitely assigned at the end of the sequence"
+error AssertionFormalMultiAssign "cannot bind local variable '{}' to more than one output or inout local variable formal argument"
 note NoteRequiredHere "required here"
 note NoteClockHere "clock here"
 warning unused-def UnusedDefinition "{} definition is unused"
@@ -1220,7 +1224,7 @@ group default = { real-underflow real-overflow vector-overflow int-overflow unco
                   negative-timing-limit bad-procedural-force duplicate-defparam implicit-port-type-mismatch
                   split-distweight-op dpi-pure-task multibit-edge unknown-sys-name unknown-library
                   dup-config-rule unused-config-cell unused-config-instance specify-condition-expr
-                  seq-no-match case-too-complex token-pasting-undeclared }
+                  seq-no-match case-too-complex token-pasting-undeclared nested-solve-before }
 
 group extra = { empty-member empty-stmt dup-import pointless-void-cast case-gen-none case-gen-dup
                 unused-result format-real ignored-slice task-ignored width-trunc dup-attr event-const
