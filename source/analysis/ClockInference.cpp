@@ -42,8 +42,15 @@ bool ClockInference::isInferredClockCall(const Expression& expr) {
 }
 
 static const flat_hash_set<KnownSystemName> SampleValueFuncNames = {
-    KnownSystemName::Rose, KnownSystemName::Fell, KnownSystemName::Stable, KnownSystemName::Changed,
-    KnownSystemName::Past};
+    KnownSystemName::Rose,          KnownSystemName::Fell,
+    KnownSystemName::Stable,        KnownSystemName::Changed,
+    KnownSystemName::Past,          KnownSystemName::SampledIf,
+    KnownSystemName::SampledIfnone, KnownSystemName::SampledUnique,
+    KnownSystemName::SampledPriority, KnownSystemName::SampledCase,
+    KnownSystemName::SampledCasez,  KnownSystemName::SampledCasex,
+    KnownSystemName::SampledOr,     KnownSystemName::SampledAnd,
+    KnownSystemName::SampledInside, KnownSystemName::SampledOutside,
+    KnownSystemName::SampledDisable};
 
 bool ClockInference::isSampledValueFuncCall(const Expression& expr) {
     if (expr.kind == ExpressionKind::Call)

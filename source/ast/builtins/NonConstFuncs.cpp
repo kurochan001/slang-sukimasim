@@ -346,6 +346,34 @@ public:
     }
 };
 
+class SampledExtensionStub : public SystemSubroutine {
+public:
+    SampledExtensionStub(KnownSystemName knownNameId, std::string_view displayName) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), displayName(displayName) {}
+
+    const Expression& bindArgument(size_t, const ASTContext& context,
+                                   const ExpressionSyntax& syntax, const Args&) const final {
+        return Expression::bind(syntax, context, ASTFlags::AssertionExpr);
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args&, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        auto& diag = context.addDiag(diag::NonstandardSysFunc, range);
+        diag << displayName;
+        return comp.getErrorType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+
+private:
+    std::string_view displayName;
+};
+
 class PastFunc : public SystemSubroutine {
 public:
     PastFunc() : SystemSubroutine(KnownSystemName::Past, SubroutineKind::Function) {}
@@ -726,6 +754,30 @@ void Builtins::registerNonConstFuncs() {
     addSystemSubroutine(std::make_shared<ScanfFunc>(false));
     addSystemSubroutine(std::make_shared<FReadFunc>());
     addSystemSubroutine(std::make_shared<SampledFunc>());
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledIf, "$sampled_if"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledIfnone, "$sampled_ifnone"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledUnique, "$sampled_unique"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledPriority, "$sampled_priority"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledCase, "$sampled_case"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledCasez, "$sampled_casez"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledCasex, "$sampled_casex"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledOr, "$sampled_or"));
+    addSystemSubroutine(
+        std::make_shared<SampledExtensionStub>(KnownSystemName::SampledAnd, "$sampled_and"));
+    addSystemSubroutine(std::make_shared<SampledExtensionStub>(KnownSystemName::SampledInside,
+                                                               "$sampled_inside"));
+    addSystemSubroutine(std::make_shared<SampledExtensionStub>(KnownSystemName::SampledOutside,
+                                                               "$sampled_outside"));
+    addSystemSubroutine(std::make_shared<SampledExtensionStub>(KnownSystemName::SampledDisable,
+                                                               "$sampled_disable"));
     addSystemSubroutine(std::make_shared<PastFunc>());
     addSystemSubroutine(std::make_shared<TimeScaleFunc>(KnownSystemName::TimeUnit, true));
     addSystemSubroutine(std::make_shared<TimeScaleFunc>(KnownSystemName::TimePrecision, true));

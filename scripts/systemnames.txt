@@ -99,6 +99,18 @@ $steady_gclk SteadyGclk
 $changing_gclk ChangingGclk
 $sampled_gclk SampledGclk
 $sampled Sampled
+$sampled_if SampledIf
+$sampled_ifnone SampledIfnone
+$sampled_unique SampledUnique
+$sampled_priority SampledPriority
+$sampled_case SampledCase
+$sampled_casez SampledCasez
+$sampled_casex SampledCasex
+$sampled_or SampledOr
+$sampled_and SampledAnd
+$sampled_inside SampledInside
+$sampled_outside SampledOutside
+$sampled_disable SampledDisable
 $past Past
 
 $stacktrace Stacktrace

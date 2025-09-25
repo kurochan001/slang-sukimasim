@@ -111,6 +111,18 @@ enum class SLANG_EXPORT KnownSystemName {
     ChangingGclk,
     SampledGclk,
     Sampled,
+    SampledIf,
+    SampledIfnone,
+    SampledUnique,
+    SampledPriority,
+    SampledCase,
+    SampledCasez,
+    SampledCasex,
+    SampledOr,
+    SampledAnd,
+    SampledInside,
+    SampledOutside,
+    SampledDisable,
     Past,
     Stacktrace,
     CountDrivers,
@@ -384,7 +396,7 @@ SLANG_EXPORT KnownSystemName parseKnownSystemName(std::string_view str);
 
 class SLANG_EXPORT KnownSystemName_traits {
 public:
-    static const std::array<KnownSystemName, 361> values;
+    static const std::array<KnownSystemName, 373> values;
 };
 
 }
