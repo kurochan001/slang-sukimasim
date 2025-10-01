@@ -13,6 +13,8 @@ __init__.pyi
 
 # C and CMake ignores.
 build/
+build-*/
+build.*/
 install/
 compile_commands.json
 CMakeSettings.json
