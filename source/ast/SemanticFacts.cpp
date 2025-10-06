@@ -154,11 +154,13 @@ static DriveStrength getDriveStrengthVal(TokenKind kind) {
         case TokenKind::Supply0Keyword:
         case TokenKind::Supply1Keyword:
             return DriveStrength::Supply;
-        // Phase 154: Strong0/Strong1/Weak0/Weak1 removed, using default Strong for compatibility
-        // These were obsolete Verilog keywords
         case TokenKind::StrongKeyword:
+        case TokenKind::Strong0Keyword:
+        case TokenKind::Strong1Keyword:
             return DriveStrength::Strong;
         case TokenKind::WeakKeyword:
+        case TokenKind::Weak0Keyword:
+        case TokenKind::Weak1Keyword:
             return DriveStrength::Weak;
         case TokenKind::Pull0Keyword:
         case TokenKind::Pull1Keyword:

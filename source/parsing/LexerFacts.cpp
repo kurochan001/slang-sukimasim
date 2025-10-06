@@ -594,6 +594,8 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::StaticKeyword:
         case TokenKind::StringKeyword:
         case TokenKind::StrongKeyword:
+        case TokenKind::Strong0Keyword:
+        case TokenKind::Strong1Keyword:
         case TokenKind::StructKeyword:
         case TokenKind::SuperKeyword:
         case TokenKind::Supply0Keyword:
@@ -636,6 +638,8 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::WaitOrderKeyword:
         case TokenKind::WAndKeyword:
         case TokenKind::WeakKeyword:
+        case TokenKind::Weak0Keyword:
+        case TokenKind::Weak1Keyword:
         case TokenKind::WhileKeyword:
         case TokenKind::WildcardKeyword:
         case TokenKind::WireKeyword:
