@@ -1015,6 +1015,10 @@ bool SyntaxFacts::isDriveStrength(TokenKind kind) {
         case TokenKind::Supply1Keyword:
         case TokenKind::Pull1Keyword:
         case TokenKind::HighZ1Keyword:
+        case TokenKind::Strong0Keyword:
+        case TokenKind::Strong1Keyword:
+        case TokenKind::Weak0Keyword:
+        case TokenKind::Weak1Keyword:
             return true;
         default:
             return false;
@@ -1458,6 +1462,8 @@ bool SyntaxFacts::isStrength0(TokenKind kind) {
         case TokenKind::Pull0Keyword:
         case TokenKind::Supply0Keyword:
         case TokenKind::HighZ0Keyword:
+        case TokenKind::Strong0Keyword:
+        case TokenKind::Weak0Keyword:
             return true;
         default:
             return false;
@@ -1469,6 +1475,8 @@ bool SyntaxFacts::isStrength1(TokenKind kind) {
         case TokenKind::Pull1Keyword:
         case TokenKind::Supply1Keyword:
         case TokenKind::HighZ1Keyword:
+        case TokenKind::Strong1Keyword:
+        case TokenKind::Weak1Keyword:
             return true;
         default:
             return false;
