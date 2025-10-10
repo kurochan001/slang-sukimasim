@@ -1622,6 +1622,11 @@ InterfacePortSymbol::IfaceConn InterfacePortSymbol::getConnection() const {
     return getConnectionAndExpr().first;
 }
 
+const ModportSymbol* InterfacePortSymbol::getResolvedModport() const {
+    auto conn = getConnection();
+    return conn.second;
+}
+
 std::pair<InterfacePortSymbol::IfaceConn, const Expression*> InterfacePortSymbol::
     getConnectionAndExpr() const {
 

@@ -10,6 +10,7 @@
 #include "slang/ast/statements/LoopStatements.h"
 #include "slang/syntax/SyntaxFwd.h"
 #include "slang/util/Util.h"
+#include <vector>
 
 namespace slang::ast {
 
@@ -286,6 +287,9 @@ public:
     SolveBeforeConstraint(std::span<const Expression* const> solve,
                           std::span<const Expression* const> after) :
         Constraint(ConstraintKind::SolveBefore), solve(solve), after(after) {}
+
+    [[nodiscard]] std::vector<const Symbol*> getSolveVariables() const;
+    [[nodiscard]] std::vector<const Symbol*> getAfterVariables() const;
 
     static Constraint& fromSyntax(const syntax::SolveBeforeConstraintSyntax& syntax,
                                   const ASTContext& context);

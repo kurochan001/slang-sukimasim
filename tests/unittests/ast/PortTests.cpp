@@ -9,6 +9,7 @@
 #include "slang/ast/expressions/SelectExpressions.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
@@ -1822,4 +1823,70 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::DisallowedPortDefault);
+}
+
+TEST_CASE("Modport metadata helpers") {
+    auto tree = SyntaxTree::fromText(R"(
+interface Ifc;
+    logic clk;
+    logic d, q;
+
+    clocking cb @(posedge clk);
+        input d;
+        output q;
+    endclocking
+
+    modport master (input clk, input d, output q);
+    modport cb_port (clocking cb);
+endinterface
+
+module top(Ifc.master i);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto ifaceLookup = compilation.tryGetDefinition("Ifc", compilation.getRoot()).definition;
+    REQUIRE(ifaceLookup);
+    auto& ifaceDef = ifaceLookup->as<DefinitionSymbol>();
+    auto& ifaceInst = InstanceSymbol::createDefault(compilation, ifaceDef);
+
+    const ModportSymbol* master = nullptr;
+    const ModportSymbol* cbPort = nullptr;
+    for (const auto& mod : ifaceInst.body.membersOfType<ModportSymbol>()) {
+        if (mod.name == "master")
+            master = &mod;
+        else if (mod.name == "cb_port")
+            cbPort = &mod;
+    }
+
+    REQUIRE(master);
+    REQUIRE(cbPort);
+
+    auto masterPorts = master->getPortList();
+    REQUIRE(masterPorts.size() == 3);
+    CHECK(masterPorts[0].name == "clk");
+    CHECK(masterPorts[0].direction == ArgumentDirection::In);
+    CHECK(masterPorts[0].internalSymbol != nullptr);
+    CHECK(masterPorts[0].connectionExpr != nullptr);
+    CHECK(masterPorts[1].name == "d");
+    CHECK(masterPorts[1].direction == ArgumentDirection::In);
+    CHECK(masterPorts[2].name == "q");
+    CHECK(masterPorts[2].direction == ArgumentDirection::Out);
+
+    auto clockingList = cbPort->getClockingList();
+    REQUIRE(clockingList.size() == 1);
+    CHECK(clockingList[0].name == "cb");
+    CHECK(clockingList[0].target != nullptr);
+
+    auto topLookup = compilation.tryGetDefinition("top", compilation.getRoot()).definition;
+    REQUIRE(topLookup);
+    auto& topDef = topLookup->as<DefinitionSymbol>();
+    auto& topInst = InstanceSymbol::createDefault(compilation, topDef);
+    auto* topPort = topInst.body.findPort("i");
+    REQUIRE(topPort);
+    auto& ifacePort = topPort->as<InterfacePortSymbol>();
+    CHECK(ifacePort.getResolvedModport() == master);
 }

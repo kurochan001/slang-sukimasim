@@ -294,6 +294,23 @@ ModportSymbol::ModportSymbol(Compilation& compilation, std::string_view name, So
     Symbol(SymbolKind::Modport, name, loc), Scope(compilation, this) {
 }
 
+std::vector<ModportSymbol::PortInfo> ModportSymbol::getPortList() const {
+    std::vector<PortInfo> result;
+    for (const auto& port : membersOfType<ModportPortSymbol>()) {
+        result.push_back(
+            PortInfo{port.name, port.direction, port.internalSymbol, port.getConnectionExpr()});
+    }
+    return result;
+}
+
+std::vector<ModportSymbol::ClockingInfo> ModportSymbol::getClockingList() const {
+    std::vector<ClockingInfo> result;
+    for (const auto& clocking : membersOfType<ModportClockingSymbol>()) {
+        result.push_back(ClockingInfo{clocking.name, clocking.target});
+    }
+    return result;
+}
+
 void ModportSymbol::fromSyntax(const ASTContext& context, const ModportDeclarationSyntax& syntax,
                                SmallVectorBase<const ModportSymbol*>& results) {
     auto& comp = context.getCompilation();
