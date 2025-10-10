@@ -21,7 +21,7 @@ class Item;
 endclass
 )");
 
-    Compilation compilation;
+    Compilation compilation(optionsFor(LanguageVersion::v1800_2023));
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 
@@ -78,4 +78,35 @@ endclass
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::SoftConstraintNoRand);
+}
+
+TEST_CASE("Solve before duplicate detection") {
+    auto tree = SyntaxTree::fromText(R"(
+class Item;
+    rand int a;
+    rand int b;
+    constraint ctrl { solve a, a before b; }
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::SolveBeforeRepeated);
+}
+
+TEST_CASE("Solve before circular detection") {
+    auto tree = SyntaxTree::fromText(R"(
+class Item;
+    rand int a;
+    constraint ctrl { solve a before a; }
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::SolveBeforeCircular);
 }
