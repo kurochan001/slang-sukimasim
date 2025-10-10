@@ -13,6 +13,7 @@
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/symbols/ValueSymbol.h"
 #include "slang/syntax/SyntaxFwd.h"
+#include <vector>
 
 namespace slang::ast {
 
@@ -163,7 +164,22 @@ class SLANG_EXPORT ModportSymbol final : public Symbol, public Scope {
 public:
     bool hasExports = false;
 
+    struct PortInfo {
+        std::string_view name;
+        ArgumentDirection direction;
+        const Symbol* internalSymbol;
+        const Expression* connectionExpr;
+    };
+
+    struct ClockingInfo {
+        std::string_view name;
+        const Symbol* target;
+    };
+
     ModportSymbol(Compilation& compilation, std::string_view name, SourceLocation loc);
+
+    [[nodiscard]] std::vector<PortInfo> getPortList() const;
+    [[nodiscard]] std::vector<ClockingInfo> getClockingList() const;
 
     void serializeTo(ASTSerializer&) const {}
 

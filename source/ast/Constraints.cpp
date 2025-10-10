@@ -293,6 +293,9 @@ Constraint& ExpressionConstraint::fromSyntax(const ExpressionConstraintSyntax& s
     if (!expr.visit(visitor))
         return badConstraint(comp, result);
 
+    if (isSoft && !visitor.sawRandVars)
+        context.addDiag(diag::SoftConstraintNoRand, expr.sourceRange);
+
     return *result;
 }
 
@@ -442,6 +445,20 @@ static std::pair<const Symbol*, SourceRange> getConstraintPrimary(const Expressi
     return {sym, expr.sourceRange};
 }
 
+static std::vector<const Symbol*> collectConstraintVariables(
+    std::span<const Expression* const> exprs) {
+    std::vector<const Symbol*> result;
+    result.reserve(exprs.size());
+    for (auto* expr : exprs) {
+        if (!expr)
+            continue;
+        auto [sym, _] = getConstraintPrimary(*expr);
+        if (sym)
+            result.push_back(sym);
+    }
+    return result;
+}
+
 Constraint& DisableSoftConstraint::fromSyntax(const DisableConstraintSyntax& syntax,
                                               const ASTContext& context) {
     auto& comp = context.getCompilation();
@@ -507,6 +524,14 @@ void SolveBeforeConstraint::serializeTo(ASTSerializer& serializer) const {
     for (auto item : after)
         serializer.serialize(*item);
     serializer.endArray();
+}
+
+std::vector<const Symbol*> SolveBeforeConstraint::getSolveVariables() const {
+    return collectConstraintVariables(solve);
+}
+
+std::vector<const Symbol*> SolveBeforeConstraint::getAfterVariables() const {
+    return collectConstraintVariables(after);
 }
 
 Constraint& ForeachConstraint::fromSyntax(const LoopConstraintSyntax& syntax,

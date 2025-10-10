@@ -14,6 +14,7 @@ add_executable(
   ast/CheckerTests.cpp
   ast/ClassTests.cpp
   ast/ConfigTests.cpp
+  ast/ConstraintTests.cpp
   ast/CoverTests.cpp
   ast/EvalTests.cpp
   ast/ExpressionTests.cpp

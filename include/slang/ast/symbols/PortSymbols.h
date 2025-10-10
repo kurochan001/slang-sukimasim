@@ -146,6 +146,8 @@ public:
 
     bool isInvalid() const { return !interfaceDef && !isGeneric; }
 
+    [[nodiscard]] const ModportSymbol* getResolvedModport() const;
+
     /// Gets the set of dimensions for specifying interface arrays.
     /// Returns nullopt if an error occurs evaluating the dimensions.
     std::optional<std::span<const ConstantRange>> getDeclaredRange() const;
