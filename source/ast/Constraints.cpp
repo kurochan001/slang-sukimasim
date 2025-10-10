@@ -11,6 +11,8 @@
 #include "slang/ast/Compilation.h"
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/syntax/AllSyntax.h"
+#include <string>
+#include <unordered_set>
 
 namespace slang::ast {
 
@@ -116,8 +118,10 @@ struct ConstraintExprVisitor {
                 if (mode != RandMode::None)
                     sawRandVars = true;
 
-                if (isSoft && mode == RandMode::RandC)
-                    context.addDiag(diag::RandCInSoft, expr.sourceRange);
+                if (isSoft && mode == RandMode::RandC) {
+                    auto& diag = context.addDiag(diag::RandCInSoft, expr.sourceRange);
+                    diag << sym->name;
+                }
             }
 
             bool childrenHaveRand = false;
@@ -136,7 +140,7 @@ struct ConstraintExprVisitor {
                     expr.visitExprs(*this);
                     isTop = oldTop;
                     childrenHaveRand = sawRandVars;
-                    sawRandVars = oldSawRand;
+                    sawRandVars = oldSawRand || childrenHaveRand;
                 }
             }
 
@@ -223,8 +227,10 @@ struct ConstraintExprVisitor {
                         RandMode mode = context.getRandMode(sym);
                         if (mode == RandMode::Rand)
                             anyRandVars = true;
-                        else if (mode == RandMode::RandC)
-                            context.addDiag(diag::RandCInDist, subExpr.sourceRange);
+                        else if (mode == RandMode::RandC) {
+                            auto& diag = context.addDiag(diag::RandCInDist, subExpr.sourceRange);
+                            diag << sym.name;
+                        }
                     });
 
                     if (!anyRandVars)
@@ -399,8 +405,10 @@ Constraint& UniquenessConstraint::fromSyntax(const UniquenessConstraintSyntax& s
                     symType = symType->getArrayElementType();
 
                 RandMode mode = context.getRandMode(*sym);
-                if (mode == RandMode::RandC)
-                    context.addDiag(diag::RandCInUnique, expr.sourceRange);
+                if (mode == RandMode::RandC) {
+                    auto& diag = context.addDiag(diag::RandCInUnique, expr.sourceRange);
+                    diag << sym->name;
+                }
                 else if (mode == RandMode::None)
                     context.addDiag(diag::InvalidUniquenessExpr, expr.sourceRange);
                 else if (!commonType)
@@ -469,7 +477,8 @@ Constraint& DisableSoftConstraint::fromSyntax(const DisableConstraintSyntax& syn
 
     auto [sym, sourceRange] = getConstraintPrimary(expr);
     if (!sym || context.getRandMode(*sym) != RandMode::Rand) {
-        context.addDiag(diag::BadDisableSoft, sourceRange);
+        auto name = sym ? std::string(sym->name) : std::string("<expression>");
+        context.addDiag(diag::BadDisableSoft, sourceRange) << name;
         return badConstraint(comp, result);
     }
 
@@ -483,7 +492,8 @@ void DisableSoftConstraint::serializeTo(ASTSerializer& serializer) const {
 Constraint& SolveBeforeConstraint::fromSyntax(const SolveBeforeConstraintSyntax& syntax,
                                               const ASTContext& context) {
     bool bad = false;
-    auto bindExprs = [&](auto& list, auto& results) {
+    auto bindExprs = [&](auto& list, auto& results, SmallVector<const Symbol*>& symbols,
+                        SmallVector<SourceRange>& ranges) {
         for (auto item : list) {
             auto& expr = Expression::bind(*item, context);
             results.push_back(&expr);
@@ -494,18 +504,57 @@ Constraint& SolveBeforeConstraint::fromSyntax(const SolveBeforeConstraintSyntax&
             }
 
             auto [sym, sourceRange] = getConstraintPrimary(expr);
-            if (!sym || context.getRandMode(*sym) == RandMode::None)
-                context.addDiag(diag::BadSolveBefore, sourceRange);
-            else if (sym && context.getRandMode(*sym) == RandMode::RandC)
-                context.addDiag(diag::RandCInSolveBefore, sourceRange);
+            auto name = sym ? std::string(sym->name) : std::string("<expression>");
+            RandMode mode = sym ? context.getRandMode(*sym) : RandMode::None;
+            if (!sym || mode == RandMode::None)
+                context.addDiag(diag::BadSolveBefore, sourceRange) << name;
+            else if (mode == RandMode::RandC)
+                context.addDiag(diag::RandCInSolveBefore, sourceRange) << name;
+
+            if (sym) {
+                symbols.push_back(sym);
+                ranges.push_back(sourceRange);
+            }
         }
     };
 
     auto& comp = context.getCompilation();
     SmallVector<const Expression*> solve;
     SmallVector<const Expression*> after;
-    bindExprs(syntax.beforeExpr, solve);
-    bindExprs(syntax.afterExpr, after);
+    SmallVector<const Symbol*> solveSymbols;
+    SmallVector<const Symbol*> afterSymbols;
+    SmallVector<SourceRange> solveRanges;
+    SmallVector<SourceRange> afterRanges;
+    bindExprs(syntax.beforeExpr, solve, solveSymbols, solveRanges);
+    bindExprs(syntax.afterExpr, after, afterSymbols, afterRanges);
+
+    std::unordered_set<const Symbol*> solveSet;
+    std::unordered_set<const Symbol*> afterSet;
+    std::unordered_set<const Symbol*> repeatedReported;
+    std::unordered_set<const Symbol*> crossReported;
+
+    auto reportRepeated = [&](const Symbol* sym, SourceRange range) {
+        if (repeatedReported.insert(sym).second) {
+            context.addDiag(diag::SolveBeforeRepeated, range) << sym->name;
+            bad = true;
+        }
+    };
+
+    for (size_t i = 0; i < solveSymbols.size(); ++i) {
+        auto sym = solveSymbols[i];
+        if (!solveSet.insert(sym).second)
+            reportRepeated(sym, solveRanges[i]);
+    }
+
+    for (size_t i = 0; i < afterSymbols.size(); ++i) {
+        auto sym = afterSymbols[i];
+        if (!afterSet.insert(sym).second)
+            reportRepeated(sym, afterRanges[i]);
+        if (solveSet.count(sym) && crossReported.insert(sym).second) {
+            context.addDiag(diag::SolveBeforeCircular, afterRanges[i]) << sym->name;
+            bad = true;
+        }
+    }
 
     auto result = comp.emplace<SolveBeforeConstraint>(solve.copy(comp), after.copy(comp));
     if (bad)
