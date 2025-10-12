@@ -7,6 +7,8 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/expressions/AssignmentExpressions.h"
 
+#include <iostream>
+
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Bitstream.h"
 #include "slang/ast/Compilation.h"
@@ -510,7 +512,10 @@ Expression& NewArrayExpression::fromSyntax(Compilation& compilation,
             assignmentTarget = &compilation.getErrorType();
     }
 
+    std::cerr << "[SLANG DEBUG] NewArrayExpression::fromSyntax - before selfDetermined" << std::endl;
     auto& sizeExpr = selfDetermined(compilation, *syntax.sizeExpr, context);
+    std::cerr << "[SLANG DEBUG] NewArrayExpression::fromSyntax - after selfDetermined" << std::endl;
+
     const Expression* initExpr = nullptr;
     if (syntax.initializer)
         initExpr = &bindRValue(*assignmentTarget, *syntax.initializer->expression, {}, context);
@@ -531,13 +536,35 @@ ConstantValue NewArrayExpression::evalImpl(EvalContext& context) const {
     if (!sz)
         return nullptr;
 
+    // Early check: If integer conversion fails or value is negative, reject immediately
+    if (!sz.isInteger()) {
+        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange) << sz;
+        return nullptr;
+    }
+
     std::optional<int64_t> size = sz.integer().as<int64_t>();
     if (!size || *size < 0) {
         context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange) << sz;
         return nullptr;
     }
 
-    size_t count = size_t(*size);
+    // Prevent overflow when casting to size_t
+    if (*size > static_cast<int64_t>(std::numeric_limits<size_t>::max())) {
+        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange) << sz;
+        return nullptr;
+    }
+
+    size_t count = static_cast<size_t>(*size);
+
+    // Sanity check: Prevent absurdly large allocations (>1GB worth of ConstantValues)
+    // Each ConstantValue is roughly 64 bytes, so 16M elements = ~1GB
+    constexpr size_t MAX_REASONABLE_SIZE = 16 * 1024 * 1024;
+    if (count > MAX_REASONABLE_SIZE) {
+        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange)
+            << "Array size too large: " + std::to_string(count);
+        return nullptr;
+    }
+
     size_t index = 0;
     std::vector<ConstantValue> result(count);
 
