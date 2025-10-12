@@ -154,6 +154,9 @@ static void addBuiltInMethods(Scope& scope, bool isCovergroup) {
     get_inst_coverage.addArg("covered_bins"sv, int_t, ArgumentDirection::Ref, SVInt(32, 0, true));
     get_inst_coverage.addArg("total_bins"sv, int_t, ArgumentDirection::Ref, SVInt(32, 0, true));
 
+    // IEEE 1800-2023 Section 19.8 - get_name() method
+    makeFunc("get_name"sv, string_t);
+
     makeFunc("start"sv, void_t);
     makeFunc("stop"sv, void_t);
 }
