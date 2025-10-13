@@ -745,10 +745,21 @@ Expression& NewCovergroupExpression::fromSyntax(Compilation& compilation,
     auto& coverType = assignmentTarget.getCanonicalType().as<CovergroupType>();
 
     SmallVector<const Expression*> args;
-    // Phase 145: Covergroup formal arguments are for sample(), not for new()
-    // According to LRM, covergroup constructor doesn't take the formal arguments
-    // They are only used when sample() is called
-    if (!CallExpression::bindArgs(syntax.argList, {}, "new"sv, range, context,
+    SmallVector<const FormalArgumentSymbol*> formalArgs;
+
+    // IEEE 1800-2023 Section 19.3.1: Covergroup constructor can optionally take a string name
+    // Allow a single optional string argument for naming the instance
+    if (syntax.argList && !syntax.argList->parameters.empty()) {
+        auto& stringType = compilation.getStringType();
+        auto formalArg = compilation.emplace<FormalArgumentSymbol>(
+            "name"sv, SourceLocation(), ArgumentDirection::In, VariableLifetime::Automatic);
+        formalArg->setType(stringType);
+        formalArgs.push_back(formalArg);
+    }
+
+    // Phase 145: Covergroup formal arguments (from portList) are for sample(), not for new()
+    // But we allow an optional string name parameter as per IEEE 1800-2023
+    if (!CallExpression::bindArgs(syntax.argList, formalArgs, "new"sv, range, context,
                                   args)) {
         return badExpr(compilation, nullptr);
     }
