@@ -2145,7 +2145,10 @@ void Lookup::qualified(const ScopedNameSyntax& syntax, const ASTContext& context
             do {
                 auto& symbol = current->asSymbol();
                 if (symbol.kind == SymbolKind::CompilationUnit) {
-                    unqualifiedImpl(*current, name, location, first.range, flags, {}, result, scope,
+                    // sukimasim fix: IEEE 1800-2023 §23.8 - $unit:: explicitly refers to compilation unit scope
+                    // Change the search scope from original 'scope' to '*current' (compilation unit)
+                    // to prevent local variables from shadowing $unit:: references
+                    unqualifiedImpl(*current, name, location, first.range, flags, {}, result, *current,
                                     nullptr);
                     break;
                 }
