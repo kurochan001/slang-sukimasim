@@ -1257,7 +1257,7 @@ void Builtins::registerSystemTasks() {
     addSystemSubroutine(std::make_shared<InputTask>(KnownSystemName::Input));
     TASK(KnownSystemName::Key, 0, &stringType);
     TASK(KnownSystemName::NoKey, 0, );
-    TASK(KnownSystemName::Log, 0, &stringType);
+    // TASK(KnownSystemName::Log, 0, &stringType); // REMOVED: VCD $log conflicts with IEEE 1800-2023 math $log
     TASK(KnownSystemName::NoLog, 0, );
     TASK(KnownSystemName::Reset, 0, &intType, &intType, &intType);
     TASK(KnownSystemName::Save, 1, &stringType);
