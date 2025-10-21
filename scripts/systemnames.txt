@@ -244,7 +244,8 @@ $dumpportsflush DumpPortsFlush
 $input Input
 $key Key
 $nokey NoKey
-$log Log
+# $log Log  # REMOVED: Conflicts with IEEE 1800-2023 math function $log (natural logarithm)
+              # VCD logging is non-standard; use $nolog for VCD control if needed
 $nolog NoLog
 $reset Reset
 $save Save
