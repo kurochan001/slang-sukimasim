@@ -55,21 +55,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto strCv = args[0]->evalLValue(context);
-        auto indexCv = args[1]->eval(context);
-        auto charCv = args[2]->eval(context);
-        if (!strCv || !indexCv || !charCv)
-            return nullptr;
-
-        const std::string& str = strCv.load().str();
-        int32_t index = indexCv.integer().as<int32_t>().value();
-        uint8_t c = charCv.integer().as<uint8_t>().value();
-
-        if (c == 0 || index < 0 || size_t(index) >= str.length())
-            return nullptr;
-
-        strCv.addIndex(index, nullptr);
-        strCv.store(SVInt(8, c, false));
+        // Phase 2.1: Disable constant evaluation - let SukimaSim handle at runtime
+        // String values are runtime entities and should not be constant-evaluated
         return nullptr;
     }
 };
@@ -82,17 +69,9 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        ConstantValue strCv = args[0]->eval(context);
-        auto indexCv = args[1]->eval(context);
-        if (!ensureStringValue(strCv) || !indexCv)
-            return nullptr;
-
-        const std::string& str = strCv.str();
-        int32_t index = indexCv.integer().as<int32_t>().value();
-        if (index < 0 || size_t(index) >= str.length())
-            return SVInt(8, 0, false);
-
-        return SVInt(8, uint64_t(str[size_t(index)]), false);
+        // Phase 2.1: Disable constant evaluation - let SukimaSim handle at runtime
+        // String values are runtime entities and should not be constant-evaluated
+        return nullptr;
     }
 };
 
@@ -190,26 +169,16 @@ public:
 
 class StringAtoIMethod : public SimpleSystemSubroutine {
 public:
-    StringAtoIMethod(const Builtins& builtins, KnownSystemName knownNameId, int base) :
+    StringAtoIMethod(const Builtins& builtins, KnownSystemName knownNameId, int /* base */) :
         SimpleSystemSubroutine(knownNameId, SubroutineKind::Function, 0, {}, builtins.integerType,
-                               true),
-        base(base) {}
+                               true) {}
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        ConstantValue cv = args[0]->eval(context);
-        if (!ensureStringValue(cv))
-            return nullptr;
-
-        std::string str = cv.str();
-        std::erase(str, '_');
-
-        int result = strToInt(str, nullptr, base).value_or(0);
-        return SVInt(32, uint64_t(result), true);
+        // Phase 2.1: Disable constant evaluation - let SukimaSim handle at runtime
+        // String values are runtime entities and should not be constant-evaluated
+        return nullptr;
     }
-
-private:
-    int base;
 };
 
 class StringAtoRealMethod : public SimpleSystemSubroutine {
@@ -220,38 +189,24 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        ConstantValue cv = args[0]->eval(context);
-        if (!ensureStringValue(cv))
-            return nullptr;
-
-        std::string str = cv.str();
-        std::erase(str, '_');
-
-        double result = strToDouble(str).value_or(0.0);
-        return real_t(result);
+        // Phase 2.1: Disable constant evaluation - let SukimaSim handle at runtime
+        // String values are runtime entities and should not be constant-evaluated
+        return nullptr;
     }
 };
 
 class StringItoAMethod : public SimpleSystemSubroutine {
 public:
-    StringItoAMethod(const Builtins& builtins, KnownSystemName knownNameId, LiteralBase base) :
+    StringItoAMethod(const Builtins& builtins, KnownSystemName knownNameId, LiteralBase /* base */) :
         SimpleSystemSubroutine(knownNameId, SubroutineKind::Function, 1, {&builtins.integerType},
-                               builtins.voidType, true, /* isFirstArgLValue */ true),
-        base(base) {}
+                               builtins.voidType, true, /* isFirstArgLValue */ true) {}
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto strCv = args[0]->evalLValue(context);
-        auto valCv = args[1]->eval(context);
-        if (!strCv || !valCv)
-            return nullptr;
-
-        strCv.store(valCv.integer().toString(base, false));
+        // Phase 2.1: Disable constant evaluation - let SukimaSim handle at runtime
+        // String values are runtime entities and should not be constant-evaluated
         return nullptr;
     }
-
-private:
-    LiteralBase base;
 };
 
 class StringRealtoAMethod : public SimpleSystemSubroutine {
@@ -263,12 +218,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto strCv = args[0]->evalLValue(context);
-        auto valCv = args[1]->eval(context);
-        if (!strCv || !valCv)
-            return nullptr;
-
-        strCv.store(std::to_string(valCv.real()));
+        // Phase 2.1: Disable constant evaluation - let SukimaSim handle at runtime
+        // String values are runtime entities and should not be constant-evaluated
         return nullptr;
     }
 };
