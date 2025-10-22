@@ -18,8 +18,8 @@ using namespace syntax;
 
 class EnumFirstLastMethod : public SystemSubroutine {
 public:
-    EnumFirstLastMethod(KnownSystemName knownNameId, bool first) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function), first(first) {}
+    EnumFirstLastMethod(KnownSystemName knownNameId, bool /* first */) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function) {}
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
@@ -32,41 +32,16 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        if (!noHierarchical(context, *args[0]))
-            return nullptr;
-
-        // Expression isn't actually evaluated here; we know the value to return at compile time.
-        const EnumType& type = args[0]->type->getCanonicalType().as<EnumType>();
-
-        auto range = type.values();
-        if (range.begin() == range.end())
-            return nullptr;
-
-        const EnumValueSymbol* value;
-        if (first) {
-            value = &*range.begin();
-        }
-        else {
-            for (auto it = range.begin();;) {
-                auto prev = it++;
-                if (it == range.end()) {
-                    value = &*prev;
-                    break;
-                }
-            }
-        }
-
-        return value->getValue();
+        // Phase 2.2: Disable constant evaluation - let SukimaSim handle at runtime
+        // Enum values depend on runtime state and should not be constant-evaluated
+        return nullptr;
     }
-
-private:
-    bool first;
 };
 
 class EnumNextPrevMethod : public SystemSubroutine {
 public:
-    EnumNextPrevMethod(KnownSystemName knownNameId, bool next) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function), next(next) {}
+    EnumNextPrevMethod(KnownSystemName knownNameId, bool /* next */) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function) {}
 
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
                                    const ExpressionSyntax& syntax, const Args& args) const final {
@@ -88,67 +63,10 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto val = args[0]->eval(context);
-        if (!val)
-            return nullptr;
-
-        // Count defaults to 1, but can optionally be passed in.
-        SVInt one(33, 1, true);
-        SVInt count = one;
-        if (args.size() == 2) {
-            auto countCv = args[1]->eval(context);
-            if (!countCv)
-                return nullptr;
-
-            // Convert to a signed 33-bit number for delta computation.
-            count = countCv.integer();
-            count = count.resize(33);
-            count.setSigned(true);
-        }
-
-        std::optional<size_t> foundIndex;
-        SmallVector<const EnumValueSymbol*> values;
-        const EnumType& type = args[0]->type->getCanonicalType().as<EnumType>();
-        auto& targetInt = val.integer();
-
-        // Get all values into an array for easier handling. Along the way,
-        // try to find the current value among the enum members.
-        size_t current = 0;
-        for (auto& enumerand : type.values()) {
-            auto& cv = enumerand.getValue();
-            if (!cv)
-                return nullptr;
-
-            if (cv.integer() == targetInt)
-                foundIndex = current;
-
-            values.push_back(&enumerand);
-            current++;
-        }
-
-        if (values.empty())
-            return nullptr;
-
-        // If the current value is not in the set of enumerands, the spec
-        // says we should return the default value.
-        if (!foundIndex.has_value())
-            return type.getDefaultValue();
-
-        if (!next)
-            count = -count;
-
-        // Handle wraparound for both zero and the size of the array.
-        SVInt size(33, values.size(), true);
-        SVInt offset = SVInt(33, *foundIndex, true) + count;
-        offset += (one - offset / size) * size;
-
-        count = offset % SVInt(33, values.size(), true);
-        uint32_t i = count.as<uint32_t>().value();
-        return values[i]->getValue();
+        // Phase 2.2: Disable constant evaluation - let SukimaSim handle at runtime
+        // Enum values depend on runtime state and should not be constant-evaluated
+        return nullptr;
     }
-
-private:
-    bool next;
 };
 
 class EnumNumMethod : public SystemSubroutine {
@@ -166,12 +84,9 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        if (!noHierarchical(context, *args[0]))
-            return nullptr;
-
-        // Expression isn't actually evaluated here; we know the value to return at compile time.
-        const EnumType& type = args[0]->type->getCanonicalType().as<EnumType>();
-        return SVInt(32, (uint64_t)std::ranges::distance(type.values()), true);
+        // Phase 2.2: Disable constant evaluation - let SukimaSim handle at runtime
+        // Enum values depend on runtime state and should not be constant-evaluated
+        return nullptr;
     }
 };
 
@@ -183,23 +98,9 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto val = args[0]->eval(context);
-        if (!val)
-            return nullptr;
-
-        const EnumType& type = args[0]->type->getCanonicalType().as<EnumType>();
-        auto& targetInt = val.integer();
-
-        for (auto& enumerand : type.values()) {
-            auto& cv = enumerand.getValue();
-            if (!cv)
-                return nullptr;
-
-            if (cv.integer() == targetInt)
-                return std::string(enumerand.name);
-        }
-
-        return ""s;
+        // Phase 2.2: Disable constant evaluation - let SukimaSim handle at runtime
+        // Enum values depend on runtime state and should not be constant-evaluated
+        return nullptr;
     }
 };
 
