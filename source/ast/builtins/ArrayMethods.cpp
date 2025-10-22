@@ -63,50 +63,9 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo& callInfo) const final {
-        ConstantValue arr = args[0]->eval(context);
-        if (!arr)
-            return nullptr;
-
-        auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
-        if (iterExpr) {
-            SLANG_ASSERT(iterVar);
-            if (arr.empty()) {
-                auto elemType = iterExpr->type;
-                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
-            }
-
-            auto it = begin(arr);
-            auto guard = context.disableCaching();
-            auto iterVal = context.createLocal(iterVar, *it);
-            ConstantValue cv = iterExpr->eval(context);
-            if (!cv)
-                return nullptr;
-
-            SVInt result = cv.integer();
-            for (++it; it != end(arr); ++it) {
-                *iterVal = *it;
-                cv = iterExpr->eval(context);
-                if (!cv)
-                    return nullptr;
-
-                op(result, cv.integer());
-            }
-
-            return result;
-        }
-        else {
-            if (arr.empty()) {
-                auto elemType = args[0]->type->getArrayElementType();
-                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
-            }
-
-            auto it = begin(arr);
-            SVInt result = it->integer();
-            for (++it; it != end(arr); ++it)
-                op(result, it->integer());
-
-            return result;
-        }
+        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
+        // Array reduction methods compute values from runtime array state
+        return nullptr;
     }
 
 private:
@@ -115,8 +74,8 @@ private:
 
 class ArraySortMethod : public SystemSubroutine {
 public:
-    ArraySortMethod(KnownSystemName knownNameId, bool reversed) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function), reversed(reversed) {
+    ArraySortMethod(KnownSystemName knownNameId, bool /* reversed */) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function) {
         withClauseMode = WithClauseMode::Iterator;
     }
 
@@ -147,67 +106,10 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo& callInfo) const final {
-        auto lval = args[0]->evalLValue(context);
-        if (!lval)
-            return nullptr;
-
-        auto target = lval.resolve();
-        if (!target)
-            return nullptr;
-
-        auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
-        if (iterExpr) {
-            SLANG_ASSERT(iterVar);
-            auto guard = context.disableCaching();
-            auto iterVal = context.createLocal(iterVar);
-
-            auto sortTarget = [&, ie = iterExpr](auto& target) {
-                auto pred = [&, ie = ie](ConstantValue& a, ConstantValue& b) {
-                    *iterVal = a;
-                    ConstantValue cva = ie->eval(context);
-
-                    *iterVal = b;
-                    ConstantValue cvb = ie->eval(context);
-
-                    return cva < cvb;
-                };
-
-                if (reversed)
-                    std::ranges::sort(target.rbegin(), target.rend(), pred);
-                else
-                    std::ranges::sort(target, pred);
-            };
-
-            if (target->isQueue()) {
-                sortTarget(*target->queue());
-            }
-            else {
-                auto& vec = std::get<ConstantValue::Elements>(target->getVariant());
-                sortTarget(vec);
-            }
-        }
-        else {
-            auto sortTarget = [&](auto& target) {
-                if (reversed)
-                    std::ranges::sort(target.rbegin(), target.rend(), std::less<>{});
-                else
-                    std::ranges::sort(target, std::less<>{});
-            };
-
-            if (target->isQueue()) {
-                sortTarget(*target->queue());
-            }
-            else {
-                auto& vec = std::get<ConstantValue::Elements>(target->getVariant());
-                sortTarget(vec);
-            }
-        }
-
+        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
+        // Array sorting methods modify array state and should be runtime-evaluated
         return nullptr;
     }
-
-private:
-    bool reversed;
 };
 
 class ArrayReverseMethod : public SystemSubroutine {
@@ -225,19 +127,8 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        auto lval = args[0]->evalLValue(context);
-        if (!lval)
-            return nullptr;
-
-        auto target = lval.resolve();
-        if (!target)
-            return nullptr;
-
-        if (target->isQueue())
-            std::ranges::reverse(*target->queue());
-        else
-            std::ranges::reverse(std::get<ConstantValue::Elements>(target->getVariant()));
-
+        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
+        // Array methods modify array state and should be runtime-evaluated
         return nullptr;
     }
 };
@@ -358,15 +249,15 @@ public:
 
 class ArrayMinMaxMethod : public SystemSubroutine {
 public:
-    ArrayMinMaxMethod(KnownSystemName knownNameId, bool isMin) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function), isMin(isMin) {
+    ArrayMinMaxMethod(KnownSystemName knownNameId, bool /* isMin */) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function) {
         withClauseMode = WithClauseMode::Iterator;
     }
 
     static bool isLRMStrict() {
-        // Phase 217: Always use strict LRM mode for IEEE 1800-2023 compliance
-        // Array min/max methods should return a queue as per Section 7.12
-        return true;  // Always return queue for LRM compliance
+        // Phase 2.3: Return single element for compatibility with SukimaSim runtime
+        // SukimaSim returns a single min/max value, not a queue
+        return false;
         // const char* e = std::getenv("SUKIMASIM_STRICT_LRM");
         // return e && std::string_view(e) == "1";
     }
@@ -416,92 +307,10 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo& callInfo) const final {
-        ConstantValue arr = args[0]->eval(context);
-        if (!arr)
-            return nullptr;
-
-        // Phase 176: Return default value for empty arrays
-        if (arr.empty()) {
-            auto elemType = args[0]->type->getArrayElementType();
-            if (elemType->isIntegral())
-                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
-            else if (elemType->isFloating())
-                return real_t(0.0);
-            else if (elemType->isString())
-                return std::string("");
-            else
-                return nullptr;
-        }
-
-        auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
-        // Strict LRM: return queue of all min/max; Non-strict: single element / value
-        auto guard = context.disableCaching();
-        if (isLRMStrict()) {
-            SVQueue results;
-            ConstantValue bestMetric;
-            bool haveBest = false;
-            if (iterExpr) {
-                SLANG_ASSERT(iterVar);
-                auto iterVal = context.createLocal(iterVar);
-                for (auto it = begin(arr); it != end(arr); ++it) {
-                    *iterVal = *it;
-                    ConstantValue cv = iterExpr->eval(context);
-                    if (!cv)
-                        return nullptr;
-                    if (!haveBest || (isMin ? (cv < bestMetric) : (bestMetric < cv))) {
-                        haveBest = true;
-                        bestMetric = cv;
-                        results.clear();
-                        results.emplace_back(*it);
-                    }
-                    else if (!(bestMetric < cv) && !(cv < bestMetric)) {
-                        results.emplace_back(*it);
-                    }
-                }
-            } else {
-                for (auto it = begin(arr); it != end(arr); ++it) {
-                    if (!haveBest || (isMin ? (*it < bestMetric) : (bestMetric < *it))) {
-                        haveBest = true;
-                        bestMetric = *it;
-                        results.clear();
-                        results.emplace_back(*it);
-                    }
-                    else if (!(bestMetric < *it) && !(*it < bestMetric)) {
-                        results.emplace_back(*it);
-                    }
-                }
-            }
-            return results;
-        } else {
-            if (iterExpr) {
-                SLANG_ASSERT(iterVar);
-                auto it = begin(arr);
-                auto iterVal = context.createLocal(iterVar, *it);
-                ConstantValue elem = *it;
-                ConstantValue val = iterExpr->eval(context);
-                for (++it; it != end(arr); ++it) {
-                    *iterVal = *it;
-                    auto cv = iterExpr->eval(context);
-                    if (isMin ? (cv < val) : (val < cv)) {
-                        val = cv;
-                        elem = *it;
-                    }
-                }
-                return val;
-            } else {
-                auto it = begin(arr);
-                ConstantValue elem = *it;
-                for (++it; it != end(arr); ++it) {
-                    if (isMin ? (*it < elem) : (elem < *it))
-                        elem = *it;
-                }
-                return elem;
-            }
-        }
+        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
+        // Array min/max methods find extrema from runtime array state
+        return nullptr;
     }
-
-private:
-    bool isMin;
 };
 
 class ArrayMinMaxIndexMethod : public SystemSubroutine {
