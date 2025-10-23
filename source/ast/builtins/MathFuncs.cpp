@@ -319,6 +319,7 @@ void Builtins::registerMathFuncs() {
     REGISTER(KnownSystemName::Sqrt, std::sqrt);
     REGISTER(KnownSystemName::Floor, std::floor);
     REGISTER(KnownSystemName::Ceil, std::ceil);
+    REGISTER(KnownSystemName::Round, std::round);
     REGISTER(KnownSystemName::Sin, std::sin);
     REGISTER(KnownSystemName::Cos, std::cos);
     REGISTER(KnownSystemName::Tan, std::tan);
