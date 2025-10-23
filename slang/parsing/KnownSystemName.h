@@ -56,6 +56,7 @@ enum class SLANG_EXPORT KnownSystemName {
     Sqrt,
     Floor,
     Ceil,
+    Round,
     Sin,
     Cos,
     Tan,

@@ -42,6 +42,7 @@ $exp Exp
 $sqrt Sqrt
 $floor Floor
 $ceil Ceil
+$round Round
 $sin Sin
 $cos Cos
 $tan Tan
