@@ -1495,6 +1495,7 @@ token semi
 DPIExport base=Member
 token keyword
 token specString
+token property
 token c_identifier
 token equals
 token functionOrTask
