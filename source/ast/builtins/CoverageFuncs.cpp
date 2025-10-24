@@ -88,37 +88,80 @@ private:
     size_t requiredArgs;
 };
 
+// SimpleSystemTask implementation for void-returning coverage tasks
+class SimpleSystemTask : public SystemSubroutine {
+public:
+    SimpleSystemTask(KnownSystemName knownNameId, const Type& returnType, size_t requiredArgs = 0,
+                     const std::vector<const Type*>& argTypes = {}) :
+        SystemSubroutine(knownNameId, SubroutineKind::Task), argTypes(argTypes),
+        returnType(&returnType), requiredArgs(requiredArgs) {
+        SLANG_ASSERT(requiredArgs <= argTypes.size());
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, requiredArgs, argTypes.size()))
+            return comp.getErrorType();
+        return *returnType;
+    }
+
+    const Expression& bindArgument(size_t argIndex, const ASTContext& context,
+                                   const ExpressionSyntax& syntax, const Args& args) const final {
+        if (argIndex >= argTypes.size())
+            return SystemSubroutine::bindArgument(argIndex, context, syntax, args);
+        return Expression::bindArgument(*argTypes[argIndex], ArgumentDirection::In, {}, syntax,
+                                        context);
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+
+private:
+    std::vector<const Type*> argTypes;
+    const Type* returnType;
+    size_t requiredArgs;
+};
+
 void Builtins::registerCoverageFuncs() {
     using parsing::KnownSystemName;
 
 #define REGISTER(name, ...) addSystemSubroutine(std::make_shared<name>(__VA_ARGS__))
-    // IEEE 1800-2023 Section 20.11: Coverage control functions
-    // $coverage_control(control_constant, coverage_type, scope_def, modules_or_instance)
-    // All 4 arguments are required per LRM
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageControl, intType, 4,
-             std::vector<const Type*>{&intType, &intType, &intType, &stringType});
-    
-    // $coverage_get_max(coverage_type, scope_def, modules_or_instance)
-    // All 3 arguments are required per LRM
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageGetMax, intType, 3,
-             std::vector<const Type*>{&intType, &intType, &stringType});
-    
-    // $coverage_get(coverage_type, scope_def, modules_or_instance)
-    // All 3 arguments are required per LRM
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageGet, realType, 3,
+    // IEEE 1800-2023 Section 19.14: Coverage system functions and tasks
+
+    // $coverage_control - System task (void return) per LRM 19.14.1
+    // All 4 int arguments are required
+    REGISTER(SimpleSystemTask, KnownSystemName::CoverageControl, voidType, 4,
+             std::vector<const Type*>{&intType, &intType, &intType, &intType});
+
+    // $coverage_get - System function (real return) per LRM 19.14.2
+    // Arguments are optional - 0 to 3 arguments
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageGet, realType, 0,
              std::vector<const Type*>{&intType, &intType, &stringType});
 
-    // $coverage_merge(coverage_type, filename) - both arguments are required
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 2,
-             std::vector<const Type*>{&intType, &stringType});
-    
-    // $coverage_save(coverage_type, filename) - both arguments are required
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 2,
-             std::vector<const Type*>{&intType, &stringType});
+    // $coverage_get_max - System function (real return) per LRM 19.14.3
+    // Arguments are optional - 0 to 3 arguments
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageGetMax, realType, 0,
+             std::vector<const Type*>{&stringType, &stringType, &stringType});
+
+    // $coverage_save - System task (void return) per LRM 19.14.4
+    // First argument (filename) is required, second (incremental) is optional
+    REGISTER(SimpleSystemTask, KnownSystemName::CoverageSave, voidType, 1,
+             std::vector<const Type*>{&stringType, &intType});
+
+    // $coverage_merge - System task (void return) per LRM 19.14.5
+    // All 3 string arguments are required
+    REGISTER(SimpleSystemTask, KnownSystemName::CoverageMerge, voidType, 3,
+             std::vector<const Type*>{&stringType, &stringType, &stringType});
+
+    // Legacy coverage functions (kept for backward compatibility)
     REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType);
-    REGISTER(NonConstantFunction, KnownSystemName::SetCoverageDbName, voidType, 1,
+    REGISTER(SimpleSystemTask, KnownSystemName::SetCoverageDbName, voidType, 1,
              std::vector<const Type*>{&stringType});
-    REGISTER(NonConstantFunction, KnownSystemName::LoadCoverageDb, voidType, 1,
+    REGISTER(SimpleSystemTask, KnownSystemName::LoadCoverageDb, voidType, 1,
              std::vector<const Type*>{&stringType});
 #undef REGISTER
 }
