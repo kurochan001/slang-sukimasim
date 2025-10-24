@@ -1365,8 +1365,9 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
         if (!isIfaceClass)
             funcOptions = FunctionOptions::AllowOverrideSpecifiers;
 
-        // Pure or extern functions don't have bodies.
-        if (isPureOrExtern) {
+        // IEEE 1800-2023 Ch.8.26: Pure, extern, or interface class virtual methods can be prototypes (no body).
+        // Interface class virtual methods can have either prototype (;) or implementation (body).
+        if (isPureOrExtern || (isIfaceClass && isVirtual)) {
             auto& proto = parseFunctionPrototype(SyntaxKind::ClassDeclaration,
                                                  funcOptions | FunctionOptions::IsPrototype);
             checkProto(proto, false);
