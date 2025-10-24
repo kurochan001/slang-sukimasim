@@ -2482,6 +2482,10 @@ DPIExportSyntax& Parser::parseDPIExport(AttrList attributes) {
     Token keyword = consume();
     Token specString = parseDPISpecString();
 
+    Token property;
+    if (peek(TokenKind::ContextKeyword) || peek(TokenKind::PureKeyword))
+        property = consume();
+
     Token c_identifier, equals;
     if (peek(TokenKind::Identifier)) {
         c_identifier = consume();
@@ -2496,8 +2500,8 @@ DPIExportSyntax& Parser::parseDPIExport(AttrList attributes) {
 
     Token name = expect(TokenKind::Identifier);
     Token semi = expect(TokenKind::Semicolon);
-    return factory.dPIExport(attributes, keyword, specString, c_identifier, equals, functionOrTask,
-                             name, semi);
+    return factory.dPIExport(attributes, keyword, specString, property, c_identifier, equals,
+                             functionOrTask, name, semi);
 }
 
 ElabSystemTaskSyntax* Parser::parseElabSystemTask(AttrList attributes) {
