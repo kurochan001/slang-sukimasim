@@ -1155,7 +1155,13 @@ void Builtins::registerSystemTasks() {
     addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NcGetHostname));
     // $socket_open returns a socket handle (integer), so it's a function
     addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SocketOpen));
-    
+
+    // IEEE 1800-2023 Section 31: Timing Check Tasks
+    // These can be used outside of specify blocks
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingSetup));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingHold));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingSetuphold));
+
     REGISTER(DisplayTask, KnownSystemName::Write, LiteralBase::Decimal);
     REGISTER(DisplayTask, KnownSystemName::WriteB, LiteralBase::Binary);
     REGISTER(DisplayTask, KnownSystemName::WriteO, LiteralBase::Octal);
