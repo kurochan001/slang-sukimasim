@@ -1294,7 +1294,13 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
     auto qualifiers = qualifierBuffer.copy(alloc);
     checkClassQualifiers(qualifiers, peek(TokenKind::ConstraintKeyword));
 
-    if (isVariableDeclaration()) {
+    // IEEE 1800-2023 Ch.8.26: In interface classes, 'property' declares a class property (variable), not an assertion property
+    bool isInterfaceClassProperty = isIfaceClass && peek(TokenKind::PropertyKeyword);
+
+    if (isVariableDeclaration() || isInterfaceClassProperty) {
+        // For interface class property keyword, consume it
+        if (isInterfaceClassProperty)
+            consume();
         // Check that all qualifiers are allowed specifically for properties.
         Token lastLifetime;
         for (auto qual : qualifiers) {
@@ -1329,7 +1335,10 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
                 }
             }
 
-            errorIfIface(decl);
+            // IEEE 1800-2023 Ch.8.26: Interface classes can have properties (class properties declared with 'property' keyword)
+            // Only error if this is NOT an interface class property
+            if (!isInterfaceClassProperty)
+                errorIfIface(decl);
         }
         else if (decl.kind == SyntaxKind::PackageImportDeclaration ||
                  decl.kind == SyntaxKind::NetTypeDeclaration ||
@@ -1371,11 +1380,14 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
         // Check that qualifiers are allowed specifically for methods.
         bool isPure = false;
         bool isStatic = false;
+        bool isVirtual = false;
         for (auto qual : qualifiers) {
             if (qual.kind == TokenKind::PureKeyword)
                 isPure = true;
             else if (qual.kind == TokenKind::StaticKeyword)
                 isStatic = true;
+            else if (qual.kind == TokenKind::VirtualKeyword)
+                isVirtual = true;
 
             if (!isMethodQualifier(qual.kind)) {
                 auto& diag = addDiag(diag::InvalidMethodQualifier, qual.range());
@@ -1391,7 +1403,9 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
             }
         }
 
-        if (isIfaceClass && !isPure)
+        // IEEE 1800-2023 Ch.8.26: Interface classes can have pure virtual, virtual (with body), or extern methods
+        // Only error if method is neither pure nor virtual
+        if (isIfaceClass && !isPure && !isVirtual)
             addDiag(diag::IfaceMethodPure, peek().location());
 
         auto checkProto = [&](auto& proto, bool checkLifetime) {
