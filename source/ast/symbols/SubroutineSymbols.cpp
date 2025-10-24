@@ -1154,22 +1154,32 @@ const SubroutineSymbol* MethodPrototypeSymbol::getSubroutine() const {
         *used = true;
     }
 
-    if (flags.has(MethodFlags::Pure)) {
-        // A pure method should not have a body defined.
+    // IEEE 1800-2023 Ch.8.26: Interface class virtual methods may have no body
+    if (flags.has(MethodFlags::Pure | MethodFlags::Virtual)) {
+        // A pure or virtual method may not have a body defined.
         if (syntax) {
-            auto& diag = outerScope.addDiag(diag::BodyForPure,
-                                            syntax->prototype->name->sourceRange());
-            diag.addNote(diag::NoteDeclarationHere, location);
+            // Virtual methods with body are allowed, but pure methods are not
+            if (flags.has(MethodFlags::Pure)) {
+                auto& diag = outerScope.addDiag(diag::BodyForPure,
+                                                syntax->prototype->name->sourceRange());
+                diag.addNote(diag::NoteDeclarationHere, location);
+            }
+            // For virtual with body, continue to create subroutine below
         }
         else {
             // Create a stub subroutine that we can return for callers to reference.
             subroutine = &SubroutineSymbol::createFromPrototype(comp, *this, nearScope);
+            return *subroutine;
         }
-        return *subroutine;
     }
 
     // Otherwise, there must be a body for any declared prototype.
     if (!syntax) {
+        // Skip error for virtual methods without body (allowed in interface classes)
+        if (flags.has(MethodFlags::Virtual)) {
+            subroutine = &SubroutineSymbol::createFromPrototype(comp, *this, nearScope);
+            return *subroutine;
+        }
         outerScope.addDiag(diag::NoMemberImplFound, location) << name;
         return nullptr;
     }
