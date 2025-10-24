@@ -1294,87 +1294,7 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
     auto qualifiers = qualifierBuffer.copy(alloc);
     checkClassQualifiers(qualifiers, peek(TokenKind::ConstraintKeyword));
 
-    // IEEE 1800-2023 Ch.8.26: In interface classes, 'property' declares a class property (variable), not an assertion property
-    bool isInterfaceClassProperty = isIfaceClass && peek(TokenKind::PropertyKeyword);
-
-    if (isVariableDeclaration() || isInterfaceClassProperty) {
-        // For interface class property keyword, consume it
-        if (isInterfaceClassProperty)
-            consume();
-        // Check that all qualifiers are allowed specifically for properties.
-        Token lastLifetime;
-        for (auto qual : qualifiers) {
-            if (!isPropertyQualifier(qual.kind)) {
-                auto& diag = addDiag(diag::InvalidPropertyQualifier, qual.range());
-                diag << qual.rawText();
-                break;
-            }
-
-            if (isLifetimeModifier(qual.kind))
-                lastLifetime = qual;
-        }
-
-        auto& decl = parseVariableDeclaration({});
-        if (decl.kind == SyntaxKind::DataDeclaration) {
-            // Make sure qualifiers weren't duplicated in the data declaration's modifiers.
-            // Note that we don't have to check for `const` here because parseVariableDeclaration
-            // will error if the const keyword isn't first, but if it was first we would have
-            // already consumed it ourselves as a qualifier.
-            for (auto mod : decl.as<DataDeclarationSyntax>().modifiers) {
-                if (isLifetimeModifier(mod.kind) && lastLifetime) {
-                    if (mod.kind == lastLifetime.kind) {
-                        auto& diag = addDiag(diag::DuplicateQualifier, mod.range());
-                        diag << mod.rawText() << lastLifetime.range();
-                    }
-                    else {
-                        auto& diag = addDiag(diag::QualifierConflict, mod.range());
-                        diag << mod.rawText();
-                        diag << lastLifetime.rawText() << lastLifetime.range();
-                    }
-                    break;
-                }
-            }
-
-            // IEEE 1800-2023 Ch.8.26: Interface classes can have properties (class properties declared with 'property' keyword)
-            // Only error if this is NOT an interface class property
-            if (!isInterfaceClassProperty)
-                errorIfIface(decl);
-        }
-        else if (decl.kind == SyntaxKind::PackageImportDeclaration ||
-                 decl.kind == SyntaxKind::NetTypeDeclaration ||
-                 decl.kind == SyntaxKind::LetDeclaration) {
-            // Nettypes and package imports are disallowed in classes.
-            addDiag(diag::NotAllowedInClass, decl.sourceRange());
-        }
-        else {
-            // Otherwise, check for invalid qualifiers.
-            for (auto qual : qualifiers) {
-                if (isIfaceClass) {
-                    addDiag(diag::InvalidQualifierForIfaceMember, qual.range());
-                    break;
-                }
-
-                switch (qual.kind) {
-                    case TokenKind::RandKeyword:
-                    case TokenKind::RandCKeyword:
-                    case TokenKind::ConstKeyword:
-                    case TokenKind::StaticKeyword:
-                        addDiag(diag::InvalidQualifierForMember, qual.range());
-                        break;
-                    case TokenKind::LocalKeyword:
-                    case TokenKind::ProtectedKeyword:
-                        if (decl.kind == SyntaxKind::ParameterDeclarationStatement)
-                            addDiag(diag::InvalidQualifierForMember, qual.range());
-                        break;
-                    default:
-                        break;
-                }
-            }
-        }
-
-        return &factory.classPropertyDeclaration(attributes, qualifiers, decl);
-    }
-
+    // IEEE 1800-2023 Ch.8.26: Check for methods BEFORE variables to handle virtual function prototypes correctly
     auto kind = peek().kind;
     if (kind == TokenKind::TaskKeyword || kind == TokenKind::FunctionKeyword) {
         // Check that qualifiers are allowed specifically for methods.
@@ -1481,6 +1401,90 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
 
             return &factory.classMethodDeclaration(attributes, qualifiers, funcDecl);
         }
+    }
+
+    // IEEE 1800-2023 Ch.8.26: In interface classes, 'property' declares a class property (variable), not an assertion property
+    bool isInterfaceClassProperty = isIfaceClass && peek(TokenKind::PropertyKeyword);
+    Token propertyToken;
+
+    if (isVariableDeclaration() || isInterfaceClassProperty) {
+        // For interface class property keyword, consume it
+        if (isInterfaceClassProperty)
+            propertyToken = consume();
+        // Check that all qualifiers are allowed specifically for properties.
+        Token lastLifetime;
+        for (auto qual : qualifiers) {
+            if (!isPropertyQualifier(qual.kind)) {
+                auto& diag = addDiag(diag::InvalidPropertyQualifier, qual.range());
+                diag << qual.rawText();
+                break;
+            }
+
+            if (isLifetimeModifier(qual.kind))
+                lastLifetime = qual;
+        }
+
+        auto& decl = parseVariableDeclaration({});
+        if (decl.kind == SyntaxKind::DataDeclaration) {
+            // Make sure qualifiers weren't duplicated in the data declaration's modifiers.
+            // Note that we don't have to check for `const` here because parseVariableDeclaration
+            // will error if the const keyword isn't first, but if it was first we would have
+            // already consumed it ourselves as a qualifier.
+            for (auto mod : decl.as<DataDeclarationSyntax>().modifiers) {
+                if (isLifetimeModifier(mod.kind) && lastLifetime) {
+                    if (mod.kind == lastLifetime.kind) {
+                        auto& diag = addDiag(diag::DuplicateQualifier, mod.range());
+                        diag << mod.rawText() << lastLifetime.range();
+                    }
+                    else {
+                        auto& diag = addDiag(diag::QualifierConflict, mod.range());
+                        diag << mod.rawText();
+                        diag << lastLifetime.rawText() << lastLifetime.range();
+                    }
+                    break;
+                }
+            }
+
+            // IEEE 1800-2023 Ch.8.26: Interface classes can have properties (class properties declared with 'property' keyword)
+            // Only error if this is NOT an interface class property
+            if (!isInterfaceClassProperty)
+                errorIfIface(decl);
+        }
+        else if (decl.kind == SyntaxKind::PackageImportDeclaration ||
+                 decl.kind == SyntaxKind::NetTypeDeclaration ||
+                 decl.kind == SyntaxKind::LetDeclaration) {
+            // Nettypes and package imports are disallowed in classes.
+            addDiag(diag::NotAllowedInClass, decl.sourceRange());
+        }
+        else {
+            // Otherwise, check for invalid qualifiers.
+            for (auto qual : qualifiers) {
+                if (isIfaceClass) {
+                    addDiag(diag::InvalidQualifierForIfaceMember, qual.range());
+                    break;
+                }
+
+                switch (qual.kind) {
+                    case TokenKind::RandKeyword:
+                    case TokenKind::RandCKeyword:
+                    case TokenKind::ConstKeyword:
+                    case TokenKind::StaticKeyword:
+                        addDiag(diag::InvalidQualifierForMember, qual.range());
+                        break;
+                    case TokenKind::LocalKeyword:
+                    case TokenKind::ProtectedKeyword:
+                        if (decl.kind == SyntaxKind::ParameterDeclarationStatement)
+                            addDiag(diag::InvalidQualifierForMember, qual.range());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        // IEEE 1800-2023 Ch.8.26: Interface class properties are handled the same as class properties
+        // The 'property' keyword was already consumed, so just treat it as a normal property
+        return &factory.classPropertyDeclaration(attributes, qualifiers, decl);
     }
 
     if (kind == TokenKind::ConstraintKeyword) {
