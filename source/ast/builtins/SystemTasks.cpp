@@ -1158,9 +1158,10 @@ void Builtins::registerSystemTasks() {
 
     // IEEE 1800-2023 Section 31: Timing Check Tasks
     // These can be used outside of specify blocks
-    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingSetup));
-    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingHold));
-    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingSetuphold));
+    // TODO: Uncomment when KnownSystemName enum includes these entries
+    // addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingSetup));
+    // addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingHold));
+    // addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::TimingSetuphold));
 
     REGISTER(DisplayTask, KnownSystemName::Write, LiteralBase::Decimal);
     REGISTER(DisplayTask, KnownSystemName::WriteB, LiteralBase::Binary);
