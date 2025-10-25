@@ -391,3 +391,17 @@ $sukimasim_tlm_bridge SukimaSimTlmBridge
 $sukimasim_formal_link SukimaSimFormalLink
 $nc_get_hostname NcGetHostname
 $socket_open SocketOpen
+
+# IEEE 1800-2023 Section 31: Timing Checks
+$setup Setup
+$hold Hold
+$setuphold SetupHold
+$recovery Recovery
+$removal Removal
+$recrem RecRem
+$skew Skew
+$timeskew TimeSkew
+$fullskew FullSkew
+$period Period
+$width Width
+$nochange NoChange
