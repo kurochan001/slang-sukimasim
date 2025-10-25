@@ -149,13 +149,14 @@ Statement& ExpressionStatement::fromSyntax(Compilation& compilation,
     if (expr.bad())
         return badStmt(compilation, result);
 
-    if (expr.kind != ExpressionKind::Call ||
-        (expr.as<CallExpression>().getSubroutineKind() == SubroutineKind::Task &&
-         expr.type->isVoid())) {
+    // Phase 61 Fix: IEEE 1800-2023 allows void'(...) for any function call
+    // Only error if the expression is not a Call at all
+    if (expr.kind != ExpressionKind::Call) {
         context.addDiag(diag::VoidCastFuncCall, expr.sourceRange);
         return badStmt(compilation, result);
     }
 
+    // Warn if casting a void-returning function/task to void (pointless but not an error)
     if (expr.type->isVoid()) {
         context.addDiag(diag::PointlessVoidCast, expr.sourceRange)
             << expr.as<CallExpression>().getSubroutineName();
