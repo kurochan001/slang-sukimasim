@@ -255,11 +255,9 @@ public:
     }
 
     static bool isLRMStrict() {
-        // Phase 2.3: Return single element for compatibility with SukimaSim runtime
-        // SukimaSim returns a single min/max value, not a queue
-        return false;
-        // const char* e = std::getenv("SUKIMASIM_STRICT_LRM");
-        // return e && std::string_view(e) == "1";
+        // IEEE 1800-2023 Ch.7.12.1: min()/max() SHALL return a queue
+        // Phase 61 Fix: Always return queue for LRM compliance
+        return true;
     }
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
