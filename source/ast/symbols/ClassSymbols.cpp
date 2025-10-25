@@ -331,7 +331,6 @@ void ClassType::handleExtends(const ExtendsClauseSyntax& extendsClause, const AS
 
     // Inherit all base class members that don't conflict with our declared symbols.
     auto& scopeNameMap = getNameMap();
-    bool pureVirtualError = false;
 
     for (auto& member : baseType->members()) {
         if (member.name.empty())
@@ -359,37 +358,28 @@ void ClassType::handleExtends(const ExtendsClauseSyntax& extendsClause, const AS
         if (member.kind == SymbolKind::TransparentMember)
             toWrap = &member.as<TransparentMemberSymbol>().wrapped;
 
-        // If this is a pure virtual method being inherited and we aren't ourselves
-        // an abstract class, issue an error.
-        if (!isAbstract && toWrap->kind == SymbolKind::MethodPrototype) {
+        // IEEE 1800-2023 Section 8.20: If this is a pure virtual method being inherited
+        // and we don't override it, this class becomes implicitly abstract.
+        // We don't issue an error at inheritance time - only at instantiation time.
+        if (toWrap->kind == SymbolKind::MethodPrototype) {
             auto& sub = toWrap->as<MethodPrototypeSymbol>();
             if (sub.flags.has(MethodFlags::Pure)) {
-                if (!pureVirtualError) {
-                    auto& diag = context.addDiag(diag::InheritFromAbstract,
-                                                 extendsClause.sourceRange());
-                    diag << name;
-                    diag << baseType->name;
-                    diag << sub.name;
-                    diag.addNote(diag::NoteDeclarationHere, sub.location);
-                    pureVirtualError = true;
+                // This class has an unimplemented pure virtual method, so it must be abstract
+                if (!isAbstract) {
+                    isAbstract = true;  // Mark as implicitly abstract
                 }
-                continue;
+                // Continue to inherit the pure virtual method (don't skip it)
             }
         }
 
-        if (!isAbstract && toWrap->kind == SymbolKind::ConstraintBlock) {
+        if (toWrap->kind == SymbolKind::ConstraintBlock) {
             auto& cb = toWrap->as<ConstraintBlockSymbol>();
             if (cb.flags.has(ConstraintBlockFlags::Pure)) {
-                if (!pureVirtualError) {
-                    auto& diag = context.addDiag(diag::InheritFromAbstractConstraint,
-                                                 extendsClause.sourceRange());
-                    diag << name;
-                    diag << baseType->name;
-                    diag << cb.name;
-                    diag.addNote(diag::NoteDeclarationHere, cb.location);
-                    pureVirtualError = true;
+                // This class has an unimplemented pure constraint, so it must be abstract
+                if (!isAbstract) {
+                    isAbstract = true;  // Mark as implicitly abstract
                 }
-                continue;
+                // Continue to inherit the pure constraint (don't skip it)
             }
         }
 
