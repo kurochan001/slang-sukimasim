@@ -57,8 +57,9 @@ public:
     const VariableSymbol* thisVar = nullptr;
 
     /// Set to true if the class is an abstract class (declared with the
-    /// "virtual" keyword).
-    bool isAbstract = false;
+    /// "virtual" keyword, or implicitly abstract due to unimplemented
+    /// pure virtual methods - IEEE 1800-2023 Section 8.20).
+    mutable bool isAbstract = false;
 
     /// Set to true if the class is an interface class.
     bool isInterface = false;
