@@ -686,6 +686,15 @@ const Type& PackedArrayType::fromDim(const Scope& scope, const Type& elementType
         return elementType;
 
     auto& comp = scope.getCompilation();
+
+    // P1.3: Check for invalid packed array range with negative indices
+    // IEEE 1800-2017 §7.4.1: packed array ranges must have non-negative bounds
+    if (dim.left < 0 || dim.right < 0) {
+        scope.addDiag(diag::InvalidPackedRange, sourceRange.get())
+            << dim.left << dim.right;
+        return comp.getErrorType();
+    }
+
     auto width = checkedMulU32(elementType.getBitWidth(), dim.width());
     if (!width || width > (uint32_t)SVInt::MAX_BITS) {
         uint64_t fullWidth = uint64_t(elementType.getBitWidth()) * dim.width();

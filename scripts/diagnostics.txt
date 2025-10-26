@@ -402,6 +402,7 @@ error InheritFromAbstract "'{}' cannot inherit from virtual class '{}' without p
 error InheritFromAbstractConstraint "'{}' cannot inherit from virtual class '{}' without providing an implementation for pure constraint '{}'"
 error InvalidPortType "{} is not a valid type for a port"
 error InvalidPortSubType "{} is not a valid type for a port because it contains type {}"
+error InvalidPackedRange "packed array range [{}:{}] is invalid; msb must be greater than or equal to lsb (IEEE 1800-2017 §7.4.1)"
 error InvalidNetType "{} is not a valid type for a net; only 4-state integral types and unpacked structs/unions and arrays of such types are allowed"
 error InvalidUserDefinedNetType "{} is not a valid type for a user-defined nettype; only integral types, floating types, and unpacked structs, unions, and arrays of such types are allowed"
 error ImplicitConnNetInconsistent "net type '{}' of implicit named connection is inconsistent with net type '{}' of port"
