@@ -654,15 +654,18 @@ FunctionPortBaseSyntax& Parser::parseFunctionPort(bitmask<FunctionOptions> optio
 
     // The data type is fully optional; if we see an identifier here we need
     // to disambiguate. Otherwise see if we have a port name or nothing at all.
+    // For DPI-C prototypes (IsPrototype), always parse data type to support
+    // argument declarations without names (e.g., "output int" in DPI-C imports).
     DataTypeSyntax* dataType = nullptr;
     if (!peek(TokenKind::Identifier))
         dataType = &parseDataType(TypeOptions::AllowImplicit);
-    else if (!isPlainPortName())
+    else if (!isPlainPortName() || options.has(FunctionOptions::IsPrototype))
         dataType = &parseDataType();
 
     DeclaratorSyntax* decl;
+    // For DPI-C prototypes, also parse declarator if array dimensions are present (e.g., "output int[]")
     if (!options.has(FunctionOptions::IsPrototype) || peek(TokenKind::Identifier) ||
-        peek(TokenKind::Equals)) {
+        peek(TokenKind::Equals) || peek(TokenKind::OpenBracket)) {
         decl = &parseDeclarator();
     }
     else {
