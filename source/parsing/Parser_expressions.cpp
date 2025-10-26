@@ -5,6 +5,7 @@
 // SPDX-FileCopyrightText: Michael Popoloski
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
+#include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/ParserDiags.h"
 #include "slang/parsing/Lexer.h"
 #include "slang/parsing/Parser.h"
@@ -167,6 +168,33 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
             auto opToken = consume();
             auto attributes = parseAttributes();
             auto& rightOperand = parseSubExpression(options, newPrecedence);
+
+            // P1.2: Check for chained assignment (e.g., a <= b <= c)
+            // IEEE 1800-2017 §10.4: assignments cannot be chained
+            if (isAssignmentOperator(opKind)) {
+                if (rightOperand.kind == SyntaxKind::AssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::NonblockingAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::AddAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::SubtractAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::MultiplyAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::DivideAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::ModAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::AndAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::OrAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::XorAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::LogicalLeftShiftAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::LogicalRightShiftAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::ArithmeticLeftShiftAssignmentExpression ||
+                    rightOperand.kind == SyntaxKind::ArithmeticRightShiftAssignmentExpression) {
+                    addDiag(diag::ChainedAssignment, rightOperand.sourceRange());
+                }
+                // Special case: nonblocking assignment with <= comparison (e.g., b <= a <= c)
+                else if (opKind == SyntaxKind::NonblockingAssignmentExpression &&
+                         rightOperand.kind == SyntaxKind::LessThanEqualExpression) {
+                    addDiag(diag::ChainedAssignment, rightOperand.sourceRange());
+                }
+            }
+
             left = &factory.binaryExpression(opKind, *left, opToken, attributes, rightOperand);
 
             if (isAssignmentOperator(opKind) || options.has(ExpressionOptions::DisallowAttrs))
