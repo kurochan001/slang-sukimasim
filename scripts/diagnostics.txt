@@ -1102,7 +1102,7 @@ warning task-ignored ConstSysTaskIgnored "system task '{}' is ignored in constan
 warning constant-conversion ConstantConversion "implicit conversion from {} to {} changes value from {} to {}"
 
 subsystem Compilation
-fatal MaxInstanceDepthExceeded "{} instantiation exceeded maximum depth of {}"
+fatal MaxInstanceDepthExceeded "{} instantiation exceeded maximum depth of {}; this usually indicates a circular dependency (IEEE 1800-2017 §25.3)"
 fatal InfinitelyRecursiveHierarchy "infinitely recursive instantiation of {}"
 error InvalidTopModule "'{}' is not a valid top-level module"
 error TopModuleIfacePort "top-level module '{}' has unconnected interface port '{}'"
