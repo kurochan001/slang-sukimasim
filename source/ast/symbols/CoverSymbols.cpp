@@ -578,7 +578,8 @@ static const Expression& bindCovergroupExpr(const ExpressionSyntax& syntax,
     else
         expr = &Expression::bind(syntax, context, extraFlags);
 
-    context.eval(*expr, EvalFlags::CovergroupExpr);
+    // NOTE: CovergroupExpr flag has been removed from EvalFlags
+    context.eval(*expr, EvalFlags::None);
     return *expr;
 }
 
@@ -656,7 +657,8 @@ void CoverageBinSymbol::resolve() const {
                 for (auto& opt : coverpoint.options) {
                     if (opt.getName() == "auto_bin_max") {
                         auto& optExpr = opt.getExpression();
-                        EvalContext evalCtx(context, EvalFlags::CovergroupExpr);
+                        // NOTE: CovergroupExpr flag has been removed from EvalFlags
+                        EvalContext evalCtx(context, EvalFlags::None);
                         auto cv = optExpr.eval(evalCtx);
                         if (cv.isInteger()) {
                             autoBinMax = cv.integer().as<int32_t>().value_or(0);
@@ -677,8 +679,9 @@ void CoverageBinSymbol::resolve() const {
                 // If this is a range expression like [0:15], split it
                 if (rangeExpr.kind == ExpressionKind::RangeSelect) {
                     auto& rs = rangeExpr.as<RangeSelectExpression>();
-                    
-                    EvalContext evalCtx(context, EvalFlags::CovergroupExpr);
+
+                    // NOTE: CovergroupExpr flag has been removed from EvalFlags
+                    EvalContext evalCtx(context, EvalFlags::None);
                     auto leftVal = rs.left().eval(evalCtx);
                     auto rightVal = rs.right().eval(evalCtx);
                     
