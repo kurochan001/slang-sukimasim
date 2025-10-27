@@ -1059,7 +1059,7 @@ std::pair<Trivia, Trivia> Preprocessor::handlePragmaDirective(Token directive) {
             wantComma = true;
 
             if (!succeeded) {
-                while (peekSameLine())
+                while (peekSameLine() && peek().kind != TokenKind::EndOfFile)
                     skipped.push_back(consume());
 
                 ok = false;
