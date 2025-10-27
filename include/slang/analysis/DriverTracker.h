@@ -32,13 +32,22 @@ class AnalyzedProcedure;
 
 /// State tracked per canonical instance.
 struct SLANG_EXPORT InstanceDriverState {
-    struct IfacePortDriver {
-        not_null<const ast::HierarchicalReference*> ref;
+    /// Information about a driver that is applied hierarchically through an
+    /// interface or ref port and so needs to be reapplied for non-canonical instances.
+    struct HierPortDriver {
+        /// The driver that was applied to the interface or ref port.
         not_null<const ValueDriver*> driver;
+
+        /// The original target of the driver.
+        not_null<const ast::ValueSymbol*> target;
+
+        /// If this was an interface port driver, the hierarchical reference
+        /// that describes how the driver was applied. Otherwise nullptr.
+        const ast::HierarchicalReference* ref = nullptr;
     };
 
-    /// Drivers that are applied through interface ports.
-    std::vector<IfacePortDriver> ifacePortDrivers;
+    /// Drivers that are applied through hierarchical ports.
+    std::vector<HierPortDriver> hierPortDrivers;
 
     /// A list of instances that refer to the canonical one.
     std::vector<const ast::InstanceSymbol*> nonCanonicalInstances;
@@ -77,9 +86,9 @@ public:
     void noteNonCanonicalInstance(AnalysisContext& context, DriverAlloc& driverAlloc,
                                   const ast::InstanceSymbol& instance);
 
-    /// Propagates drivers to modport ports down to the targets of the
-    /// modport port connections.
-    void propagateModportDrivers(AnalysisContext& context, DriverAlloc& driverAlloc);
+    /// Propagates drivers of modport ports and ref ports down to the targets of their
+    /// actual port connections.
+    void propagateIndirectDrivers(AnalysisContext& context, DriverAlloc& driverAlloc);
 
     /// Returns all of the tracked drivers for the given symbol.
     DriverList getDrivers(const ast::ValueSymbol& symbol) const;
@@ -89,18 +98,20 @@ public:
         const ast::InstanceBodySymbol& symbol) const;
 
 private:
-    const ast::HierarchicalReference* addDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
-                                                const ast::ValueSymbol& symbol,
-                                                SymbolDriverMap& driverMap,
-                                                const ValueDriver& driver, DriverBitRange bounds);
-    void noteInterfacePortDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
-                                 const ast::HierarchicalReference& ref, const ValueDriver& driver);
+    using HierPortDriver = InstanceDriverState::HierPortDriver;
+
+    void addDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
+                   const ast::ValueSymbol& symbol, SymbolDriverMap& driverMap,
+                   const ValueDriver& driver, DriverBitRange bounds,
+                   SmallVector<HierPortDriver>& hierPortDrivers);
+    void noteHierPortDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
+                            const HierPortDriver& hierPortDriver);
     void applyInstanceSideEffect(AnalysisContext& context, DriverAlloc& driverAlloc,
-                                 const InstanceDriverState::IfacePortDriver& ifacePortDriver,
+                                 const HierPortDriver& hierPortDriver,
                                  const ast::InstanceSymbol& instance);
-    void propagateModportDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
-                                const ast::Expression& connectionExpr,
-                                const ValueDriver& originalDriver);
+    void propagateIndirectDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
+                                 const ast::Expression& connectionExpr,
+                                 const ValueDriver& originalDriver);
     void addDrivers(AnalysisContext& context, DriverAlloc& driverAlloc, const ast::Expression& expr,
                     DriverKind driverKind, bitmask<DriverFlags> driverFlags,
                     const ast::Symbol& containingSymbol,
@@ -108,7 +119,7 @@ private:
 
     concurrent_map<const ast::ValueSymbol*, SymbolDriverMap> symbolDrivers;
     concurrent_map<const ast::InstanceBodySymbol*, InstanceDriverState> instanceMap;
-    concurrent_map<const ast::ValueSymbol*, DriverList> modportPortDrivers;
+    concurrent_map<const ast::ValueSymbol*, DriverList> indirectDrivers;
 };
 
 } // namespace slang::analysis

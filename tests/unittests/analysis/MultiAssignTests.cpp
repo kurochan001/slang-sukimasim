@@ -1168,3 +1168,49 @@ endmodule
     auto [diags, design] = analyze(code, compilation, analysisManager);
     CHECK_DIAGS_EMPTY;
 }
+
+TEST_CASE("Multi assign through ref ports") {
+    auto& code = R"(
+module m(ref int r);
+endmodule
+
+module n(ref int s);
+    assign s = 2;
+endmodule
+
+module top1;
+    int r, s;
+    m m1(r);
+    n n1(s);
+
+    assign r = 3;
+    assign s = 1;
+endmodule
+
+module o(ref int s);
+    q q1(s);
+endmodule
+
+module p(ref int s);
+    o o1(s);
+endmodule
+
+module top2;
+    int r;
+    p p1(r);
+    p p2(r);
+endmodule
+
+module q(ref int t);
+    assign t = 2;
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto [diags, design] = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::MultipleContAssigns);
+    CHECK(diags[1].code == diag::MultipleContAssigns);
+}

@@ -251,6 +251,33 @@ endmodule
     CHECK(diags[2].code == diag::DuplicateImport);
 }
 
+TEST_CASE("Package lookup with path") {
+    auto tree = SyntaxTree::fromText(R"(
+package pkg;
+    parameter int x = 42;
+endpackage
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    const CompilationUnitSymbol* unit = compilation.getRoot().compilationUnits[0];
+
+    LookupResult result;
+    ASTContext context(*unit, LookupLocation::max);
+    Lookup::name(compilation.parseName("pkg::x"), context, LookupFlags::None, result);
+
+    REQUIRE(result.found);
+    CHECK(result.found->kind == SymbolKind::Parameter);
+    CHECK(result.found->as<ParameterSymbol>().getValue().integer() == 42);
+
+    // Verify that the package is in the result.path
+    REQUIRE(result.path.size() == 1);
+    CHECK(result.path[0].symbol->name == "pkg");
+    CHECK(result.path[0].symbol->kind == SymbolKind::Package);
+}
+
 TEST_CASE("Package references 2") {
     auto tree = SyntaxTree::fromText(R"(
 package p;
@@ -1075,7 +1102,7 @@ endmodule
     CHECK(result == R"(
 source:64:33: error: reference to 'gen3' by hierarchical name is not allowed in a constant expression
     localparam int blah2 = int'(m_inst.gen3.a[0]);
-                                ^~~~~~~~~~~~~~~~
+                                ^~~~~~~~~~~
 source:66:14: error: multiple imports found for identifier 'foo'
     wire a = foo.bar;           // import collision
              ^~~
@@ -1117,7 +1144,7 @@ source:75:21: error: use of undeclared identifier 'bar'
                     ^~~
 source:77:19: error: no member named 'bar' in 'type_t'
     wire l = gen3.bar;          // doesn't find top.gen3.bar because of local variable
-             ~~~~~^~~
+             ~~~~ ^~~
 source:79:20: error: hierarchical scope 'array1' is not indexable
     wire n = array1[0].foo;     // no upward because indexing fails
                    ^~~
