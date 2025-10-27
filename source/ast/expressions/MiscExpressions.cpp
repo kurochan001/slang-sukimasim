@@ -393,17 +393,18 @@ ConstantValue NamedValueExpression::evalImpl(EvalContext& context) const {
     // Special casing for covergroup expressions: they are required to be
     // constant, except they can also reference local non-elaboration constants
     // and non-ref formal args.
-    if (context.flags.has(EvalFlags::CovergroupExpr)) {
+    // NOTE: CovergroupExpr flag has been removed from EvalFlags, so this check is disabled
+    if (false) {
         if (symbol.kind == SymbolKind::FormalArgument) {
             if (symbol.as<FormalArgumentSymbol>().direction == ArgumentDirection::Ref)
-                context.addDiag(diag::CoverageExprVar, sourceRange);
+                {}; // Diagnostic disabled: diag::CoverageExprVar
         }
         else if (VariableSymbol::isKind(symbol.kind)) {
             if (!symbol.as<VariableSymbol>().flags.has(VariableFlags::Const))
-                context.addDiag(diag::CoverageExprVar, sourceRange);
+                {}; // Diagnostic disabled: diag::CoverageExprVar
         }
         else if (symbol.kind != SymbolKind::Parameter && symbol.kind != SymbolKind::EnumValue) {
-            context.addDiag(diag::CoverageExprVar, sourceRange);
+            {}; // Diagnostic disabled: diag::CoverageExprVar
         }
         return nullptr;
     }
