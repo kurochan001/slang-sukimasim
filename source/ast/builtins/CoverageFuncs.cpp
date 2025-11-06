@@ -134,28 +134,30 @@ void Builtins::registerCoverageFuncs() {
 
     // $coverage_control - System function (int return) per IEEE 1800-2023 Section 20.13
     // First argument (flag) is required, remaining arguments are optional
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageControl, intType, 1,
-             std::vector<const Type*>{&intType, &intType, &intType, &intType});
+    // Fourth argument can be a hierarchy reference or string
+    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageControl, intType, 3, 1,
+             std::vector<const Type*>{&intType, &intType, &intType, &stringType});
 
     // $coverage_get - System function (real return) per LRM 19.14.2
     // Arguments are optional - 0 to 3 arguments
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageGet, realType, 0,
+    // Third argument can be a hierarchy reference or string
+    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageGet, realType, 2, 0,
              std::vector<const Type*>{&intType, &intType, &stringType});
 
     // $coverage_get_max - System function (real return) per LRM 19.14.3
-    // Arguments are optional - 0 to 3 arguments
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageGetMax, realType, 0,
-             std::vector<const Type*>{&stringType, &stringType, &stringType});
+    // Arguments: coverage_type (int), scope_def (int), modules_or_instance (string or hierarchy)
+    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageGetMax, realType, 2, 0,
+             std::vector<const Type*>{&intType, &intType, &stringType});
 
     // $coverage_save - System function (int return) per IEEE 1800-2023 Section 20.13.4
-    // First argument (filename) is required, second (incremental) is optional
+    // Arguments: coverage_type (int), filename (string)
     REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 1,
-             std::vector<const Type*>{&stringType, &intType});
+             std::vector<const Type*>{&intType, &stringType});
 
     // $coverage_merge - System function (int return) per IEEE 1800-2023 Section 20.13.5
-    // All 3 string arguments are required
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 3,
-             std::vector<const Type*>{&stringType, &stringType, &stringType});
+    // Arguments: coverage_type (int), filename1 (string), filename2 (string)
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 1,
+             std::vector<const Type*>{&intType, &stringType, &stringType});
 
     // Legacy coverage functions (kept for backward compatibility)
     REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType);
