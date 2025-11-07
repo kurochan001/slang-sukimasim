@@ -181,6 +181,7 @@ private:
     syntax::ExpressionSyntax& parsePrimaryExpression(bitmask<ExpressionOptions> options);
     syntax::ExpressionSyntax& parseIntegerExpression(bool disallowVector);
     syntax::ExpressionSyntax& parseInsideExpression(syntax::ExpressionSyntax& expr);
+    syntax::ExpressionSyntax& parseMatchesExpression(syntax::ExpressionSyntax& expr);
     syntax::ExpressionSyntax& parsePostfixExpression(syntax::ExpressionSyntax& expr, bitmask<ExpressionOptions> options);
     syntax::ExpressionSyntax& parseNewExpression(syntax::NameSyntax& expr, bitmask<ExpressionOptions> options);
     syntax::ConcatenationExpressionSyntax& parseConcatenation(Token openBrace, syntax::ExpressionSyntax* first);

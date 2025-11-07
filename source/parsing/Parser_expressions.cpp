@@ -112,6 +112,14 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
     while (true) {
         // either a binary operator, or we're done
         current = peek();
+
+        // Check for matches keyword before checking binary operators
+        // IEEE 1800-2023 §11.9: Pattern matching with tagged unions
+        if (current.kind == TokenKind::MatchesKeyword && !options.has(ExpressionOptions::PatternContext)) {
+            left = &parseMatchesExpression(*left);
+            continue;
+        }
+
         auto opKind = getBinaryExpression(current.kind);
         if (opKind == SyntaxKind::Unknown) {
             break;
@@ -360,6 +368,14 @@ ExpressionSyntax& Parser::parseInsideExpression(ExpressionSyntax& expr) {
     auto inside = expect(TokenKind::InsideKeyword);
     auto& list = parseRangeList();
     return factory.insideExpression(expr, inside, list);
+}
+
+ExpressionSyntax& Parser::parseMatchesExpression(ExpressionSyntax& expr) {
+    // IEEE 1800-2023 §11.9: Pattern matching with tagged unions
+    // Parse: expr matches pattern
+    auto matches = expect(TokenKind::MatchesKeyword);
+    auto& pattern = parsePattern();
+    return factory.matchesExpression(expr, matches, pattern);
 }
 
 RangeListSyntax& Parser::parseRangeList() {

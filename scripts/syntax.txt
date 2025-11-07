@@ -240,6 +240,11 @@ Expression expr
 token inside
 RangeList ranges
 
+MatchesExpression base=Expression
+Expression expr
+token matches
+Pattern pattern
+
 ConditionalExpression base=Expression
 ConditionalPredicate predicate
 token question
