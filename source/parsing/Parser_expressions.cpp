@@ -115,9 +115,12 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
 
         // Check for matches keyword before checking binary operators
         // IEEE 1800-2023 §11.9: Pattern matching with tagged unions
-        if (current.kind == TokenKind::MatchesKeyword && !options.has(ExpressionOptions::PatternContext)) {
-            left = &parseMatchesExpression(*left);
-            continue;
+        if (current.kind == TokenKind::MatchesKeyword) {
+            if (!options.has(ExpressionOptions::PatternContext)) {
+                left = &parseMatchesExpression(*left);
+                continue;
+            }
+            // In pattern context, let it fall through to conditional expression handling
         }
 
         auto opKind = getBinaryExpression(current.kind);
@@ -219,7 +222,11 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
         // question mark coming up. Otherwise we might be a predicate inside a
         // statement which doesn't need the question.
         bool takeConditional = current.kind == TokenKind::Question;
-        if (current.kind == TokenKind::MatchesKeyword || current.kind == TokenKind::TripleAnd)
+        // IEEE 1800-2023 §11.9: Don't treat standalone matches as conditional expression
+        // Only treat it as conditional if it's followed by ? (ternary operator)
+        if (current.kind == TokenKind::TripleAnd)
+            takeConditional = isConditionalExpression();
+        else if (current.kind == TokenKind::MatchesKeyword)
             takeConditional = isConditionalExpression();
 
         if (takeConditional) {
@@ -1013,7 +1020,8 @@ PatternSyntax& Parser::parsePattern() {
             auto dot = consume();
             if (peek(TokenKind::Star))
                 return factory.wildcardPattern(dot, consume());
-            return factory.variablePattern(dot, expect(TokenKind::Identifier));
+            auto ident = expect(TokenKind::Identifier);
+            return factory.variablePattern(dot, ident);
         }
         case TokenKind::TaggedKeyword: {
             auto tagged = consume();

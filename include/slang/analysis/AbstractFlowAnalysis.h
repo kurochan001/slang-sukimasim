@@ -906,7 +906,8 @@ protected:
                          SimpleAssignmentPatternExpression, StructuredAssignmentPatternExpression,
                          ReplicatedAssignmentPatternExpression, ValueRangeExpression,
                          DistExpression, NewArrayExpression, NewClassExpression,
-                         NewCovergroupExpression, CopyClassExpression, TaggedUnionExpression>)
+                         NewCovergroupExpression, CopyClassExpression, TaggedUnionExpression,
+                         MatchesExpression>)
     void visitExpr(const T& expr) {
         expr.visitExprs(DERIVED);
     }
