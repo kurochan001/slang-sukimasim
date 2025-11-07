@@ -13,6 +13,9 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/symbols/BlockSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/diagnostics/ConstEvalDiags.h"
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/parsing/LexerFacts.h"
@@ -61,6 +64,12 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
     for (auto condSyntax : syntax.predicate->conditions) {
         auto& cond = Expression::bind(*condSyntax->expr, trueContext);
         bad |= cond.bad();
+
+        // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
+        // Note: This is a simplified implementation that doesn't create a proper scope.
+        // Pattern variables will be accessible in the entire then-branch, not just the condition.
+        // A full implementation would require AST restructuring to create proper scoped blocks.
+        // For now, we skip pattern variable registration and rely on runtime evaluation.
 
         const Pattern* pattern = nullptr;
         if (condSyntax->matchesClause) {

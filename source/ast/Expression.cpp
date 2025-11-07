@@ -962,6 +962,12 @@ Expression& Expression::create(Compilation& compilation, const ExpressionSyntax&
                                                         syntax.as<TaggedUnionExpressionSyntax>(),
                                                         context, assignmentTarget);
             break;
+        case SyntaxKind::MatchesExpression:
+            // IEEE 1800-2023 §11.9: Pattern matching with tagged unions
+            result = &MatchesExpression::fromSyntax(compilation,
+                                                    syntax.as<MatchesExpressionSyntax>(),
+                                                    context);
+            break;
         default:
             if (NameSyntax::isKind(syntax.kind)) {
                 result = &bindName(compilation, syntax.as<NameSyntax>(), nullptr, nullptr, context);

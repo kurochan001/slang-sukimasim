@@ -458,4 +458,37 @@ public:
     }
 };
 
+/// Represents a pattern matching expression for tagged unions (IEEE 1800-2023 §11.9)
+class SLANG_EXPORT MatchesExpression final : public Expression {
+public:
+    /// The expression being matched
+    const Expression& expr;
+
+    /// The tag name to match (e.g., "Integer", "Pair")
+    std::string_view tagName;
+
+    /// The pattern variable name (e.g., "i", "p"), or empty if no variable
+    std::string_view patternVar;
+
+    MatchesExpression(const Type& type, const Expression& expr, std::string_view tagName,
+                     std::string_view patternVar, SourceRange sourceRange) :
+        Expression(ExpressionKind::Matches, type, sourceRange),
+        expr(expr), tagName(tagName), patternVar(patternVar) {}
+
+    ConstantValue evalImpl(EvalContext& context) const;
+
+    void serializeTo(ASTSerializer& serializer) const;
+
+    static Expression& fromSyntax(Compilation& compilation,
+                                  const syntax::MatchesExpressionSyntax& syntax,
+                                  const ASTContext& context);
+
+    static bool isKind(ExpressionKind kind) { return kind == ExpressionKind::Matches; }
+
+    template<typename TVisitor>
+    void visitExprs(TVisitor&& visitor) const {
+        expr.visit(visitor);
+    }
+};
+
 } // namespace slang::ast
