@@ -411,11 +411,14 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                 auto& unionType = *expr.type;
                 const Type* memberType = &unionType;
 
+                // Get the canonical type (resolve typedefs)
+                auto& canonicalType = unionType.getCanonicalType();
+
                 // If it's a union type, get the member type
-                if (unionType.kind == SymbolKind::UnpackedUnionType ||
-                    unionType.kind == SymbolKind::PackedUnionType) {
+                if (canonicalType.kind == SymbolKind::UnpackedUnionType ||
+                    canonicalType.kind == SymbolKind::PackedUnionType) {
                     // Union types are scopes, so we can look up the member by name
-                    auto& unionScope = unionType.as<Scope>();
+                    auto& unionScope = canonicalType.as<Scope>();
                     auto member = unionScope.find(tagName);
                     if (member && member->kind == SymbolKind::Field) {
                         memberType = &member->as<FieldSymbol>().getType();

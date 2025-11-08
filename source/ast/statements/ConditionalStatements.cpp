@@ -65,13 +65,47 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
         auto& cond = Expression::bind(*condSyntax->expr, trueContext);
         bad |= cond.bad();
 
-        // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
-        // Note: This is a simplified implementation that doesn't create a proper scope.
-        // Pattern variables will be accessible in the entire then-branch, not just the condition.
-        // A full implementation would require AST restructuring to create proper scoped blocks.
-        // For now, we skip pattern variable registration and rely on runtime evaluation.
-
         const Pattern* pattern = nullptr;
+
+        // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
+        // Check if the condition expression is a MatchesExpression with a pattern variable
+        bool isMatchesExprWithPatternVar = false;
+        if (!bad && cond.kind == ExpressionKind::Matches) {
+            auto& matchesExpr = cond.as<MatchesExpression>();
+            if (!matchesExpr.patternVar.empty()) {
+                isMatchesExprWithPatternVar = true;
+            }
+        }
+
+        // Also check the original syntax for nested MatchesExpression (e.g., !(expr matches ...))
+        // This is needed because !(v matches ...) binds as UnaryOp, not Matches
+        if (!isMatchesExprWithPatternVar && condSyntax->expr) {
+            std::function<bool(const syntax::ExpressionSyntax&)> hasSyntaxMatchesWithVar;
+            hasSyntaxMatchesWithVar = [&](const syntax::ExpressionSyntax& expr) -> bool {
+                if (expr.kind == SyntaxKind::MatchesExpression) {
+                    auto& me = expr.as<syntax::MatchesExpressionSyntax>();
+                    if (me.pattern && me.pattern->kind == SyntaxKind::TaggedPattern) {
+                        auto& tp = me.pattern->as<syntax::TaggedPatternSyntax>();
+                        if (tp.pattern && tp.pattern->kind == SyntaxKind::VariablePattern) {
+                            return true;
+                        }
+                    }
+                }
+                for (uint32_t i = 0; i < expr.getChildCount(); i++) {
+                    auto child = expr.childNode(i);
+                    if (child && syntax::ExpressionSyntax::isKind(child->kind)) {
+                        if (hasSyntaxMatchesWithVar(child->as<syntax::ExpressionSyntax>()))
+                            return true;
+                    }
+                }
+                return false;
+            };
+
+            if (hasSyntaxMatchesWithVar(*condSyntax->expr)) {
+                isMatchesExprWithPatternVar = true;
+            }
+        }
+
         if (condSyntax->matchesClause) {
             // If there is a matches clause we expect a block to have been created.
             // The first one will be registered with the stmtCtx, the rest are children
@@ -109,6 +143,58 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
             bad |= pattern->bad();
 
             // We don't consider the condition to be const if there's a pattern.
+            isConst = false;
+        }
+        else if (isMatchesExprWithPatternVar) {
+            // IEEE 1800-2023 §11.9: MatchesExpression with pattern variable
+            // The block was already created by findBlocks/StatementBlockSymbol::fromSyntax
+            // We need to retrieve it and update the context
+
+            if (!currBlock) {
+                ifTrue = stmtCtx.tryGetBlock(context, *condSyntax);
+
+                if (!ifTrue) {
+                    bad = true;
+                }
+                else {
+                    if (ifTrue->bad()) {
+                        bad = true;
+                        ifTrue = ifTrue->as<InvalidStatement>().child;
+                    }
+
+                    if (ifTrue && ifTrue->kind == StatementKind::Block) {
+                        currBlock = ifTrue->as<BlockStatement>().blockSymbol;
+                    }
+                    else {
+                        bad = true;
+                    }
+                }
+            }
+            else {
+                auto last = currBlock->getLastMember();
+
+                if (last && last->kind == SymbolKind::StatementBlock) {
+                    currBlock = &last->as<StatementBlockSymbol>();
+                }
+                else {
+                    bad = true;
+                }
+            }
+
+            // Update context to use the pattern variable block scope
+            if (!bad && currBlock) {
+                trueContext = ASTContext(*currBlock, LookupLocation::max, trueContext.flags);
+
+                // Touch the block to ensure elaborateVariables is called
+                // This will create the PatternVarSymbol and make it available
+                currBlock->members();
+
+                if (currBlock->isKnownBad()) {
+                    bad = true;
+                }
+            }
+
+            // We don't consider the condition to be const if there's a pattern variable.
             isConst = false;
         }
         else if (!bad && !trueContext.requireBooleanConvertible(cond)) {
