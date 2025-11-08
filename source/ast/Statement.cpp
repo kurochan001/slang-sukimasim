@@ -402,6 +402,38 @@ Statement& Statement::badStmt(Compilation& compilation, const Statement* stmt) {
     return *compilation.emplace<InvalidStatement>(stmt);
 }
 
+// IEEE 1800-2023 §11.9: Check if an expression contains a MatchesExpression with pattern variables
+static bool hasMatchesExpressionWithPatternVar(const syntax::ExpressionSyntax& expr) {
+    // Recursively check if the expression syntax contains "matches" keyword
+    if (expr.kind == SyntaxKind::MatchesExpression) {
+        // Check if it has a pattern variable by looking at the pattern
+        auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
+        if (matchesExpr.pattern && matchesExpr.pattern->kind == SyntaxKind::TaggedPattern) {
+            auto& taggedPattern = matchesExpr.pattern->as<syntax::TaggedPatternSyntax>();
+            // Check if there's a nested variable pattern
+            if (taggedPattern.pattern &&
+                taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
+                return true;
+            }
+        }
+    }
+
+    // Recursively check child expressions
+    for (uint32_t i = 0; i < expr.getChildCount(); i++) {
+        auto child = expr.childNode(i);
+        if (child && child->kind == SyntaxKind::ExpressionStatement) {
+            // Not actually an expression, skip
+            continue;
+        }
+        if (child && syntax::ExpressionSyntax::isKind(child->kind)) {
+            if (hasMatchesExpressionWithPatternVar(child->as<syntax::ExpressionSyntax>()))
+                return true;
+        }
+    }
+
+    return false;
+}
+
 static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
                        SmallVectorBase<const StatementBlockSymbol*>& results,
                        SmallVector<const SyntaxNode*>& extraMembers, bool labelHandled) {
@@ -481,6 +513,11 @@ static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
             bool hasPattern = false;
             for (auto condSyntax : cond.predicate->conditions) {
                 if (condSyntax->matchesClause) {
+                    hasPattern = true;
+                    break;
+                }
+                // IEEE 1800-2023 §11.9: Also check for MatchesExpression with pattern variables
+                if (condSyntax->expr && hasMatchesExpressionWithPatternVar(*condSyntax->expr)) {
                     hasPattern = true;
                     break;
                 }
