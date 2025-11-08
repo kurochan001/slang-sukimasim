@@ -163,6 +163,30 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
     StatementBlockSymbol* first = nullptr;
     StatementBlockSymbol* curr = nullptr;
 
+    // Helper function to check if expression contains MatchesExpression with pattern variable
+    std::function<bool(const syntax::ExpressionSyntax&)> hasMatchesExprWithPatternVar;
+    hasMatchesExprWithPatternVar = [&hasMatchesExprWithPatternVar](const syntax::ExpressionSyntax& expr) -> bool {
+        if (expr.kind == SyntaxKind::MatchesExpression) {
+            auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
+            if (matchesExpr.pattern && matchesExpr.pattern->kind == SyntaxKind::TaggedPattern) {
+                auto& taggedPattern = matchesExpr.pattern->as<syntax::TaggedPatternSyntax>();
+                if (taggedPattern.pattern &&
+                    taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
+                    return true;
+                }
+            }
+        }
+        // Check child expressions recursively
+        for (uint32_t i = 0; i < expr.getChildCount(); i++) {
+            auto child = expr.childNode(i);
+            if (child && syntax::ExpressionSyntax::isKind(child->kind)) {
+                if (hasMatchesExprWithPatternVar(child->as<syntax::ExpressionSyntax>()))
+                    return true;
+            }
+        }
+        return false;
+    };
+
     for (auto cond : syntax.predicate->conditions) {
         if (cond->matchesClause) {
             auto block = comp.emplace<StatementBlockSymbol>(
@@ -170,6 +194,24 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
                 StatementBlockKind::Sequential, VariableLifetime::Automatic);
 
             // Each block needs elaboration to collect pattern variables.
+            block->setNeedElaboration();
+            block->setSyntax(*cond);
+
+            if (!first) {
+                first = curr = block;
+            }
+            else {
+                curr->addMember(*block);
+                curr = block;
+            }
+        }
+        // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
+        else if (cond->expr && hasMatchesExprWithPatternVar(*cond->expr)) {
+            auto block = comp.emplace<StatementBlockSymbol>(
+                comp, ""sv, cond->expr->getFirstToken().location(),
+                StatementBlockKind::Sequential, VariableLifetime::Automatic);
+
+            // Each block needs elaboration to collect pattern variables from MatchesExpression
             block->setNeedElaboration();
             block->setSyntax(*cond);
 
@@ -334,14 +376,61 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
         ASTContext context(*this, LookupLocation::max);
 
         auto& cond = syntax->as<ConditionalPatternSyntax>();
-        SLANG_ASSERT(cond.matchesClause);
 
-        SmallVector<const PatternVarSymbol*> vars;
-        if (!Pattern::createPatternVars(context, *cond.matchesClause->pattern, *cond.expr, vars))
-            stmt = createInvalid();
+        if (cond.matchesClause) {
+            // Traditional pattern matching with matchesClause
+            SmallVector<const PatternVarSymbol*> vars;
+            if (!Pattern::createPatternVars(context, *cond.matchesClause->pattern, *cond.expr, vars))
+                stmt = createInvalid();
 
-        for (auto var : vars)
-            insertCB(*var);
+            for (auto var : vars)
+                insertCB(*var);
+        }
+        else if (cond.expr && cond.expr->kind == SyntaxKind::MatchesExpression) {
+            // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables at syntax level
+            auto& matchesSyntax = cond.expr->as<syntax::MatchesExpressionSyntax>();
+
+            // Extract pattern variable from the syntax
+            std::string_view patternVar;
+            std::string_view tagName;
+
+            if (matchesSyntax.pattern && matchesSyntax.pattern->kind == SyntaxKind::TaggedPattern) {
+                auto& taggedPattern = matchesSyntax.pattern->as<syntax::TaggedPatternSyntax>();
+                tagName = taggedPattern.memberName.valueText();
+
+                if (taggedPattern.pattern &&
+                    taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
+                    auto& varPattern = taggedPattern.pattern->as<syntax::VariablePatternSyntax>();
+                    patternVar = varPattern.variableName.valueText();
+                }
+            }
+
+            if (!patternVar.empty()) {
+                // Bind the expression to get its type
+                auto& expr = Expression::bind(*matchesSyntax.expr, context);
+                auto& unionType = *expr.type;
+                const Type* memberType = &unionType;
+
+                // If it's a union type, get the member type
+                if (unionType.kind == SymbolKind::UnpackedUnionType ||
+                    unionType.kind == SymbolKind::PackedUnionType) {
+                    // Union types are scopes, so we can look up the member by name
+                    auto& unionScope = unionType.as<Scope>();
+                    auto member = unionScope.find(tagName);
+                    if (member && member->kind == SymbolKind::Field) {
+                        memberType = &member->as<FieldSymbol>().getType();
+                    }
+                }
+
+                // Create a PatternVarSymbol for the pattern variable
+                auto& comp = getCompilation();
+                auto* patternVarSymbol = comp.emplace<PatternVarSymbol>(
+                    patternVar,
+                    cond.expr->getFirstToken().location(),
+                    *memberType);
+                insertCB(*patternVarSymbol);
+            }
+        }
     }
     else if (syntax->kind == SyntaxKind::PatternCaseItem) {
         ASTContext context(*this, LookupLocation::max);
