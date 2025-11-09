@@ -546,7 +546,13 @@ bool Driver::processOptions() {
     if (options.compat.has_value()) {
         std::initializer_list<CompilationFlags> compFlags;
         std::initializer_list<AnalysisFlags> analysisFlags;
-        if (options.compat == CompatMode::Vcs) {
+
+        // Phase 3.4: IEEE 1800-2023 Strict mode
+        if (options.compat == CompatMode::Strict) {
+            // Strict mode: No compatibility flags enabled
+            // All flags remain at their LRM-compliant defaults
+        }
+        else if (options.compat == CompatMode::Vcs) {
             compFlags = vcsCompFlags;
             analysisFlags = vcsAnalysisFlags;
         }
@@ -661,7 +667,21 @@ bool Driver::processOptions() {
         diagEngine.setSeverity(diag::UnknownSystemName, DiagnosticSeverity::Error);
     }
 
-    if (options.compat == CompatMode::Vcs || options.compat == CompatMode::All) {
+    // Phase 3.4: Diagnostic severity configuration based on CompatMode
+    if (options.compat == CompatMode::Strict) {
+        // IEEE 1800-2023 strict mode: Maximum LRM compliance
+        // All non-standard constructs and errors are strictly enforced
+        diagEngine.setSeverity(diag::IndexOOB, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::RangeOOB, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::RangeWidthOOB, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::ImplicitNamedPortTypeMismatch, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::SplitDistWeightOp, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::DPIPureTask, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::SpecifyPathConditionExpr, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::SolveBeforeDisallowed, DiagnosticSeverity::Error);
+        diagEngine.setSeverity(diag::MissingTimeScale, DiagnosticSeverity::Error);
+    }
+    else if (options.compat == CompatMode::Vcs || options.compat == CompatMode::All) {
         diagEngine.setSeverity(diag::StaticInitializerMustBeExplicit, DiagnosticSeverity::Ignored);
         diagEngine.setSeverity(diag::ImplicitConvert, DiagnosticSeverity::Ignored);
         diagEngine.setSeverity(diag::BadFinishNum, DiagnosticSeverity::Ignored);
@@ -670,6 +690,7 @@ bool Driver::processOptions() {
         diagEngine.setSeverity(diag::NonstandardDist, DiagnosticSeverity::Ignored);
     }
     else {
+        // Default mode (no --compat specified)
         // Phase 151: Changed to warnings for LRM compliance
         // Many commercial simulators allow x/z index access with warnings rather than errors
         // SystemVerilog LRM allows implementation-defined behavior for out-of-bounds access
