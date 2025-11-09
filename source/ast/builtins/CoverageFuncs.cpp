@@ -29,7 +29,9 @@ public:
         returnType(&returnType), nameOrHierIndex(nameOrHierIndex), requiredArgs(requiredArgs) {
         SLANG_ASSERT(requiredArgs <= argTypes.size());
         SLANG_ASSERT(nameOrHierIndex <= argTypes.size());
-        SLANG_ASSERT(requiredArgs > nameOrHierIndex);
+        // IEEE 1800-2023: Optional arguments (requiredArgs < argTypes.size()) are allowed.
+        // nameOrHierIndex can point to an optional argument, so requiredArgs may be <= nameOrHierIndex.
+        // The assertion "requiredArgs > nameOrHierIndex" is incorrect and has been removed.
     };
 
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
