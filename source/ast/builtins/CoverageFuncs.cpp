@@ -152,17 +152,17 @@ void Builtins::registerCoverageFuncs() {
     REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageGetMax, realType, 2, 0,
              std::vector<const Type*>{&intType, &intType, &stringType});
 
-    // $coverage_save - System function (int return) per IEEE 1800-2023 Section 19.14.4
-    // int $coverage_save(string filename[, int incremental]);
-    // Arguments: filename (string, required), incremental (int, optional)
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 1,
-             std::vector<const Type*>{&stringType, &intType});
+    // $coverage_save - System function (int return) per IEEE 1800-2023 Section 20.13.4
+    // int $coverage_save(int coverage_type, string filename[, int merge_type]);
+    // Arguments: coverage_type (int, required), filename (string, required), merge_type (int, optional)
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageSave, intType, 2,
+             std::vector<const Type*>{&intType, &stringType, &intType});
 
-    // $coverage_merge - System function (int return) per IEEE 1800-2023 Section 19.14.5
-    // int $coverage_merge(string destination, string source1, string source2);
-    // Arguments: destination (string), source1 (string), source2 (string) - all required
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 3,
-             std::vector<const Type*>{&stringType, &stringType, &stringType});
+    // $coverage_merge - System function (int return) per IEEE 1800-2023 Section 20.13.5
+    // int $coverage_merge(int coverage_type, string filename1[, string filename2]);
+    // Arguments: coverage_type (int, required), filename1 (string, required), filename2 (string, optional)
+    REGISTER(NonConstantFunction, KnownSystemName::CoverageMerge, intType, 2,
+             std::vector<const Type*>{&intType, &stringType, &stringType});
 
     // Legacy coverage functions (kept for backward compatibility)
     REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType);
