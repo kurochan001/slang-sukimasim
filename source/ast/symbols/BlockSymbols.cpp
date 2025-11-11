@@ -167,41 +167,60 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
 
     // Helper function to check if expression contains MatchesExpression with pattern variable
     // IEEE 1800-2023 §12.6: Pattern variables can appear in any pattern type
+    std::function<bool(const syntax::PatternSyntax&)> hasVariablePattern;
+    hasVariablePattern = [&hasVariablePattern](const syntax::PatternSyntax& pattern) -> bool {
+        switch (pattern.kind) {
+            case SyntaxKind::VariablePattern:
+                return true;
+            case SyntaxKind::ParenthesizedPattern:
+                return hasVariablePattern(*pattern.as<ParenthesizedPatternSyntax>().pattern);
+            case SyntaxKind::TaggedPattern: {
+                auto& tagged = pattern.as<syntax::TaggedPatternSyntax>();
+                return tagged.pattern && hasVariablePattern(*tagged.pattern);
+            }
+            case SyntaxKind::StructurePattern: {
+                for (auto member : pattern.as<StructurePatternSyntax>().members) {
+                    if (member->kind == SyntaxKind::NamedStructurePatternMember) {
+                        if (hasVariablePattern(
+                                *member->as<NamedStructurePatternMemberSyntax>().pattern))
+                            return true;
+                    }
+                    else if (member->kind == SyntaxKind::OrderedStructurePatternMember) {
+                        if (hasVariablePattern(
+                                *member->as<OrderedStructurePatternMemberSyntax>().pattern))
+                            return true;
+                    }
+                }
+                return false;
+            }
+            default:
+                break;
+        }
+
+        for (uint32_t i = 0; i < pattern.getChildCount(); i++) {
+            auto child = pattern.childNode(i);
+            if (child && syntax::PatternSyntax::isKind(child->kind) &&
+                hasVariablePattern(child->as<syntax::PatternSyntax>()))
+                return true;
+        }
+
+        return false;
+    };
+
     std::function<bool(const syntax::ExpressionSyntax&)> hasMatchesExprWithPatternVar;
-    hasMatchesExprWithPatternVar = [&hasMatchesExprWithPatternVar](const syntax::ExpressionSyntax& expr) -> bool {
+    hasMatchesExprWithPatternVar = [&hasMatchesExprWithPatternVar,
+                                    &hasVariablePattern](const syntax::ExpressionSyntax& expr) -> bool {
         if (expr.kind == SyntaxKind::MatchesExpression) {
             auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
-            if (matchesExpr.pattern) {
-                // Check if pattern contains any variable patterns
-                // This includes VariablePattern, TaggedPattern with variables,
-                // StructurePattern with variables, etc.
-                std::function<bool(const syntax::PatternSyntax&)> hasVariablePattern;
-                hasVariablePattern = [&hasVariablePattern](const syntax::PatternSyntax& pattern) -> bool {
-                    if (pattern.kind == SyntaxKind::VariablePattern)
-                        return true;
-
-                    // Check nested patterns
-                    for (uint32_t i = 0; i < pattern.getChildCount(); i++) {
-                        auto child = pattern.childNode(i);
-                        if (child && syntax::PatternSyntax::isKind(child->kind)) {
-                            if (hasVariablePattern(child->as<syntax::PatternSyntax>()))
-                                return true;
-                        }
-                    }
-                    return false;
-                };
-
-                if (hasVariablePattern(*matchesExpr.pattern))
-                    return true;
-            }
+            if (matchesExpr.pattern && hasVariablePattern(*matchesExpr.pattern))
+                return true;
         }
-        // Check child expressions recursively
+
         for (uint32_t i = 0; i < expr.getChildCount(); i++) {
             auto child = expr.childNode(i);
-            if (child && syntax::ExpressionSyntax::isKind(child->kind)) {
-                if (hasMatchesExprWithPatternVar(child->as<syntax::ExpressionSyntax>()))
-                    return true;
-            }
+            if (child && syntax::ExpressionSyntax::isKind(child->kind) &&
+                hasMatchesExprWithPatternVar(child->as<syntax::ExpressionSyntax>()))
+                return true;
         }
         return false;
     };
@@ -427,7 +446,8 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                 std::cerr << "[BLOCK_DEBUG]   pattern kind: " << toString(cond.matchesClause->pattern->kind) << "\n";
             }
 
-            bool success = Pattern::createPatternVars(context, *cond.matchesClause->pattern, *expr.type, vars);
+            bool success = Pattern::createPatternVars(context, *cond.matchesClause->pattern,
+                                                      *expr.type, vars);
 
             // DEBUG: Show result
             if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
@@ -438,8 +458,11 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                 }
             }
 
-            if (!success)
+            if (!success) {
+                vars.clear();
+                Pattern::createPlaceholderVars(context, *cond.matchesClause->pattern, vars);
                 stmt = createInvalid();
+            }
 
             for (auto var : vars)
                 insertCB(*var);
@@ -469,7 +492,8 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
 
                 // Create pattern variables using the generic Pattern::createPatternVars
                 // This handles all pattern types: TaggedPattern, StructurePattern, VariablePattern, etc.
-                bool success = Pattern::createPatternVars(context, *matchesSyntax.pattern, *expr.type, vars);
+                bool success =
+                    Pattern::createPatternVars(context, *matchesSyntax.pattern, *expr.type, vars);
 
                 // DEBUG: Show result
                 if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
@@ -480,11 +504,14 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                     }
                 }
 
-                if (success) {
-                    // Insert all created pattern variables into the current scope
-                    for (auto var : vars)
-                        insertCB(*var);
+                if (!success) {
+                    Pattern::createPlaceholderVars(context, *matchesSyntax.pattern, vars);
+                    stmt = createInvalid();
                 }
+
+                // Insert all created pattern variables into the current scope
+                for (auto var : vars)
+                    insertCB(*var);
             }
         }
     }
@@ -494,8 +521,12 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
         auto& caseSyntax = syntax->parent->as<CaseStatementSyntax>();
 
         SmallVector<const PatternVarSymbol*> vars;
-        if (!Pattern::createPatternVars(context, *syntax->as<PatternCaseItemSyntax>().pattern,
-                                        *caseSyntax.expr, vars)) {
+        bool success = Pattern::createPatternVars(context, *syntax->as<PatternCaseItemSyntax>().pattern,
+                                                  *caseSyntax.expr, vars);
+        if (!success) {
+            vars.clear();
+            Pattern::createPlaceholderVars(context, *syntax->as<PatternCaseItemSyntax>().pattern,
+                                           vars);
             stmt = createInvalid();
         }
 

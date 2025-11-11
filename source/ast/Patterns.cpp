@@ -81,6 +81,11 @@ bool Pattern::createPatternVars(const ASTContext& context, const PatternSyntax& 
 bool Pattern::createPatternVars(const ASTContext& context, const PatternSyntax& syntax,
                                 const Type& targetType,
                                 SmallVector<const PatternVarSymbol*>& results) {
+    if (targetType.isError()) {
+        createPlaceholderVars(context, syntax, results);
+        return true;
+    }
+
     switch (syntax.kind) {
         case SyntaxKind::ParenthesizedPattern:
             return createPatternVars(context, *syntax.as<ParenthesizedPatternSyntax>().pattern,
