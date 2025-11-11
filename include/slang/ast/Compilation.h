@@ -969,8 +969,28 @@ private:
     // A list of DPI export directives we've encountered during elaboration.
     std::vector<std::pair<const syntax::DPIExportSyntax*, const Scope*>> dpiExports;
 
+    struct BindDirectiveRecord {
+        const syntax::BindDirectiveSyntax* syntax = nullptr;
+        std::string scopePath;
+
+        bool operator==(const BindDirectiveRecord& other) const {
+            return syntax == other.syntax && scopePath == other.scopePath;
+        }
+    };
+
+    struct BindDirectiveRecordHasher {
+        size_t operator()(const BindDirectiveRecord& record) const noexcept {
+            size_t seed = 0;
+            hash_combine(seed, record.syntax);
+            hash_combine(seed, record.scopePath);
+            return seed;
+        }
+    };
+
     // A list of bind directives we've encountered during elaboration.
     std::vector<std::pair<const syntax::BindDirectiveSyntax*, const Scope*>> bindDirectives;
+    flat_hash_set<BindDirectiveRecord, BindDirectiveRecordHasher> bindDirectiveRecords;
+    flat_hash_set<std::string> appliedBindDirectiveKeys;
 
     // A list of extern interface method implementations for later elaboration.
     std::vector<const SubroutineSymbol*> externInterfaceMethods;
