@@ -33,6 +33,22 @@ struct EvalVisitor {
     }
 };
 
+PatternVarSymbol* tryReusePlaceholder(const ASTContext& context,
+                                     const syntax::VariablePatternSyntax& syntax) {
+    auto placeholders = context.patternVarPlaceholders;
+    for (auto placeholder : placeholders) {
+        if (!placeholder)
+            continue;
+
+        if (!placeholder->flags.has(VariableFlags::PatternPlaceholder))
+            continue;
+
+        if (placeholder->getSyntax() == &syntax)
+            return placeholder;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 namespace slang::ast {
@@ -92,10 +108,21 @@ bool Pattern::createPatternVars(const ASTContext& context, const PatternSyntax& 
                                      targetType, results);
         case SyntaxKind::VariablePattern: {
             auto& varSyntax = syntax.as<VariablePatternSyntax>();
-            auto var = context.getCompilation().emplace<PatternVarSymbol>(
-                varSyntax.variableName.valueText(), varSyntax.variableName.location(), targetType);
-            var->setSyntax(varSyntax);
-            results.push_back(var);
+            if (auto placeholder = tryReusePlaceholder(context, varSyntax)) {
+                auto mutableVar = const_cast<PatternVarSymbol*>(placeholder);
+                mutableVar->flags &= ~VariableFlags::CompilerGenerated;
+                mutableVar->flags &= ~VariableFlags::PatternPlaceholder;
+                mutableVar->setType(targetType);
+                mutableVar->setSyntax(varSyntax);
+                results.push_back(mutableVar);
+            }
+            else {
+                auto var = context.getCompilation().emplace<PatternVarSymbol>(
+                    varSyntax.variableName.valueText(), varSyntax.variableName.location(),
+                    targetType);
+                var->setSyntax(varSyntax);
+                results.push_back(var);
+            }
             break;
         }
         case SyntaxKind::TaggedPattern:
