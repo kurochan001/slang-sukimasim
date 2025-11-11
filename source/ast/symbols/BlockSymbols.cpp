@@ -164,16 +164,33 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
     StatementBlockSymbol* curr = nullptr;
 
     // Helper function to check if expression contains MatchesExpression with pattern variable
+    // IEEE 1800-2023 §12.6: Pattern variables can appear in any pattern type
     std::function<bool(const syntax::ExpressionSyntax&)> hasMatchesExprWithPatternVar;
     hasMatchesExprWithPatternVar = [&hasMatchesExprWithPatternVar](const syntax::ExpressionSyntax& expr) -> bool {
         if (expr.kind == SyntaxKind::MatchesExpression) {
             auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
-            if (matchesExpr.pattern && matchesExpr.pattern->kind == SyntaxKind::TaggedPattern) {
-                auto& taggedPattern = matchesExpr.pattern->as<syntax::TaggedPatternSyntax>();
-                if (taggedPattern.pattern &&
-                    taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
+            if (matchesExpr.pattern) {
+                // Check if pattern contains any variable patterns
+                // This includes VariablePattern, TaggedPattern with variables,
+                // StructurePattern with variables, etc.
+                std::function<bool(const syntax::PatternSyntax&)> hasVariablePattern;
+                hasVariablePattern = [&hasVariablePattern](const syntax::PatternSyntax& pattern) -> bool {
+                    if (pattern.kind == SyntaxKind::VariablePattern)
+                        return true;
+
+                    // Check nested patterns
+                    for (uint32_t i = 0; i < pattern.getChildCount(); i++) {
+                        auto child = pattern.childNode(i);
+                        if (child && syntax::PatternSyntax::isKind(child->kind)) {
+                            if (hasVariablePattern(child->as<syntax::PatternSyntax>()))
+                                return true;
+                        }
+                    }
+                    return false;
+                };
+
+                if (hasVariablePattern(*matchesExpr.pattern))
                     return true;
-                }
             }
         }
         // Check child expressions recursively
@@ -387,51 +404,23 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                 insertCB(*var);
         }
         else if (cond.expr && cond.expr->kind == SyntaxKind::MatchesExpression) {
-            // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables at syntax level
+            // IEEE 1800-2023 §11.9, §12.6: Handle MatchesExpression with pattern variables
+            // Use Pattern::createPatternVars to handle all pattern types (including nested patterns)
             auto& matchesSyntax = cond.expr->as<syntax::MatchesExpressionSyntax>();
 
-            // Extract pattern variable from the syntax
-            std::string_view patternVar;
-            std::string_view tagName;
+            if (matchesSyntax.pattern) {
+                SmallVector<const PatternVarSymbol*> vars;
 
-            if (matchesSyntax.pattern && matchesSyntax.pattern->kind == SyntaxKind::TaggedPattern) {
-                auto& taggedPattern = matchesSyntax.pattern->as<syntax::TaggedPatternSyntax>();
-                tagName = taggedPattern.memberName.valueText();
-
-                if (taggedPattern.pattern &&
-                    taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
-                    auto& varPattern = taggedPattern.pattern->as<syntax::VariablePatternSyntax>();
-                    patternVar = varPattern.variableName.valueText();
-                }
-            }
-
-            if (!patternVar.empty()) {
-                // Bind the expression to get its type
+                // Bind the expression to get its type for pattern variable type inference
                 auto& expr = Expression::bind(*matchesSyntax.expr, context);
-                auto& unionType = *expr.type;
-                const Type* memberType = &unionType;
 
-                // Get the canonical type (resolve typedefs)
-                auto& canonicalType = unionType.getCanonicalType();
-
-                // If it's a union type, get the member type
-                if (canonicalType.kind == SymbolKind::UnpackedUnionType ||
-                    canonicalType.kind == SymbolKind::PackedUnionType) {
-                    // Union types are scopes, so we can look up the member by name
-                    auto& unionScope = canonicalType.as<Scope>();
-                    auto member = unionScope.find(tagName);
-                    if (member && member->kind == SymbolKind::Field) {
-                        memberType = &member->as<FieldSymbol>().getType();
-                    }
+                // Create pattern variables using the generic Pattern::createPatternVars
+                // This handles all pattern types: TaggedPattern, StructurePattern, VariablePattern, etc.
+                if (Pattern::createPatternVars(context, *matchesSyntax.pattern, *expr.type, vars)) {
+                    // Insert all created pattern variables into the current scope
+                    for (auto var : vars)
+                        insertCB(*var);
                 }
-
-                // Create a PatternVarSymbol for the pattern variable
-                auto& comp = getCompilation();
-                auto* patternVarSymbol = comp.emplace<PatternVarSymbol>(
-                    patternVar,
-                    cond.expr->getFirstToken().location(),
-                    *memberType);
-                insertCB(*patternVarSymbol);
             }
         }
     }
