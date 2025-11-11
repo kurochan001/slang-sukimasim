@@ -22,6 +22,7 @@ namespace slang::ast {
 class Expression;
 class InstanceSymbolBase;
 class ProceduralBlockSymbol;
+class PatternVarSymbol;
 class Statement;
 class SubroutineSymbol;
 class TempVarSymbol;
@@ -303,6 +304,10 @@ public:
     /// contains a pointer to the first one along with a linked list of any
     /// others that may be active. Otherwise nullptr.
     const TempVarSymbol* firstTempVar = nullptr;
+
+    /// Predeclared pattern variable placeholders that should be reused
+    /// when binding VariablePattern nodes in this context.
+    std::span<PatternVarSymbol* const> patternVarPlaceholders;
 
     /// A collection of information needed to bind names inside inline constraint
     /// blocks for class and scope randomize function calls.

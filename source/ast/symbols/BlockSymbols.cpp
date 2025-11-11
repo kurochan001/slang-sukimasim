@@ -32,6 +32,38 @@ namespace slang::ast {
 using namespace parsing;
 using namespace syntax;
 
+namespace {
+
+void addPatternVarMembers(StatementBlockSymbol& block, const PatternSyntax& pattern) {
+    SmallVector<const PatternVarSymbol*> vars;
+    ASTContext context(block, LookupLocation::max);
+    Pattern::createPlaceholderVars(context, pattern, vars);
+
+    for (auto var : vars) {
+        auto mutableVar = const_cast<PatternVarSymbol*>(var);
+        mutableVar->flags |= VariableFlags::CompilerGenerated;
+        mutableVar->flags |= VariableFlags::PatternPlaceholder;
+        block.addMember(*mutableVar);
+    }
+}
+
+void addPatternVarsFromMatchesExpr(StatementBlockSymbol& block,
+                                   const ExpressionSyntax& expr) {
+    if (expr.kind == SyntaxKind::MatchesExpression) {
+        auto& matchesExpr = expr.as<MatchesExpressionSyntax>();
+        if (matchesExpr.pattern)
+            addPatternVarMembers(block, *matchesExpr.pattern);
+    }
+
+    for (uint32_t i = 0; i < expr.getChildCount(); i++) {
+        auto child = expr.childNode(i);
+        if (child && ExpressionSyntax::isKind(child->kind))
+            addPatternVarsFromMatchesExpr(block, child->as<ExpressionSyntax>());
+    }
+}
+
+} // namespace
+
 const Statement& StatementBlockSymbol::getStatement(const ASTContext& parentContext,
                                                     Statement::StatementContext& stmtCtx) const {
     if (!stmt) {
@@ -234,6 +266,8 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
             // Each block needs elaboration to collect pattern variables.
             block->setNeedElaboration();
             block->setSyntax(*cond);
+            if (cond->matchesClause->pattern)
+                addPatternVarMembers(*block, *cond->matchesClause->pattern);
 
             if (!first) {
                 first = curr = block;
@@ -252,6 +286,7 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
             // Each block needs elaboration to collect pattern variables from MatchesExpression
             block->setNeedElaboration();
             block->setSyntax(*cond);
+            addPatternVarsFromMatchesExpr(*block, *cond->expr);
 
             if (!first) {
                 first = curr = block;
@@ -296,6 +331,8 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
                                                      StatementBlockKind::Sequential,
                                                      VariableLifetime::Automatic);
     result->setSyntax(syntax);
+    if (syntax.pattern)
+        addPatternVarMembers(*result, *syntax.pattern);
     result->blocks = Statement::createAndAddBlockItems(*result, *syntax.statement,
                                                        /* labelHandled */ false);
 
@@ -387,6 +424,18 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
     if (!syntax)
         return;
 
+    SmallVector<PatternVarSymbol*> placeholderSymbols;
+    for (auto member = getFirstMember(); member; member = member->getNextSibling()) {
+        if (member->kind != SymbolKind::PatternVar)
+            continue;
+
+        auto& var = member->as<PatternVarSymbol>();
+        if (var.flags.has(VariableFlags::PatternPlaceholder))
+            placeholderSymbols.push_back(const_cast<PatternVarSymbol*>(&var));
+    }
+    std::span<PatternVarSymbol* const> placeholderSpan(placeholderSymbols.begin(),
+                                                       placeholderSymbols.end());
+
     auto createInvalid = [&] {
         auto& comp = getCompilation();
         auto& result = *comp.emplace<BlockStatement>(InvalidStatement::Instance, blockKind,
@@ -406,6 +455,7 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
     else if (syntax->kind == SyntaxKind::ForeachLoopStatement) {
         SmallVector<ForeachLoopStatement::LoopDim, 4> dims;
         ASTContext context(*this, LookupLocation::max);
+        context.patternVarPlaceholders = placeholderSpan;
 
         if (!ForeachLoopStatement::buildLoopDims(*syntax->as<ForeachLoopStatementSyntax>().loopList,
                                                  context, dims)) {
@@ -421,6 +471,7 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
     }
     else if (syntax->kind == SyntaxKind::ConditionalPattern) {
         ASTContext context(*this, LookupLocation::max);
+        context.patternVarPlaceholders = placeholderSpan;
 
         auto& cond = syntax->as<ConditionalPatternSyntax>();
 
@@ -460,12 +511,16 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
 
             if (!success) {
                 vars.clear();
-                Pattern::createPlaceholderVars(context, *cond.matchesClause->pattern, vars);
+                if (placeholderSpan.empty())
+                    Pattern::createPlaceholderVars(context, *cond.matchesClause->pattern, vars);
                 stmt = createInvalid();
             }
 
-            for (auto var : vars)
+            for (auto var : vars) {
+                if (var->getParentScope() == this)
+                    continue;
                 insertCB(*var);
+            }
         }
         else if (cond.expr && cond.expr->kind == SyntaxKind::MatchesExpression) {
             // IEEE 1800-2023 §11.9, §12.6: Handle MatchesExpression with pattern variables
@@ -505,18 +560,24 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                 }
 
                 if (!success) {
-                    Pattern::createPlaceholderVars(context, *matchesSyntax.pattern, vars);
+                    vars.clear();
+                    if (placeholderSpan.empty())
+                        Pattern::createPlaceholderVars(context, *matchesSyntax.pattern, vars);
                     stmt = createInvalid();
                 }
 
                 // Insert all created pattern variables into the current scope
-                for (auto var : vars)
+                for (auto var : vars) {
+                    if (var->getParentScope() == this)
+                        continue;
                     insertCB(*var);
+                }
             }
         }
     }
     else if (syntax->kind == SyntaxKind::PatternCaseItem) {
         ASTContext context(*this, LookupLocation::max);
+        context.patternVarPlaceholders = placeholderSpan;
         SLANG_ASSERT(syntax->parent);
         auto& caseSyntax = syntax->parent->as<CaseStatementSyntax>();
 
@@ -525,13 +586,18 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                                                   *caseSyntax.expr, vars);
         if (!success) {
             vars.clear();
-            Pattern::createPlaceholderVars(context, *syntax->as<PatternCaseItemSyntax>().pattern,
-                                           vars);
+            if (placeholderSpan.empty()) {
+                Pattern::createPlaceholderVars(context, *syntax->as<PatternCaseItemSyntax>().pattern,
+                                               vars);
+            }
             stmt = createInvalid();
         }
 
-        for (auto var : vars)
+        for (auto var : vars) {
+            if (var->getParentScope() == this)
+                continue;
             insertCB(*var);
+        }
     }
 }
 
