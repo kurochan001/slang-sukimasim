@@ -2357,6 +2357,7 @@ struct BindEntry {
     BindDirectiveInfo info;
 };
 SmallVector<BindEntry> binds;
+flat_hash_map<std::string, BindEntry> bindMap;
 
     auto getNodeFor = [](const OpaqueInstancePath& path, Compilation& c) {
         HierarchyOverrideNode* node = &c.hierarchyOverrides;
@@ -2365,7 +2366,7 @@ SmallVector<BindEntry> binds;
         return node;
     };
 
-    auto copyStateInto = [&](Compilation& c, bool isFinal) {
+    auto copyOverridesInto = [&](Compilation& c, bool isFinal) {
         for (auto& entry : overrides) {
             if (!entry.targetSyntax)
                 continue;
@@ -2383,6 +2384,9 @@ SmallVector<BindEntry> binds;
                 diag.addNote(diag::NotePreviousDefinition, it->second.second->sourceRange());
             }
         }
+
+        if (!isFinal)
+            return;
 
         flat_hash_set<std::string> appliedBindKeys;
 
@@ -2421,15 +2425,7 @@ SmallVector<BindEntry> binds;
                     // This is a nested definition, so we need to put the
                     // bind into the override node.
                     auto node = getNodeFor(entry.path, c);
-                    bool alreadyPresent = false;
-                    for (auto& existing : node->binds) {
-                        if (existing.second == entry.definitionTarget &&
-                            existing.first.bindSyntax == entry.info.bindSyntax) {
-                            alreadyPresent = true;
-                            break;
-                        }
-                    }
-                    if (alreadyPresent) {
+                    if (!node->bindSyntaxSet.emplace(entry.info.bindSyntax).second) {
                         if (debugBind)
                             std::cerr << "[BIND_RESOLVE] skipped duplicate nested bind\n";
                         continue;
@@ -2470,15 +2466,7 @@ SmallVector<BindEntry> binds;
             }
             else {
                 auto node = getNodeFor(entry.path, c);
-                bool alreadyPresent = false;
-                for (auto& existing : node->binds) {
-                    if (!existing.second &&
-                        existing.first.bindSyntax == entry.info.bindSyntax) {
-                        alreadyPresent = true;
-                        break;
-                    }
-                }
-                if (alreadyPresent) {
+                if (!node->bindSyntaxSet.emplace(entry.info.bindSyntax).second) {
                     if (debugBind)
                         std::cerr << "[BIND_RESOLVE] skipped duplicate instance bind\n";
                     continue;
@@ -2499,7 +2487,7 @@ SmallVector<BindEntry> binds;
         for (auto& tree : syntaxTrees)
             c.addSyntaxTree(tree);
 
-        copyStateInto(c, false);
+        copyOverridesInto(c, false);
     };
 
     auto saveState = [&](DefParamVisitor& visitor, Compilation& c) {
@@ -2520,8 +2508,7 @@ SmallVector<BindEntry> binds;
         // can cause the compilation to add more entries to the list (for recursive
         // module instantiations).
         binds.clear();
-        flat_hash_set<std::string> seenInstanceBindKeys;
-        flat_hash_set<std::string> seenDefinitionBindKeys;
+        bindMap.clear();
 
         auto makePathKey = [](const OpaqueInstancePath& path) {
             std::string key;
@@ -2599,11 +2586,11 @@ SmallVector<BindEntry> binds;
                 std::string key(instSym.getHierarchicalPath());
                 key.push_back('|');
                 key.append(syntax->instantiation->toString());
-                if (!seenInstanceBindKeys.emplace(key).second)
+                if (bindMap.find(key) != bindMap.end())
                     continue;
 
                 OpaqueInstancePath path(*target);
-                binds.emplace_back(BindEntry{std::move(path), nullptr, info});
+                bindMap.emplace(key, BindEntry{std::move(path), nullptr, info});
             }
 
             if (auto defTarget = resolvedBind.defTarget) {
@@ -2622,13 +2609,18 @@ SmallVector<BindEntry> binds;
                 std::string key = buildPathKey(path);
                 key.push_back('|');
                 key.append(syntax->instantiation->toString());
-                if (!seenDefinitionBindKeys.emplace(key).second)
+                if (bindMap.find(key) != bindMap.end())
                     continue;
 
-                binds.emplace_back(
-                    BindEntry{std::move(path), &defSyntax->as<ModuleDeclarationSyntax>(), info});
+                bindMap.emplace(
+                    key, BindEntry{std::move(path), &defSyntax->as<ModuleDeclarationSyntax>(), info});
             }
         }
+
+        binds.clear();
+        binds.reserve(bindMap.size());
+        for (auto& [_, entry] : bindMap)
+            binds.push_back(std::move(entry));
 
         if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
             std::cerr << "[BIND_SAVE] recorded bind entries=" << binds.size() << "\n";
@@ -2772,7 +2764,92 @@ SmallVector<BindEntry> binds;
     }
 
     // We have our final overrides; copy them into the main compilation unit.
-    copyStateInto(*this, true);
+    copyOverridesInto(*this, true);
+
+    // Apply binds only once to the main compilation now that overrides are final.
+    flat_hash_set<std::string> appliedBindKeys;
+    for (auto& entry : binds) {
+        std::string bindKey = buildPathKey(entry.path);
+        bindKey.push_back('|');
+        bindKey.append(entry.info.bindSyntax->instantiation->toString());
+        bool debugBind = std::getenv("SUKIMASIM_DEBUG_BIND");
+        if (debugBind) {
+            std::cerr << "[BIND_RESOLVE_FINAL] Processing bind entry\n";
+            std::cerr << "[BIND_RESOLVE_FINAL] definitionTarget: "
+                      << (entry.definitionTarget ? "yes" : "no") << "\n";
+            std::cerr << "[BIND_RESOLVE_FINAL] path.empty(): " << (entry.path.empty() ? "yes" : "no") << "\n";
+            std::cerr << "[BIND_RESOLVE_FINAL] key=" << bindKey << "\n";
+        }
+
+        auto skipBind = [&] {
+            if (debugBind)
+                std::cerr << "[BIND_RESOLVE_FINAL] duplicate key skipped\n";
+        };
+
+        if (!appliedBindKeys.emplace(bindKey).second) {
+            skipBind();
+            continue;
+        }
+
+        // reuse logic from previous copyStateInto block
+        auto applyBindEntry = [&](Compilation& c, const BindEntry& entry) {
+            auto getNodeForFinal = [&](const OpaqueInstancePath& path) {
+                HierarchyOverrideNode* node = &c.hierarchyOverrides;
+                for (auto& e : path.entries)
+                    node = &node->childNodes[e];
+                return node;
+            };
+
+            auto skipDueDuplicate = [&](const char* msg) {
+                if (debugBind)
+                    std::cerr << "[BIND_RESOLVE_FINAL] " << msg << "\n";
+            };
+
+            if (entry.definitionTarget) {
+                if (!entry.path.empty()) {
+                    auto node = getNodeForFinal(entry.path);
+                    if (!node->bindSyntaxSet.emplace(entry.info.bindSyntax).second) {
+                        skipDueDuplicate("skipped duplicate nested bind");
+                        return;
+                    }
+                    node->binds.push_back({entry.info, entry.definitionTarget});
+                    if (debugBind)
+                        std::cerr << "[BIND_RESOLVE_FINAL] Added bind to override node\n";
+                }
+                else {
+                    auto def = c.getDefinition(*c.root, *entry.definitionTarget);
+                    if (def) {
+                        auto defSym = const_cast<DefinitionSymbol*>(def);
+                        bool alreadyPresent = false;
+                        for (auto& existing : defSym->bindDirectives) {
+                            if (existing.bindSyntax == entry.info.bindSyntax) {
+                                alreadyPresent = true;
+                                break;
+                            }
+                        }
+                        if (alreadyPresent) {
+                            skipDueDuplicate("skipped duplicate definition bind");
+                            return;
+                        }
+                        defSym->bindDirectives.push_back(entry.info);
+                        if (debugBind)
+                            std::cerr << "[BIND_RESOLVE_FINAL] Added bind to definition "
+                                      << def->name << "\n";
+                    }
+                }
+            }
+            else {
+                auto node = getNodeForFinal(entry.path);
+                if (!node->bindSyntaxSet.emplace(entry.info.bindSyntax).second) {
+                    skipDueDuplicate("skipped duplicate instance bind");
+                    return;
+                }
+                node->binds.push_back({entry.info, nullptr});
+            }
+        };
+
+        applyBindEntry(*this, entry);
+    }
 }
 
 template<typename TDefList>
