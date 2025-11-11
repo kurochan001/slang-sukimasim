@@ -24,6 +24,8 @@
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
 #include "slang/syntax/AllSyntax.h"
+#include <iostream>
+#include <cstdlib>
 
 namespace slang::ast {
 
@@ -353,6 +355,15 @@ StatementBlockSymbol& StatementBlockSymbol::fromLabeledStmt(const Scope& scope,
 void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> insertCB) const {
     SLANG_ASSERT(!stmt);
 
+    // DEBUG: Entry point for variable elaboration (enabled with SUKIMASIM_DEBUG_PATTERN)
+    if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+        std::cerr << "[ELAB_DEBUG] elaborateVariables called\n";
+        auto* syntaxPtr = getSyntax();
+        if (syntaxPtr) {
+            std::cerr << "[ELAB_DEBUG]   syntax kind: " << toString(syntaxPtr->kind) << "\n";
+        }
+    }
+
     auto syntax = getSyntax();
     if (!syntax)
         return;
@@ -396,8 +407,38 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
 
         if (cond.matchesClause) {
             // Traditional pattern matching with matchesClause
+            // IEEE 1800-2023 §12.6: Pattern matching in conditional statements
+            //
+            // DEBUG: Pattern matching with matchesClause (enabled with SUKIMASIM_DEBUG_PATTERN)
+            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+                std::cerr << "[BLOCK_DEBUG] matchesClause processing\n";
+                std::cerr << "[BLOCK_DEBUG]   has expr: " << (cond.expr ? "yes" : "no") << "\n";
+            }
+
             SmallVector<const PatternVarSymbol*> vars;
-            if (!Pattern::createPatternVars(context, *cond.matchesClause->pattern, *cond.expr, vars))
+
+            // Bind the expression to get its type for pattern variable type inference
+            // CRITICAL FIX: Must use Expression::bind to get the type, not the syntax directly
+            auto& expr = Expression::bind(*cond.expr, context);
+
+            // DEBUG: Show expression type
+            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+                std::cerr << "[BLOCK_DEBUG]   expr.type: " << expr.type->toString() << "\n";
+                std::cerr << "[BLOCK_DEBUG]   pattern kind: " << toString(cond.matchesClause->pattern->kind) << "\n";
+            }
+
+            bool success = Pattern::createPatternVars(context, *cond.matchesClause->pattern, *expr.type, vars);
+
+            // DEBUG: Show result
+            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+                std::cerr << "[BLOCK_DEBUG]   createPatternVars success: " << (success ? "yes" : "no") << "\n";
+                std::cerr << "[BLOCK_DEBUG]   vars.size(): " << vars.size() << "\n";
+                for (size_t i = 0; i < vars.size(); i++) {
+                    std::cerr << "[BLOCK_DEBUG]     var[" << i << "]: " << vars[i]->name << "\n";
+                }
+            }
+
+            if (!success)
                 stmt = createInvalid();
 
             for (auto var : vars)
@@ -408,15 +449,38 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
             // Use Pattern::createPatternVars to handle all pattern types (including nested patterns)
             auto& matchesSyntax = cond.expr->as<syntax::MatchesExpressionSyntax>();
 
+            // DEBUG: Pattern matching in BlockSymbols
+            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+                std::cerr << "[BLOCK_DEBUG] MatchesExpression processing\n";
+                std::cerr << "[BLOCK_DEBUG]   has pattern: " << (matchesSyntax.pattern ? "yes" : "no") << "\n";
+            }
+
             if (matchesSyntax.pattern) {
                 SmallVector<const PatternVarSymbol*> vars;
 
                 // Bind the expression to get its type for pattern variable type inference
                 auto& expr = Expression::bind(*matchesSyntax.expr, context);
 
+                // DEBUG: Show expression type
+                if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+                    std::cerr << "[BLOCK_DEBUG]   expr.type: " << expr.type->toString() << "\n";
+                    std::cerr << "[BLOCK_DEBUG]   pattern kind: " << toString(matchesSyntax.pattern->kind) << "\n";
+                }
+
                 // Create pattern variables using the generic Pattern::createPatternVars
                 // This handles all pattern types: TaggedPattern, StructurePattern, VariablePattern, etc.
-                if (Pattern::createPatternVars(context, *matchesSyntax.pattern, *expr.type, vars)) {
+                bool success = Pattern::createPatternVars(context, *matchesSyntax.pattern, *expr.type, vars);
+
+                // DEBUG: Show result
+                if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
+                    std::cerr << "[BLOCK_DEBUG]   createPatternVars success: " << (success ? "yes" : "no") << "\n";
+                    std::cerr << "[BLOCK_DEBUG]   vars.size(): " << vars.size() << "\n";
+                    for (size_t i = 0; i < vars.size(); i++) {
+                        std::cerr << "[BLOCK_DEBUG]     var[" << i << "]: " << vars[i]->name << "\n";
+                    }
+                }
+
+                if (success) {
                     // Insert all created pattern variables into the current scope
                     for (auto var : vars)
                         insertCB(*var);
