@@ -31,6 +31,10 @@
 #include "slang/syntax/AllSyntax.h"
 #include "slang/util/TimeTrace.h"
 #include "slang/util/TypeTraits.h"
+#include "slang/util/Hash.h"
+#include <iostream>
+#include <string>
+#include <string_view>
 
 namespace {
 
@@ -38,6 +42,66 @@ using namespace slang;
 using namespace slang::ast;
 using namespace slang::parsing;
 using namespace slang::syntax;
+
+bool isHierarchicalName(const NameSyntax& name) {
+    return name.kind != SyntaxKind::IdentifierName;
+}
+
+std::string normalizeNameString(const NameSyntax& name) {
+    std::string text = name.toString();
+    auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return "";
+    auto last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+std::string combineScopeAndTarget(std::string_view scope, std::string_view inst) {
+    if (scope.empty())
+        return std::string(inst);
+    if (inst.empty())
+        return std::string(scope);
+    if (!inst.empty() && (inst[0] == '.' || inst[0] == '['))
+        return std::string(scope) + std::string(inst);
+    return std::string(scope) + "." + std::string(inst);
+}
+
+bool shouldApplyBindToInstance(const BindDirectiveInfo& info, const InstanceBodySymbol& body) {
+    auto parentInst = body.parentInstance;
+    if (!parentInst)
+        return true;
+
+    std::string thisPath = parentInst->getHierarchicalPath();
+    const auto& syntax = *info.bindSyntax;
+    bool debugBind = std::getenv("SUKIMASIM_DEBUG_BIND");
+
+    if (syntax.targetInstances) {
+        std::string scopeStr = normalizeNameString(*syntax.target);
+        for (auto target : syntax.targetInstances->targets) {
+            std::string targetStr = normalizeNameString(*target);
+            std::string candidate = combineScopeAndTarget(scopeStr, targetStr);
+            if (candidate == thisPath)
+                return true;
+        }
+        if (debugBind) {
+            std::cerr << "[BIND_FILTER] skip path=" << thisPath
+                      << " scope=" << scopeStr << std::endl;
+        }
+        return false;
+    }
+
+    if (isHierarchicalName(*syntax.target)) {
+        auto targetStr = normalizeNameString(*syntax.target);
+        bool match = targetStr == thisPath;
+        if (!match && debugBind) {
+            std::cerr << "[BIND_FILTER] hierarchical target=" << targetStr
+                      << " mismatch path=" << thisPath << std::endl;
+        }
+        return match;
+    }
+
+    return true;
+}
 
 // A helper class for building instances of definitions (modules/interfaces/programs).
 class InstanceBuilder {
@@ -1058,6 +1122,18 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(Compilation& comp,
 }
 
 void InstanceBodySymbol::finishElaboration(function_ref<void(const Symbol&)> insertCB) const {
+    bool debugBind = std::getenv("SUKIMASIM_DEBUG_BIND");
+    if (debugBind) {
+        std::cerr << "[BIND_FINISH] body=" << this << " def=" << definition.name
+                  << " parentPath="
+                  << (parentInstance ? parentInstance->getHierarchicalPath() : "<none>")
+                  << " targeted=" << flags.has(InstanceFlags::TargetedByBind)
+                  << " overrideNode=" << hierarchyOverrideNode
+                  << " overrideBindCount="
+                  << (hierarchyOverrideNode ? hierarchyOverrideNode->binds.size() : 0)
+                  << " defBindCount=" << getDefinition().bindDirectives.size() << std::endl;
+    }
+
     // Force port types to resolve so that back references to internal
     // variables and nets are known.
     for (auto port : portList) {
@@ -1076,9 +1152,43 @@ void InstanceBodySymbol::finishElaboration(function_ref<void(const Symbol&)> ins
     // If there are bind directives targeting this instance we need to apply them now.
     if (flags.has(InstanceFlags::TargetedByBind)) {
         SmallSet<const BindDirectiveSyntax*, 4> seenBindDirectives;
+        SmallSet<SourceLocation, 4> seenBindLocations;
+        flat_hash_set<std::string> seenBindKeys;
         ASTContext context(*this, LookupLocation::max);
         auto handleBind = [&](const BindDirectiveInfo& info) {
+            auto debug = std::getenv("SUKIMASIM_DEBUG_BIND");
+            if (debug) {
+                if (parentInstance)
+                    std::cerr << "[BIND_APPLY] instance path="
+                              << parentInstance->getHierarchicalPath() << " target="
+                              << info.bindSyntax->target->toString() << std::endl;
+            }
+
+            if (!shouldApplyBindToInstance(info, *this))
+                return;
+
+            if (parentInstance) {
+                std::string key = parentInstance->getHierarchicalPath();
+                key.push_back('|');
+                key += info.bindSyntax->instantiation->toString();
+                if (debug)
+                    std::cerr << "[BIND_KEY] " << key << std::endl;
+                if (!seenBindKeys.emplace(std::move(key)).second) {
+                    if (debug)
+                        std::cerr << "[BIND_SKIP] reason=key-duplicate\n";
+                    return;
+                }
+            }
+
+            if (!seenBindLocations.emplace(info.bindSyntax->bind.location()).second) {
+                if (debug)
+                    std::cerr << "[BIND_SKIP] reason=location-duplicate\n";
+                return;
+            }
+
             if (!seenBindDirectives.emplace(info.bindSyntax).second) {
+                if (debug)
+                    std::cerr << "[BIND_SKIP] reason=directive-duplicate\n";
                 addDiag(diag::DuplicateBind, info.bindSyntax->sourceRange());
                 return;
             }
