@@ -10,6 +10,7 @@
 #include "ElabVisitors.h"
 #include "builtins/Builtins.h"
 #include <fmt/core.h>
+#include <iostream>
 #include <mutex>
 
 #include "slang/ast/ScriptSession.h"
@@ -2114,6 +2115,14 @@ void Compilation::resolveBindTargets(const BindDirectiveSyntax& syntax, const Sc
         for (auto inst : syntax.targetInstances->targets) {
             LookupResult result;
             Lookup::name(*inst, context, flags, result);
+
+            // DEBUG: Output bind instance resolution status
+            if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                std::cerr << "[BIND_DEBUG] Looking for instance: " << inst->toString() << "\n";
+                std::cerr << "[BIND_DEBUG] Scope: " << scope.asSymbol().name << "\n";
+                std::cerr << "[BIND_DEBUG] Found: " << (result.found ? result.found->name : "<not found>") << "\n";
+            }
+
             result.reportDiags(context);
 
             if (result.found) {
@@ -2125,8 +2134,16 @@ void Compilation::resolveBindTargets(const BindDirectiveSyntax& syntax, const Sc
                         diag.addNote(diag::NoteDeclarationHere, result.found->location);
                     }
                     resolvedBind.instTargets.push_back(result.found);
+
+                    if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                        std::cerr << "[BIND_DEBUG] Added instance to targets: " << result.found->name << "\n";
+                    }
                 }
             }
+        }
+
+        if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+            std::cerr << "[BIND_DEBUG] Total instance targets: " << resolvedBind.instTargets.size() << "\n";
         }
     }
     else {
@@ -2322,12 +2339,22 @@ void Compilation::resolveDefParamsAndBinds() {
         }
 
         for (auto& entry : binds) {
+            if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                std::cerr << "[BIND_RESOLVE] Processing bind entry\n";
+                std::cerr << "[BIND_RESOLVE] definitionTarget: " << (entry.definitionTarget ? "yes" : "no") << "\n";
+                std::cerr << "[BIND_RESOLVE] path.empty(): " << (entry.path.empty() ? "yes" : "no") << "\n";
+            }
+
             if (entry.definitionTarget) {
                 if (!entry.path.empty()) {
                     // This is a nested definition, so we need to put the
                     // bind into the override node.
                     auto node = getNodeFor(entry.path, c);
                     node->binds.push_back({entry.info, entry.definitionTarget});
+
+                    if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                        std::cerr << "[BIND_RESOLVE] Added bind to override node (instance path bind)\n";
+                    }
                 }
                 else {
                     auto def = c.getDefinition(*c.root, *entry.definitionTarget);
@@ -2335,6 +2362,10 @@ void Compilation::resolveDefParamsAndBinds() {
                         // const_cast is fine; we accessed the private data of the compilation
                         // through a public interface that added the const on top.
                         const_cast<DefinitionSymbol*>(def)->bindDirectives.push_back(entry.info);
+
+                        if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                            std::cerr << "[BIND_RESOLVE] Added bind to definition: " << def->name << " (type bind)\n";
+                        }
                     }
                 }
             }
