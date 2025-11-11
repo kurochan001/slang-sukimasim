@@ -243,6 +243,7 @@ struct SLANG_EXPORT HierarchyOverrideNode {
     /// If the target is null, then the bind is actually targeting the
     /// scope represented by this override node.
     std::vector<std::pair<BindDirectiveInfo, const syntax::SyntaxNode*>> binds;
+    flat_hash_set<const syntax::BindDirectiveSyntax*> bindSyntaxSet;
 };
 
 /// A centralized location for creating and caching symbols. This includes
