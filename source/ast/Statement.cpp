@@ -402,33 +402,60 @@ Statement& Statement::badStmt(Compilation& compilation, const Statement* stmt) {
     return *compilation.emplace<InvalidStatement>(stmt);
 }
 
-// IEEE 1800-2023 §11.9: Check if an expression contains a MatchesExpression with pattern variables
-static bool hasMatchesExpressionWithPatternVar(const syntax::ExpressionSyntax& expr) {
-    // Recursively check if the expression syntax contains "matches" keyword
-    if (expr.kind == SyntaxKind::MatchesExpression) {
-        // Check if it has a pattern variable by looking at the pattern
-        auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
-        if (matchesExpr.pattern && matchesExpr.pattern->kind == SyntaxKind::TaggedPattern) {
-            auto& taggedPattern = matchesExpr.pattern->as<syntax::TaggedPatternSyntax>();
-            // Check if there's a nested variable pattern
-            if (taggedPattern.pattern &&
-                taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
-                return true;
-            }
+static bool patternContainsVariable(const syntax::PatternSyntax& pattern) {
+    switch (pattern.kind) {
+        case SyntaxKind::VariablePattern:
+            return true;
+        case SyntaxKind::ParenthesizedPattern:
+            return patternContainsVariable(*pattern.as<syntax::ParenthesizedPatternSyntax>().pattern);
+        case SyntaxKind::TaggedPattern: {
+            auto& tagged = pattern.as<syntax::TaggedPatternSyntax>();
+            return tagged.pattern && patternContainsVariable(*tagged.pattern);
         }
+        case SyntaxKind::StructurePattern: {
+            for (auto member : pattern.as<syntax::StructurePatternSyntax>().members) {
+                if (member->kind == SyntaxKind::NamedStructurePatternMember) {
+                    if (patternContainsVariable(
+                            *member->as<syntax::NamedStructurePatternMemberSyntax>().pattern))
+                        return true;
+                }
+                else if (member->kind == SyntaxKind::OrderedStructurePatternMember) {
+                    if (patternContainsVariable(
+                            *member->as<syntax::OrderedStructurePatternMemberSyntax>().pattern))
+                        return true;
+                }
+            }
+            return false;
+        }
+        default:
+            break;
     }
 
-    // Recursively check child expressions
+    for (uint32_t i = 0; i < pattern.getChildCount(); i++) {
+        auto child = pattern.childNode(i);
+        if (child && syntax::PatternSyntax::isKind(child->kind) &&
+            patternContainsVariable(child->as<syntax::PatternSyntax>()))
+            return true;
+    }
+
+    return false;
+}
+
+// IEEE 1800-2023 §11.9: Check if an expression contains a MatchesExpression with pattern variables
+static bool hasMatchesExpressionWithPatternVar(const syntax::ExpressionSyntax& expr) {
+    if (expr.kind == SyntaxKind::MatchesExpression) {
+        auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
+        if (matchesExpr.pattern && patternContainsVariable(*matchesExpr.pattern))
+            return true;
+    }
+
     for (uint32_t i = 0; i < expr.getChildCount(); i++) {
         auto child = expr.childNode(i);
-        if (child && child->kind == SyntaxKind::ExpressionStatement) {
-            // Not actually an expression, skip
+        if (child && child->kind == SyntaxKind::ExpressionStatement)
             continue;
-        }
-        if (child && syntax::ExpressionSyntax::isKind(child->kind)) {
-            if (hasMatchesExpressionWithPatternVar(child->as<syntax::ExpressionSyntax>()))
-                return true;
-        }
+        if (child && syntax::ExpressionSyntax::isKind(child->kind) &&
+            hasMatchesExpressionWithPatternVar(child->as<syntax::ExpressionSyntax>()))
+            return true;
     }
 
     return false;

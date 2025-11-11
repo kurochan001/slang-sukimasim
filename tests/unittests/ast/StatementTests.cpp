@@ -1861,6 +1861,57 @@ endmodule
     CHECK(diags[8].code == diag::PatternTaggedType);
 }
 
+TEST_CASE("Pattern matching structure variables accessible") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef union tagged {
+        struct packed {
+            bit [3:0] opcode;
+            bit [7:0] payload;
+        } Packet;
+        int raw;
+    } Instr;
+
+    Instr tmp;
+    byte result;
+    initial begin
+        tmp = tagged Packet '{4'b0101, 8'hAA};
+        if (tmp matches tagged Packet '{4'b0101, .payload}) begin
+            result = payload;
+        end
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Pattern matching matches expression variables accessible") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef union tagged {
+        struct packed { int addr; int data; } Load;
+        int raw;
+    } Instr;
+
+    Instr instr;
+    int sum;
+    initial begin
+        instr = tagged Load '{4, 5};
+        if (instr matches tagged Load '{.addr, .data}) begin
+            sum = addr + data;
+        end
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("Break / continue in fork join") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
