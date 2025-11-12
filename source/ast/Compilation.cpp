@@ -2389,6 +2389,7 @@ flat_hash_map<std::string, BindEntry> bindMap;
             return;
 
         flat_hash_set<std::string> appliedBindKeys;
+        flat_hash_set<const DefinitionSymbol*> clearedDefBindTargets;
 
         for (auto& entry : binds) {
             std::string bindKey = buildPathKey(entry.path);
@@ -2443,6 +2444,9 @@ flat_hash_map<std::string, BindEntry> bindMap;
                         // const_cast is fine; we accessed the private data of the compilation
                         // through a public interface that added the const on top.
                         auto defSym = const_cast<DefinitionSymbol*>(def);
+
+                        if (clearedDefBindTargets.emplace(defSym).second)
+                            defSym->bindDirectives.clear();
                         bool alreadyPresent = false;
                         for (auto& existing : defSym->bindDirectives) {
                             if (existing.bindSyntax == entry.info.bindSyntax) {
@@ -2763,7 +2767,8 @@ flat_hash_map<std::string, BindEntry> bindMap;
             break;
     }
 
-    // We have our final overrides; copy them into the main compilation unit.
+    // Rebuild hierarchy overrides from scratch for the final application.
+    hierarchyOverrides = HierarchyOverrideNode{};
     copyOverridesInto(*this, true);
 
     // Apply binds only once to the main compilation now that overrides are final.
