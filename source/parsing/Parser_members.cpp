@@ -265,12 +265,14 @@ MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) 
         }
         case TokenKind::AssertKeyword:
         case TokenKind::AssumeKeyword:
-        case TokenKind::CoverKeyword: {
+        case TokenKind::CoverKeyword:
+        case TokenKind::ExpectKeyword: {
             auto& statement = parseAssertionStatement(nullptr, {});
             switch (statement.kind) {
                 case SyntaxKind::ImmediateAssertStatement:
                 case SyntaxKind::ImmediateAssumeStatement:
                 case SyntaxKind::ImmediateCoverStatement:
+                case SyntaxKind::ImmediateExpectStatement:
                     return &factory.immediateAssertionMember(
                         attributes, statement.as<ImmediateAssertionStatementSyntax>());
                 default:
