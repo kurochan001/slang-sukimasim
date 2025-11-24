@@ -102,9 +102,9 @@ StatementSyntax& Parser::parseStatement(bool allowEmpty, bool allowSuperNew) {
         case TokenKind::AssertKeyword:
         case TokenKind::AssumeKeyword:
         case TokenKind::CoverKeyword:
+        case TokenKind::ExpectKeyword:
             return parseAssertionStatement(label, attributes);
         case TokenKind::RestrictKeyword:
-        case TokenKind::ExpectKeyword:
             return parseConcurrentAssertion(label, attributes);
         case TokenKind::WaitKeyword:
             return parseWaitStatement(label, attributes);
@@ -525,6 +525,11 @@ StatementSyntax& Parser::parseAssertionStatement(NamedLabelSyntax* label, AttrLi
                 return parseConcurrentAssertion(label, attributes);
             assertionKind = SyntaxKind::ImmediateCoverStatement;
             break;
+        case TokenKind::ExpectKeyword:
+            if (nextKind == TokenKind::PropertyKeyword)
+                return parseConcurrentAssertion(label, attributes);
+            assertionKind = SyntaxKind::ImmediateExpectStatement;
+            break;
         default:
             SLANG_UNREACHABLE;
     }
@@ -583,6 +588,7 @@ ConcurrentAssertionStatementSyntax& Parser::parseConcurrentAssertion(NamedLabelS
             break;
         case TokenKind::ExpectKeyword:
             kind = SyntaxKind::ExpectPropertyStatement;
+            propertyOrSequence = expect(TokenKind::PropertyKeyword);
             break;
         default:
             SLANG_UNREACHABLE;

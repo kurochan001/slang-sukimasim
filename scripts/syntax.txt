@@ -752,7 +752,7 @@ ParenthesizedExpression expr
 ActionBlock action
 
 kindmap<ImmediateAssertionStatement>
-ImmediateAssertStatement ImmediateAssumeStatement ImmediateCoverStatement
+ImmediateAssertStatement ImmediateAssumeStatement ImmediateCoverStatement ImmediateExpectStatement
 
 DisableIff
 token disable
