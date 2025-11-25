@@ -186,8 +186,11 @@ ConditionalStatementSyntax& Parser::parseConditionalStatement(NamedLabelSyntax* 
     auto openParen = expect(TokenKind::OpenParenthesis);
 
     Token closeParen;
-    auto& predicate = parseConditionalPredicate(parseExpression(), TokenKind::CloseParenthesis,
-                                                closeParen);
+    // Use PatternContext to prevent early matches keyword interception
+    // This allows parseConditionalPredicate to properly handle matchesClause
+    auto& predicate = parseConditionalPredicate(
+        parseSubExpression(ExpressionOptions::PatternContext, 0),
+        TokenKind::CloseParenthesis, closeParen);
     auto& statement = parseStatement();
     auto elseClause = parseElseClause();
 
