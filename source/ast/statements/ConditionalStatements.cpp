@@ -20,7 +20,6 @@
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/parsing/LexerFacts.h"
 #include "slang/syntax/AllSyntax.h"
-#include <iostream>
 
 namespace slang::ast {
 
@@ -28,62 +27,6 @@ using namespace syntax;
 using namespace parsing;
 
 using ER = Statement::EvalResult;
-
-static bool patternContainsVariable(const syntax::PatternSyntax& pattern) {
-    switch (pattern.kind) {
-        case SyntaxKind::VariablePattern:
-            return true;
-        case SyntaxKind::ParenthesizedPattern:
-            return patternContainsVariable(*pattern.as<ParenthesizedPatternSyntax>().pattern);
-        case SyntaxKind::TaggedPattern: {
-            auto& tagged = pattern.as<syntax::TaggedPatternSyntax>();
-            return tagged.pattern && patternContainsVariable(*tagged.pattern);
-        }
-        case SyntaxKind::StructurePattern: {
-            for (auto member : pattern.as<StructurePatternSyntax>().members) {
-                if (member->kind == SyntaxKind::NamedStructurePatternMember) {
-                    if (patternContainsVariable(
-                            *member->as<NamedStructurePatternMemberSyntax>().pattern))
-                        return true;
-                }
-                else if (member->kind == SyntaxKind::OrderedStructurePatternMember) {
-                    if (patternContainsVariable(
-                            *member->as<OrderedStructurePatternMemberSyntax>().pattern))
-                        return true;
-                }
-            }
-            return false;
-        }
-        default:
-            break;
-    }
-
-    for (uint32_t i = 0; i < pattern.getChildCount(); i++) {
-        auto child = pattern.childNode(i);
-        if (child && syntax::PatternSyntax::isKind(child->kind) &&
-            patternContainsVariable(child->as<syntax::PatternSyntax>()))
-            return true;
-    }
-
-    return false;
-}
-
-static bool expressionContainsPatternVar(const syntax::ExpressionSyntax& expr) {
-    if (expr.kind == SyntaxKind::MatchesExpression) {
-        auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
-        if (matchesExpr.pattern && patternContainsVariable(*matchesExpr.pattern))
-            return true;
-    }
-
-    for (uint32_t i = 0; i < expr.getChildCount(); i++) {
-        auto child = expr.childNode(i);
-        if (child && syntax::ExpressionSyntax::isKind(child->kind) &&
-            expressionContainsPatternVar(child->as<syntax::ExpressionSyntax>()))
-            return true;
-    }
-
-    return false;
-}
 
 static UniquePriorityCheck getUniquePriority(TokenKind kind) {
     UniquePriorityCheck check;
@@ -110,7 +53,6 @@ static UniquePriorityCheck getUniquePriority(TokenKind kind) {
 Statement& ConditionalStatement::fromSyntax(Compilation& comp,
                                             const ConditionalStatementSyntax& syntax,
                                             const ASTContext& context, StatementContext& stmtCtx) {
-    const bool debugPattern = std::getenv("SUKIMASIM_DEBUG_PATTERN");
     bool bad = false;
     bool isConst = true;
     bool isTrue = true;
@@ -126,12 +68,45 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
         const Pattern* pattern = nullptr;
 
         // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
-        bool isMatchesExprWithPatternVar =
-            condSyntax->expr && expressionContainsPatternVar(*condSyntax->expr);
+        // Check if the condition expression is a MatchesExpression with a pattern variable
+        bool isMatchesExprWithPatternVar = false;
+        if (!bad && cond.kind == ExpressionKind::Matches) {
+            auto& matchesExpr = cond.as<MatchesExpression>();
+            if (!matchesExpr.patternVar.empty()) {
+                isMatchesExprWithPatternVar = true;
+            }
+        }
+
+        // Also check the original syntax for nested MatchesExpression (e.g., !(expr matches ...))
+        // This is needed because !(v matches ...) binds as UnaryOp, not Matches
+        if (!isMatchesExprWithPatternVar && condSyntax->expr) {
+            std::function<bool(const syntax::ExpressionSyntax&)> hasSyntaxMatchesWithVar;
+            hasSyntaxMatchesWithVar = [&](const syntax::ExpressionSyntax& expr) -> bool {
+                if (expr.kind == SyntaxKind::MatchesExpression) {
+                    auto& me = expr.as<syntax::MatchesExpressionSyntax>();
+                    if (me.pattern && me.pattern->kind == SyntaxKind::TaggedPattern) {
+                        auto& tp = me.pattern->as<syntax::TaggedPatternSyntax>();
+                        if (tp.pattern && tp.pattern->kind == SyntaxKind::VariablePattern) {
+                            return true;
+                        }
+                    }
+                }
+                for (uint32_t i = 0; i < expr.getChildCount(); i++) {
+                    auto child = expr.childNode(i);
+                    if (child && syntax::ExpressionSyntax::isKind(child->kind)) {
+                        if (hasSyntaxMatchesWithVar(child->as<syntax::ExpressionSyntax>()))
+                            return true;
+                    }
+                }
+                return false;
+            };
+
+            if (hasSyntaxMatchesWithVar(*condSyntax->expr)) {
+                isMatchesExprWithPatternVar = true;
+            }
+        }
 
         if (condSyntax->matchesClause) {
-            if (debugPattern)
-                std::cerr << "[COND_DEBUG] matchesClause detected\n";
             // If there is a matches clause we expect a block to have been created.
             // The first one will be registered with the stmtCtx, the rest are children
             // of that first block.
@@ -171,8 +146,6 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
             isConst = false;
         }
         else if (isMatchesExprWithPatternVar) {
-            if (debugPattern)
-                std::cerr << "[COND_DEBUG] matches expression with pattern var detected\n";
             // IEEE 1800-2023 §11.9: MatchesExpression with pattern variable
             // The block was already created by findBlocks/StatementBlockSymbol::fromSyntax
             // We need to retrieve it and update the context
@@ -255,8 +228,6 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
     // which has the actual statement to execute; the others above it in the
     // tree just contain pattern variables.
     if (ifTrue) {
-        if (debugPattern)
-            std::cerr << "[COND_DEBUG] binding ifTrue via existing block\n";
         SLANG_ASSERT(currBlock);
         auto last = currBlock->getLastMember();
         SLANG_ASSERT(last);
@@ -264,8 +235,6 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
         ifTrue = &currBlock->getStatement(trueContext, stmtCtx);
     }
     else {
-        if (debugPattern)
-            std::cerr << "[COND_DEBUG] binding ifTrue directly in parent scope\n";
         ifTrue = &Statement::bind(*syntax.statement, trueContext.resetFlags(ifFlags), stmtCtx);
     }
 

@@ -103,10 +103,6 @@ public:
         return static_cast<const T*>(this);
     }
 
-    static void createPlaceholderVars(const ASTContext& context,
-                                      const syntax::PatternSyntax& syntax,
-                                      SmallVector<const PatternVarSymbol*>& results);
-
     /// Visits this pattern's concrete derived type via the provided visitor object.
     template<typename TVisitor, typename... Args>
     decltype(auto) visit(TVisitor& visitor, Args&&... args) const;
@@ -115,6 +111,10 @@ protected:
     Pattern(PatternKind kind, SourceRange sourceRange) : kind(kind), sourceRange(sourceRange) {}
 
     static Pattern& badPattern(Compilation& compilation, const Pattern* child);
+
+    static void createPlaceholderVars(const ASTContext& context,
+                                      const syntax::PatternSyntax& syntax,
+                                      SmallVector<const PatternVarSymbol*>& results);
 };
 
 /// @brief Represents an invalid pattern

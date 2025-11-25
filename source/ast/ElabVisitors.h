@@ -11,13 +11,13 @@
 #include "slang/ast/EvalContext.h"
 #include "slang/diagnostics/CompilationDiags.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
-#include "slang/util/Hash.h"
 #include "slang/util/TimeTrace.h"
 
 namespace slang::ast {
 
 static bool isEligibleForCaching(const InstanceSymbol& symbol) {
-    return !symbol.resolvedConfig && !symbol.body.flags.has(InstanceFlags::PreventsCaching);
+    return !symbol.resolvedConfig && !symbol.body.hierarchyOverrideNode &&
+           !symbol.body.flags.has(InstanceFlags::PreventsCaching);
 }
 
 class InstanceCacheKey {
@@ -33,9 +33,6 @@ public:
 private:
     not_null<const InstanceSymbol*> symbol;
     std::vector<std::pair<InstanceCacheKey, const ModportSymbol*>> ifaceKeys;
-    std::vector<std::pair<const syntax::BindDirectiveSyntax*, const syntax::SyntaxNode*>>
-        overrideBindSigs;
-    std::vector<const syntax::BindDirectiveSyntax*> defBindSigs;
     size_t savedHash;
 };
 
@@ -812,29 +809,13 @@ InstanceCacheKey::InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
         }
     }
 
-    if (auto node = symbol.body.hierarchyOverrideNode) {
-        for (auto& [info, targetDefSyntax] : node->binds) {
-            overrideBindSigs.emplace_back(info.bindSyntax, targetDefSyntax);
-            hash_combine(h, info.bindSyntax);
-            hash_combine(h, targetDefSyntax);
-        }
-    }
-
-    auto& defBinds = symbol.body.getDefinition().bindDirectives;
-    for (auto& info : defBinds) {
-        defBindSigs.push_back(info.bindSyntax);
-        hash_combine(h, info.bindSyntax);
-    }
-
     savedHash = h;
 }
 
 bool InstanceCacheKey::operator==(const InstanceCacheKey& other) const {
     if (savedHash != other.savedHash ||
         &symbol->getDefinition() != &other.symbol->getDefinition() ||
-        ifaceKeys.size() != other.ifaceKeys.size() ||
-        overrideBindSigs.size() != other.overrideBindSigs.size() ||
-        defBindSigs.size() != other.defBindSigs.size()) {
+        ifaceKeys.size() != other.ifaceKeys.size()) {
         return false;
     }
 
@@ -868,18 +849,6 @@ bool InstanceCacheKey::operator==(const InstanceCacheKey& other) const {
             return false;
 
         if (bool(l.second) != bool(r.second) || (l.second && l.second->name != r.second->name))
-            return false;
-    }
-
-    for (size_t i = 0; i < overrideBindSigs.size(); i++) {
-        auto& lhs = overrideBindSigs[i];
-        auto& rhs = other.overrideBindSigs[i];
-        if (lhs.first != rhs.first || lhs.second != rhs.second)
-            return false;
-    }
-
-    for (size_t i = 0; i < defBindSigs.size(); i++) {
-        if (defBindSigs[i] != other.defBindSigs[i])
             return false;
     }
 
