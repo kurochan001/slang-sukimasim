@@ -42,13 +42,9 @@ enum class SLANG_EXPORT VariableFlags : uint16_t {
     CheckerFreeVariable = 1 << 4,
 
     /// The variable is a function port with direction 'ref static'.
-    RefStatic = 1 << 5,
-
-    /// The variable was materialized as a placeholder for pattern matching scope setup
-    /// and should be replaced with a properly typed symbol during elaboration.
-    PatternPlaceholder = 1 << 6
+    RefStatic = 1 << 5
 };
-SLANG_BITMASK(VariableFlags, PatternPlaceholder)
+SLANG_BITMASK(VariableFlags, RefStatic)
 
 /// Represents a variable declaration.
 class SLANG_EXPORT VariableSymbol : public ValueSymbol {

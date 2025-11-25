@@ -14,8 +14,6 @@
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
 #include "slang/syntax/AllSyntax.h"
-#include <iostream>
-#include <cstdlib>
 
 namespace {
 
@@ -32,22 +30,6 @@ struct EvalVisitor {
         return pattern.evalImpl(context, value, conditionKind);
     }
 };
-
-PatternVarSymbol* tryReusePlaceholder(const ASTContext& context,
-                                     const syntax::VariablePatternSyntax& syntax) {
-    auto placeholders = context.patternVarPlaceholders;
-    for (auto placeholder : placeholders) {
-        if (!placeholder)
-            continue;
-
-        if (!placeholder->flags.has(VariableFlags::PatternPlaceholder))
-            continue;
-
-        if (placeholder->getSyntax() == &syntax)
-            return placeholder;
-    }
-    return nullptr;
-}
 
 } // namespace
 
@@ -97,32 +79,16 @@ bool Pattern::createPatternVars(const ASTContext& context, const PatternSyntax& 
 bool Pattern::createPatternVars(const ASTContext& context, const PatternSyntax& syntax,
                                 const Type& targetType,
                                 SmallVector<const PatternVarSymbol*>& results) {
-    if (targetType.isError()) {
-        createPlaceholderVars(context, syntax, results);
-        return true;
-    }
-
     switch (syntax.kind) {
         case SyntaxKind::ParenthesizedPattern:
             return createPatternVars(context, *syntax.as<ParenthesizedPatternSyntax>().pattern,
                                      targetType, results);
         case SyntaxKind::VariablePattern: {
             auto& varSyntax = syntax.as<VariablePatternSyntax>();
-            if (auto placeholder = tryReusePlaceholder(context, varSyntax)) {
-                auto mutableVar = const_cast<PatternVarSymbol*>(placeholder);
-                mutableVar->flags &= ~VariableFlags::CompilerGenerated;
-                mutableVar->flags &= ~VariableFlags::PatternPlaceholder;
-                mutableVar->setType(targetType);
-                mutableVar->setSyntax(varSyntax);
-                results.push_back(mutableVar);
-            }
-            else {
-                auto var = context.getCompilation().emplace<PatternVarSymbol>(
-                    varSyntax.variableName.valueText(), varSyntax.variableName.location(),
-                    targetType);
-                var->setSyntax(varSyntax);
-                results.push_back(var);
-            }
+            auto var = context.getCompilation().emplace<PatternVarSymbol>(
+                varSyntax.variableName.valueText(), varSyntax.variableName.location(), targetType);
+            var->setSyntax(varSyntax);
+            results.push_back(var);
             break;
         }
         case SyntaxKind::TaggedPattern:
@@ -290,13 +256,6 @@ void VariablePattern::serializeTo(ASTSerializer& serializer) const {
 bool TaggedPattern::createVars(const ASTContext& context, const syntax::TaggedPatternSyntax& syntax,
                                const Type& targetType,
                                SmallVector<const PatternVarSymbol*>& results) {
-    // DEBUG: Pattern matching variable creation
-    if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-        std::cerr << "[PATTERN_DEBUG] TaggedPattern::createVars called\n";
-        std::cerr << "[PATTERN_DEBUG]   targetType: " << targetType.toString() << "\n";
-        std::cerr << "[PATTERN_DEBUG]   isTaggedUnion: " << (targetType.isTaggedUnion() ? "yes" : "no") << "\n";
-    }
-
     if (!targetType.isTaggedUnion()) {
         if (!targetType.isError())
             context.addDiag(diag::PatternTaggedType, syntax.sourceRange()) << targetType;
@@ -321,15 +280,6 @@ bool TaggedPattern::createVars(const ASTContext& context, const syntax::TaggedPa
         return true;
 
     auto& field = member->as<FieldSymbol>();
-
-    // DEBUG: Show field type before recursive call
-    if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-        std::cerr << "[PATTERN_DEBUG]   memberName: " << memberName << "\n";
-        std::cerr << "[PATTERN_DEBUG]   field.getType(): " << field.getType().toString() << "\n";
-        std::cerr << "[PATTERN_DEBUG]   field.getType().isStruct(): " << (field.getType().isStruct() ? "yes" : "no") << "\n";
-        std::cerr << "[PATTERN_DEBUG]   syntax.pattern->kind: " << toString(syntax.pattern->kind) << "\n";
-    }
-
     return createPatternVars(context, *syntax.pattern, field.getType(), results);
 }
 
@@ -382,24 +332,9 @@ bool StructurePattern::createVars(const ASTContext& context,
                                   const syntax::StructurePatternSyntax& syntax,
                                   const Type& targetType,
                                   SmallVector<const PatternVarSymbol*>& results) {
-    // DEBUG: Structure pattern variable creation
-    if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-        std::cerr << "[PATTERN_DEBUG] StructurePattern::createVars called\n";
-        std::cerr << "[PATTERN_DEBUG]   targetType: " << targetType.toString() << "\n";
-        std::cerr << "[PATTERN_DEBUG]   isStruct: " << (targetType.isStruct() ? "yes" : "no") << "\n";
-        std::cerr << "[PATTERN_DEBUG]   members.size(): " << syntax.members.size() << "\n";
-        if (!syntax.members.empty()) {
-            std::cerr << "[PATTERN_DEBUG]   first member kind: " << toString(syntax.members[0]->kind) << "\n";
-        }
-    }
-
     if (!targetType.isStruct() || syntax.members.empty()) {
-        if (!targetType.isError() && !syntax.members.empty()) {
-            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-                std::cerr << "[PATTERN_DEBUG]   ERROR: Pattern expects struct but got: " << targetType.toString() << "\n";
-            }
+        if (!targetType.isError() && !syntax.members.empty())
             context.addDiag(diag::PatternStructType, syntax.sourceRange()) << targetType;
-        }
 
         createPlaceholderVars(context, syntax, results);
         return false;
@@ -409,9 +344,6 @@ bool StructurePattern::createVars(const ASTContext& context,
     auto& structScope = targetType.getCanonicalType().as<Scope>();
 
     if (syntax.members[0]->kind == SyntaxKind::OrderedStructurePatternMember) {
-        if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-            std::cerr << "[PATTERN_DEBUG]   Using OrderedStructurePatternMember branch\n";
-        }
         auto fields = structScope.membersOfType<FieldSymbol>();
         auto it = fields.begin();
         for (auto memberSyntax : syntax.members) {
@@ -437,19 +369,10 @@ bool StructurePattern::createVars(const ASTContext& context,
         }
     }
     else {
-        if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-            std::cerr << "[PATTERN_DEBUG]   Using NamedStructurePatternMember branch\n";
-        }
         for (auto memberSyntax : syntax.members) {
             auto& nspms = memberSyntax->as<NamedStructurePatternMemberSyntax>();
             auto memberName = nspms.name.valueText();
             auto member = structScope.find(memberName);
-
-            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-                std::cerr << "[PATTERN_DEBUG]     Processing member: " << memberName << "\n";
-                std::cerr << "[PATTERN_DEBUG]       Found in scope: " << (member ? "yes" : "no") << "\n";
-            }
-
             if (!member) {
                 if (!memberName.empty()) {
                     auto& diag = context.addDiag(diag::UnknownMember, nspms.name.range());
@@ -462,12 +385,6 @@ bool StructurePattern::createVars(const ASTContext& context,
             }
 
             auto& field = member->as<FieldSymbol>();
-
-            if (std::getenv("SUKIMASIM_DEBUG_PATTERN")) {
-                std::cerr << "[PATTERN_DEBUG]       field.getType(): " << field.getType().toString() << "\n";
-                std::cerr << "[PATTERN_DEBUG]       pattern kind: " << toString(nspms.pattern->kind) << "\n";
-            }
-
             result &= createPatternVars(context, *nspms.pattern, field.getType(), results);
         }
     }
