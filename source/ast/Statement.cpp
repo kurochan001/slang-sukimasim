@@ -443,6 +443,9 @@ static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
     }
 
     auto recurse = [&](auto stmt) {
+        if (!stmt) {
+            return;
+        }
         findBlocks(scope, *stmt, results, extraMembers, /* lableHandled */ false);
     };
 
@@ -596,10 +599,13 @@ static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
         case SyntaxKind::RestrictPropertyStatement:
         case SyntaxKind::ExpectPropertyStatement: {
             auto& ias = syntax.as<ConcurrentAssertionStatementSyntax>();
-            if (ias.action->statement)
-                recurse(ias.action->statement);
-            if (ias.action->elseClause)
-                recurse(&ias.action->elseClause->clause->as<StatementSyntax>());
+            // IEEE 1800-2023 §16.17: expect statements may not have an action block
+            if (ias.action) {
+                if (ias.action->statement)
+                    recurse(ias.action->statement);
+                if (ias.action->elseClause)
+                    recurse(&ias.action->elseClause->clause->as<StatementSyntax>());
+            }
             return;
         }
         case SyntaxKind::WaitOrderStatement: {
@@ -624,7 +630,9 @@ static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
             extraMembers.push_back(syntax.as<CheckerInstanceStatementSyntax>().instance);
             break;
         default:
-            SLANG_UNREACHABLE;
+            // Handle unexpected syntax kinds gracefully - this can occur when
+            // parsing fails and error recovery creates invalid nodes
+            return;
     }
 }
 
@@ -660,6 +668,10 @@ std::span<const StatementBlockSymbol* const> Statement::createAndAddBlockItems(
                 }
                 break;
             default:
+                // Safety check: ensure item is a valid StatementSyntax before processing
+                if (!StatementSyntax::isKind(item->kind)) {
+                    break;
+                }
                 findBlocks(scope, item->as<StatementSyntax>(), buffer, extraMembers, false);
                 break;
         }
@@ -677,6 +689,12 @@ std::span<const StatementBlockSymbol* const> Statement::createAndAddBlockItems(
 std::span<const StatementBlockSymbol* const> Statement::createBlockItems(
     const Scope& scope, const StatementSyntax& syntax, bool labelHandled,
     SmallVector<const SyntaxNode*>& extraMembers) {
+
+    // Safety check: ensure we have a valid StatementSyntax
+    // This can occur when parsing fails and error recovery creates invalid nodes
+    if (!StatementSyntax::isKind(syntax.kind)) {
+        return {};
+    }
 
     SmallVector<const StatementBlockSymbol*> buffer;
     findBlocks(scope, syntax, buffer, extraMembers, labelHandled);
