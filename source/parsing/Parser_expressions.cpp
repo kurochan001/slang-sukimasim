@@ -115,12 +115,16 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
 
         // Check for matches keyword before checking binary operators
         // IEEE 1800-2023 §11.9: Pattern matching with tagged unions
+        // Only create MatchesExpression if NOT followed by ternary operator (conditional expression)
+        // Otherwise, let the conditional expression handling create matchesClause with proper
+        // pattern variable scope
         if (current.kind == TokenKind::MatchesKeyword) {
-            if (!options.has(ExpressionOptions::PatternContext)) {
+            if (!options.has(ExpressionOptions::PatternContext) && !isConditionalExpression()) {
                 left = &parseMatchesExpression(*left);
                 continue;
             }
-            // In pattern context, let it fall through to conditional expression handling
+            // In pattern context or conditional expression, break to let conditional handling take over
+            break;
         }
 
         auto opKind = getBinaryExpression(current.kind);
