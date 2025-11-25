@@ -163,17 +163,46 @@ StatementBlockSymbol& StatementBlockSymbol::fromSyntax(const Scope& scope,
     StatementBlockSymbol* first = nullptr;
     StatementBlockSymbol* curr = nullptr;
 
+    // Helper function to recursively check if a pattern contains any VariablePattern
+    std::function<bool(const syntax::PatternSyntax&)> hasVariablePattern;
+    hasVariablePattern = [&hasVariablePattern](const syntax::PatternSyntax& pattern) -> bool {
+        switch (pattern.kind) {
+            case SyntaxKind::VariablePattern:
+                return true;
+            case SyntaxKind::TaggedPattern: {
+                auto& tp = pattern.as<syntax::TaggedPatternSyntax>();
+                if (tp.pattern)
+                    return hasVariablePattern(*tp.pattern);
+                return false;
+            }
+            case SyntaxKind::StructurePattern: {
+                auto& sp = pattern.as<syntax::StructurePatternSyntax>();
+                for (auto member : sp.members) {
+                    if (member->kind == SyntaxKind::OrderedStructurePatternMember) {
+                        if (hasVariablePattern(*member->as<syntax::OrderedStructurePatternMemberSyntax>().pattern))
+                            return true;
+                    }
+                    else if (member->kind == SyntaxKind::NamedStructurePatternMember) {
+                        if (hasVariablePattern(*member->as<syntax::NamedStructurePatternMemberSyntax>().pattern))
+                            return true;
+                    }
+                }
+                return false;
+            }
+            case SyntaxKind::ParenthesizedPattern:
+                return hasVariablePattern(*pattern.as<syntax::ParenthesizedPatternSyntax>().pattern);
+            default:
+                return false;
+        }
+    };
+
     // Helper function to check if expression contains MatchesExpression with pattern variable
     std::function<bool(const syntax::ExpressionSyntax&)> hasMatchesExprWithPatternVar;
-    hasMatchesExprWithPatternVar = [&hasMatchesExprWithPatternVar](const syntax::ExpressionSyntax& expr) -> bool {
+    hasMatchesExprWithPatternVar = [&hasMatchesExprWithPatternVar, &hasVariablePattern](const syntax::ExpressionSyntax& expr) -> bool {
         if (expr.kind == SyntaxKind::MatchesExpression) {
             auto& matchesExpr = expr.as<syntax::MatchesExpressionSyntax>();
-            if (matchesExpr.pattern && matchesExpr.pattern->kind == SyntaxKind::TaggedPattern) {
-                auto& taggedPattern = matchesExpr.pattern->as<syntax::TaggedPatternSyntax>();
-                if (taggedPattern.pattern &&
-                    taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
-                    return true;
-                }
+            if (matchesExpr.pattern && hasVariablePattern(*matchesExpr.pattern)) {
+                return true;
             }
         }
         // Check child expressions recursively
@@ -387,51 +416,19 @@ void StatementBlockSymbol::elaborateVariables(function_ref<void(const Symbol&)> 
                 insertCB(*var);
         }
         else if (cond.expr && cond.expr->kind == SyntaxKind::MatchesExpression) {
-            // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables at syntax level
+            // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
+            // Use Pattern::createPatternVars to handle all pattern types including StructurePattern
             auto& matchesSyntax = cond.expr->as<syntax::MatchesExpressionSyntax>();
 
-            // Extract pattern variable from the syntax
-            std::string_view patternVar;
-            std::string_view tagName;
-
-            if (matchesSyntax.pattern && matchesSyntax.pattern->kind == SyntaxKind::TaggedPattern) {
-                auto& taggedPattern = matchesSyntax.pattern->as<syntax::TaggedPatternSyntax>();
-                tagName = taggedPattern.memberName.valueText();
-
-                if (taggedPattern.pattern &&
-                    taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
-                    auto& varPattern = taggedPattern.pattern->as<syntax::VariablePatternSyntax>();
-                    patternVar = varPattern.variableName.valueText();
-                }
-            }
-
-            if (!patternVar.empty()) {
-                // Bind the expression to get its type
+            if (matchesSyntax.pattern) {
+                SmallVector<const PatternVarSymbol*> vars;
+                // Bind the expression to get its type for pattern variable type inference
                 auto& expr = Expression::bind(*matchesSyntax.expr, context);
-                auto& unionType = *expr.type;
-                const Type* memberType = &unionType;
+                if (!Pattern::createPatternVars(context, *matchesSyntax.pattern, *expr.type, vars))
+                    stmt = createInvalid();
 
-                // Get the canonical type (resolve typedefs)
-                auto& canonicalType = unionType.getCanonicalType();
-
-                // If it's a union type, get the member type
-                if (canonicalType.kind == SymbolKind::UnpackedUnionType ||
-                    canonicalType.kind == SymbolKind::PackedUnionType) {
-                    // Union types are scopes, so we can look up the member by name
-                    auto& unionScope = canonicalType.as<Scope>();
-                    auto member = unionScope.find(tagName);
-                    if (member && member->kind == SymbolKind::Field) {
-                        memberType = &member->as<FieldSymbol>().getType();
-                    }
-                }
-
-                // Create a PatternVarSymbol for the pattern variable
-                auto& comp = getCompilation();
-                auto* patternVarSymbol = comp.emplace<PatternVarSymbol>(
-                    patternVar,
-                    cond.expr->getFirstToken().location(),
-                    *memberType);
-                insertCB(*patternVarSymbol);
+                for (auto var : vars)
+                    insertCB(*var);
             }
         }
     }
