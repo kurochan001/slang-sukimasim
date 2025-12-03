@@ -8,6 +8,7 @@
 #include "slang/ast/expressions/MiscExpressions.h"
 
 #include "slang/ast/ASTSerializer.h"
+#include "slang/ast/Patterns.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
@@ -1663,39 +1664,60 @@ void TaggedUnionExpression::serializeTo(ASTSerializer& serializer) const {
         serializer.write("valueExpr", *valueExpr);
 }
 
-// IEEE 1800-2023 §11.9: Pattern matching for tagged unions
+// IEEE 1800-2023 §11.9, §12.6: Pattern matching for tagged unions with full pattern support
 Expression& MatchesExpression::fromSyntax(Compilation& compilation,
                                           const MatchesExpressionSyntax& syntax,
                                           const ASTContext& context) {
     // Bind the expression being matched
     auto& boundExpr = Expression::bind(*syntax.expr, context);
 
-    // Extract tag name and pattern variable from the pattern
-    std::string_view tagName;
-    std::string_view patternVar;
+    if (boundExpr.bad())
+        return badExpr(compilation, nullptr);
 
-    if (syntax.pattern->kind == SyntaxKind::TaggedPattern) {
-        auto& taggedPattern = syntax.pattern->as<TaggedPatternSyntax>();
-        tagName = taggedPattern.memberName.valueText();
+    // Bind the full pattern AST using Pattern::bind
+    // This supports all pattern types: TaggedPattern, StructurePattern, VariablePattern, etc.
+    const Pattern* pattern = nullptr;
+    if (syntax.pattern) {
+        pattern = &Pattern::bind(context, *syntax.pattern, *boundExpr.type);
+    }
 
-        // Check if there's a nested variable pattern
-        if (taggedPattern.pattern &&
-            taggedPattern.pattern->kind == SyntaxKind::VariablePattern) {
-            auto& varPattern = taggedPattern.pattern->as<VariablePatternSyntax>();
-            patternVar = varPattern.variableName.valueText();
-        }
+    if (!pattern) {
+        // Create a wildcard pattern as fallback
+        pattern = compilation.emplace<WildcardPattern>(syntax.sourceRange());
     }
 
     // The result type is a 1-bit logic (boolean)
     auto& boolType = compilation.getLogicType();
 
-    auto result = compilation.emplace<MatchesExpression>(boolType, boundExpr, tagName,
-                                                         patternVar, syntax.sourceRange());
+    auto result = compilation.emplace<MatchesExpression>(boolType, boundExpr, *pattern,
+                                                         syntax.sourceRange());
 
-    if (boundExpr.bad())
+    if (pattern->bad())
         return badExpr(compilation, result);
 
     return *result;
+}
+
+// Backward compatibility helper: extract tag name from TaggedPattern
+std::string_view MatchesExpression::getTagName() const {
+    if (pattern.kind == PatternKind::Tagged) {
+        return pattern.as<TaggedPattern>().member.name;
+    }
+    return {};
+}
+
+// Backward compatibility helper: extract pattern variable from simple VariablePattern
+std::string_view MatchesExpression::getPatternVar() const {
+    if (pattern.kind == PatternKind::Tagged) {
+        auto& tp = pattern.as<TaggedPattern>();
+        if (tp.valuePattern && tp.valuePattern->kind == PatternKind::Variable) {
+            return tp.valuePattern->as<VariablePattern>().variable.name;
+        }
+    }
+    else if (pattern.kind == PatternKind::Variable) {
+        return pattern.as<VariablePattern>().variable.name;
+    }
+    return {};
 }
 
 ConstantValue MatchesExpression::evalImpl(EvalContext& context) const {
@@ -1704,18 +1726,14 @@ ConstantValue MatchesExpression::evalImpl(EvalContext& context) const {
     if (!cv)
         return nullptr;
 
-    // For now, we return a simple boolean indicating success
-    // Full implementation would check if the active tag matches
-    // and bind the pattern variable to the union value
-    // This will be handled by sukimasim's evaluator
-    return SVInt(1, 1, false); // Return 1'b1 (true)
+    // Use Pattern::eval for full pattern matching support
+    // This handles TaggedPattern, StructurePattern, VariablePattern, etc.
+    return pattern.eval(context, cv, CaseStatementCondition::Normal);
 }
 
 void MatchesExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.write("expr", expr);
-    serializer.write("tagName", tagName);
-    if (!patternVar.empty())
-        serializer.write("patternVar", patternVar);
+    serializer.write("pattern", pattern);
 }
 
 } // namespace slang::ast

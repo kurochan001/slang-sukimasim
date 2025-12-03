@@ -17,6 +17,7 @@
 namespace slang::ast {
 
 class AssertionPortSymbol;
+class Pattern;  // Forward declaration for MatchesExpression
 
 /// Common base class for both NamedValueExpression and HierarchicalValueExpression.
 class SLANG_EXPORT ValueExpressionBase : public Expression {
@@ -458,22 +459,25 @@ public:
     }
 };
 
-/// Represents a pattern matching expression for tagged unions (IEEE 1800-2023 §11.9)
+/// Represents a pattern matching expression for tagged unions (IEEE 1800-2023 §11.9, §12.6)
 class SLANG_EXPORT MatchesExpression final : public Expression {
 public:
     /// The expression being matched
     const Expression& expr;
 
-    /// The tag name to match (e.g., "Integer", "Pair")
-    std::string_view tagName;
+    /// The full pattern AST (IEEE 1800-2023 §12.6: supports StructurePattern, TaggedPattern, etc.)
+    const Pattern& pattern;
 
-    /// The pattern variable name (e.g., "i", "p"), or empty if no variable
-    std::string_view patternVar;
-
-    MatchesExpression(const Type& type, const Expression& expr, std::string_view tagName,
-                     std::string_view patternVar, SourceRange sourceRange) :
+    MatchesExpression(const Type& type, const Expression& expr, const Pattern& pattern,
+                     SourceRange sourceRange) :
         Expression(ExpressionKind::Matches, type, sourceRange),
-        expr(expr), tagName(tagName), patternVar(patternVar) {}
+        expr(expr), pattern(pattern) {}
+
+    /// Get the tag name from TaggedPattern (for backward compatibility)
+    std::string_view getTagName() const;
+
+    /// Get the pattern variable name from simple VariablePattern (for backward compatibility)
+    std::string_view getPatternVar() const;
 
     ConstantValue evalImpl(EvalContext& context) const;
 
