@@ -72,7 +72,7 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
         bool isMatchesExprWithPatternVar = false;
         if (!bad && cond.kind == ExpressionKind::Matches) {
             auto& matchesExpr = cond.as<MatchesExpression>();
-            if (!matchesExpr.patternVar.empty()) {
+            if (!matchesExpr.getPatternVar().empty()) {
                 isMatchesExprWithPatternVar = true;
             }
         }
