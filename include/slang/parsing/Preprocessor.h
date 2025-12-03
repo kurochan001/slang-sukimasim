@@ -144,6 +144,11 @@ public:
     /// the user. If none is set, this returns false.
     bool getCellDefine() const { return cellDefine; }
 
+    /// Gets the currently active coverage collection state (IEEE 1800-2023 §22.11).
+    /// Returns true if coverage collection is enabled (default), false if disabled
+    /// via `pragma coverage off`.
+    bool getCoverageEnabled() const { return coverageEnabled; }
+
     /// Gets the currently active keyword version in use by the preprocessor.
     KeywordVersion getCurrentKeywordVersion() const { return keywordVersionStack.back(); }
 
@@ -230,6 +235,7 @@ private:
     void applyResetAllPragma(const syntax::PragmaDirectiveSyntax& pragma);
     void applyOncePragma(const syntax::PragmaDirectiveSyntax& pragma);
     void applyDiagnosticPragma(const syntax::PragmaDirectiveSyntax& pragma);
+    void applyCoveragePragma(const syntax::PragmaDirectiveSyntax& pragma);
     void ensurePragmaArgs(const syntax::PragmaDirectiveSyntax& pragma, size_t count);
     void ensureNoPragmaArgs(Token keyword, const syntax::PragmaExpressionSyntax* args);
     void resetProtectState();
@@ -444,6 +450,8 @@ private:
     TokenKind defaultNetType = TokenKind::WireKeyword;
     TokenKind unconnectedDrive = TokenKind::Unknown;
     bool cellDefine = false;
+    bool coverageEnabled = true;  // IEEE 1800-2023 §22.11 pragma coverage state
+    std::vector<bool> coverageStateStack;  // For pragma coverage save/restore
 
     int designElementDepth = 0;
     uint32_t includeDepth = 0;

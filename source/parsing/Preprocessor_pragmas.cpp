@@ -167,6 +167,11 @@ void Preprocessor::applyPragma(const PragmaDirectiveSyntax& pragma,
         return;
     }
 
+    if (name == "coverage") {
+        applyCoveragePragma(pragma);
+        return;
+    }
+
     // Otherwise, if the pragma is unknown warn and ignore.
     addDiag(diag::UnknownPragma, pragma.name.range()) << name;
 }
@@ -309,6 +314,45 @@ void Preprocessor::applyDiagnosticPragma(const PragmaDirectiveSyntax& pragma) {
         }
         else {
             addDiag(diag::ExpectedDiagPragmaArg, arg->sourceRange());
+        }
+    }
+}
+
+void Preprocessor::applyCoveragePragma(const PragmaDirectiveSyntax& pragma) {
+    // IEEE 1800-2023 §22.11: pragma coverage on/off/save/restore
+    if (pragma.args.empty()) {
+        Token last = pragma.getLastToken();
+        addDiag(diag::ExpectedPragmaExpression, last.location() + last.rawText().length());
+        return;
+    }
+
+    for (auto arg : pragma.args) {
+        if (arg->kind == SyntaxKind::SimplePragmaExpression) {
+            auto& simple = arg->as<SimplePragmaExpressionSyntax>();
+            std::string_view action = simple.value.rawText();
+
+            if (action == "on") {
+                coverageEnabled = true;
+            }
+            else if (action == "off") {
+                coverageEnabled = false;
+            }
+            else if (action == "save") {
+                coverageStateStack.push_back(coverageEnabled);
+            }
+            else if (action == "restore") {
+                if (!coverageStateStack.empty()) {
+                    coverageEnabled = coverageStateStack.back();
+                    coverageStateStack.pop_back();
+                }
+                // If stack is empty, just ignore (restore without save is benign)
+            }
+            else {
+                addDiag(diag::UnknownPragma, simple.value.range()) << action;
+            }
+        }
+        else {
+            addDiag(diag::ExpectedPragmaExpression, arg->sourceRange());
         }
     }
 }
