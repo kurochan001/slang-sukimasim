@@ -479,6 +479,10 @@ public:
     /// Get the pattern variable name from simple VariablePattern (for backward compatibility)
     std::string_view getPatternVar() const;
 
+    /// IEEE 1800-2023 §12.6: Check if pattern contains any VariablePattern at any depth
+    /// This handles TaggedPattern, StructurePattern, ParenthesizedPattern, etc.
+    bool hasPatternVars() const;
+
     ConstantValue evalImpl(EvalContext& context) const;
 
     void serializeTo(ASTSerializer& serializer) const;
