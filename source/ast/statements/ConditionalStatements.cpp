@@ -28,6 +28,44 @@ using namespace parsing;
 
 using ER = Statement::EvalResult;
 
+// IEEE 1800-2023 §12.6: Helper function to recursively check if a pattern
+// syntax contains any VariablePattern at any depth.
+// This handles TaggedPattern, StructurePattern, ParenthesizedPattern, etc.
+static bool patternSyntaxHasVariable(const PatternSyntax& pattern) {
+    switch (pattern.kind) {
+        case SyntaxKind::VariablePattern:
+            return true;
+        case SyntaxKind::ParenthesizedPattern:
+            return patternSyntaxHasVariable(
+                *pattern.as<ParenthesizedPatternSyntax>().pattern);
+        case SyntaxKind::TaggedPattern: {
+            auto& tp = pattern.as<TaggedPatternSyntax>();
+            if (tp.pattern)
+                return patternSyntaxHasVariable(*tp.pattern);
+            return false;
+        }
+        case SyntaxKind::StructurePattern: {
+            auto& sp = pattern.as<StructurePatternSyntax>();
+            for (auto member : sp.members) {
+                if (member->kind == SyntaxKind::OrderedStructurePatternMember) {
+                    if (patternSyntaxHasVariable(
+                            *member->as<OrderedStructurePatternMemberSyntax>().pattern))
+                        return true;
+                }
+                else if (member->kind == SyntaxKind::NamedStructurePatternMember) {
+                    if (patternSyntaxHasVariable(
+                            *member->as<NamedStructurePatternMemberSyntax>().pattern))
+                        return true;
+                }
+            }
+            return false;
+        }
+        default:
+            // WildcardPattern, ExpressionPattern don't have variables
+            return false;
+    }
+}
+
 static UniquePriorityCheck getUniquePriority(TokenKind kind) {
     UniquePriorityCheck check;
     switch (kind) {
@@ -67,28 +105,29 @@ Statement& ConditionalStatement::fromSyntax(Compilation& comp,
 
         const Pattern* pattern = nullptr;
 
-        // IEEE 1800-2023 §11.9: Handle MatchesExpression with pattern variables
-        // Check if the condition expression is a MatchesExpression with a pattern variable
+        // IEEE 1800-2023 §11.9, §12.6: Handle MatchesExpression with pattern variables
+        // Check if the condition expression is a MatchesExpression with pattern variables
+        // Uses hasPatternVars() to check all pattern types including StructurePattern
         bool isMatchesExprWithPatternVar = false;
         if (!bad && cond.kind == ExpressionKind::Matches) {
             auto& matchesExpr = cond.as<MatchesExpression>();
-            if (!matchesExpr.getPatternVar().empty()) {
+            if (matchesExpr.hasPatternVars()) {
                 isMatchesExprWithPatternVar = true;
             }
         }
 
         // Also check the original syntax for nested MatchesExpression (e.g., !(expr matches ...))
         // This is needed because !(v matches ...) binds as UnaryOp, not Matches
+        // IEEE 1800-2023 §12.6: Use patternSyntaxHasVariable to check all pattern types
         if (!isMatchesExprWithPatternVar && condSyntax->expr) {
             std::function<bool(const syntax::ExpressionSyntax&)> hasSyntaxMatchesWithVar;
             hasSyntaxMatchesWithVar = [&](const syntax::ExpressionSyntax& expr) -> bool {
                 if (expr.kind == SyntaxKind::MatchesExpression) {
                     auto& me = expr.as<syntax::MatchesExpressionSyntax>();
-                    if (me.pattern && me.pattern->kind == SyntaxKind::TaggedPattern) {
-                        auto& tp = me.pattern->as<syntax::TaggedPatternSyntax>();
-                        if (tp.pattern && tp.pattern->kind == SyntaxKind::VariablePattern) {
-                            return true;
-                        }
+                    // Check if pattern contains any VariablePattern at any depth
+                    // This handles TaggedPattern, StructurePattern, etc.
+                    if (me.pattern && patternSyntaxHasVariable(*me.pattern)) {
+                        return true;
                     }
                 }
                 for (uint32_t i = 0; i < expr.getChildCount(); i++) {

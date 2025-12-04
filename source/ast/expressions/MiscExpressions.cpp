@@ -1720,6 +1720,38 @@ std::string_view MatchesExpression::getPatternVar() const {
     return {};
 }
 
+// IEEE 1800-2023 §12.6: Helper to recursively check if Pattern AST contains any VariablePattern
+namespace {
+bool patternHasVariable(const Pattern& p) {
+    switch (p.kind) {
+        case PatternKind::Variable:
+            return true;
+        case PatternKind::Tagged: {
+            auto& tp = p.as<TaggedPattern>();
+            if (tp.valuePattern)
+                return patternHasVariable(*tp.valuePattern);
+            return false;
+        }
+        case PatternKind::Structure: {
+            auto& sp = p.as<StructurePattern>();
+            for (auto& fp : sp.patterns) {
+                if (patternHasVariable(*fp.pattern))
+                    return true;
+            }
+            return false;
+        }
+        default:
+            // Wildcard, Constant, Invalid patterns don't have variables
+            return false;
+    }
+}
+} // anonymous namespace
+
+// IEEE 1800-2023 §12.6: Check if pattern contains any VariablePattern at any depth
+bool MatchesExpression::hasPatternVars() const {
+    return patternHasVariable(pattern);
+}
+
 ConstantValue MatchesExpression::evalImpl(EvalContext& context) const {
     // Evaluate the expression being matched
     auto cv = expr.eval(context);
