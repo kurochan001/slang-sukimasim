@@ -886,6 +886,36 @@ private:
     size_t outputArgs;
 };
 
+class QueueFunction : public SystemSubroutine {
+public:
+    QueueFunction(KnownSystemName knownNameId, size_t minArgs, size_t maxArgs) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), minArgs(minArgs),
+        maxArgs(maxArgs) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, minArgs, maxArgs))
+            return comp.getErrorType();
+
+        for (const auto* arg : args) {
+            if (!arg->type->isIntegral())
+                return badArg(context, *arg);
+        }
+        return comp.getIntType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+
+private:
+    size_t minArgs;
+    size_t maxArgs;
+};
+
 class SdfAnnotateTask : public SystemTaskBase {
 public:
     SdfAnnotateTask() : SystemTaskBase(KnownSystemName::SdfAnnotate) {}
@@ -1297,17 +1327,12 @@ void Builtins::registerSystemTasks() {
 
 #undef ASSERTCTRL
 
-#define TASK(name, kind, input, output) \
-    addSystemSubroutine(std::make_shared<StochasticTask>(name, kind, input, output))
-    // IEEE 1800-2023 Section 22.5: Stochastic queue functions
-    // $q_initialize returns queue_id as function result
-    TASK(KnownSystemName::QInitialize, SubroutineKind::Function, 3, 0);  // (q_type, max_length, status) returns queue_id
-    TASK(KnownSystemName::QAdd, SubroutineKind::Function, 3, 0);        // (queue_id, job_id, inform_id) returns status
-    TASK(KnownSystemName::QRemove, SubroutineKind::Function, 3, 0);     // (queue_id, inform_id, status) returns job_id
-    TASK(KnownSystemName::QExam, SubroutineKind::Function, 4, 0);       // (queue_id, q_stat_code, q_stat_value, status) returns value
-    TASK(KnownSystemName::QFull, SubroutineKind::Function, 1, 0);       // (queue_id) returns 1 if full, 0 if not
-
-#undef TASK
+    // IEEE 1800-2023 Section 22.5: Stochastic queue functions (function-call form)
+    addSystemSubroutine(std::make_shared<QueueFunction>(KnownSystemName::QInitialize, 3, 4));
+    addSystemSubroutine(std::make_shared<QueueFunction>(KnownSystemName::QAdd, 3, 4));
+    addSystemSubroutine(std::make_shared<QueueFunction>(KnownSystemName::QRemove, 3, 4));
+    addSystemSubroutine(std::make_shared<QueueFunction>(KnownSystemName::QExam, 3, 4));
+    addSystemSubroutine(std::make_shared<QueueFunction>(KnownSystemName::QFull, 1, 2));
 
     // There are 16 PLA tasks, with sequential enum values starting with $async$and$array
     for (int i = 0; i < 16; i++) {
