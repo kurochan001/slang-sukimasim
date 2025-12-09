@@ -144,6 +144,11 @@ struct AnalysisScopeVisitor {
             spec.visit(*this);
     }
 
+    void visit(const GenericPackageDefSymbol& symbol) {
+        for (auto& spec : symbol.specializations())
+            spec.visit(*this);
+    }
+
     void visit(const NetType& symbol) {
         visitExprs(symbol);
 

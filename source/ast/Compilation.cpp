@@ -7,6 +7,8 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/Compilation.h"
 
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
+
 #include "ElabVisitors.h"
 #include "builtins/Builtins.h"
 #include <fmt/core.h>
@@ -944,6 +946,34 @@ const PackageSymbol* Compilation::getPackage(std::string_view lookupName) const 
     if (it == packageMap.end())
         return nullptr;
     return it->second;
+}
+
+const GenericPackageDefSymbol* Compilation::getGenericPackage(std::string_view lookupName) const {
+    auto it = genericPackageMap.find(lookupName);
+    if (it == genericPackageMap.end())
+        return nullptr;
+    return it->second;
+}
+
+void Compilation::addGenericPackage(const GenericPackageDefSymbol& pkg) {
+    SLANG_ASSERT(!isFrozen());
+
+    auto [it, inserted] = genericPackageMap.emplace(pkg.name, &pkg);
+    if (!inserted && !pkg.name.empty()) {
+        // Duplicate generic package definition - report error
+        auto& diag = root->addDiag(diag::Redefinition, pkg.location);
+        diag << pkg.name;
+        diag.addNote(diag::NotePreviousDefinition, it->second->location);
+    }
+}
+
+std::vector<const GenericPackageDefSymbol*> Compilation::getGenericPackages() const {
+    std::vector<const GenericPackageDefSymbol*> result;
+    for (auto& [name, pkg] : genericPackageMap) {
+        result.insert(
+            std::ranges::upper_bound(result, name, {}, [](auto item) { return item->name; }), pkg);
+    }
+    return result;
 }
 
 const PackageSymbol& Compilation::createPackage(const Scope& scope,

@@ -13,10 +13,14 @@
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/symbols/MemberSymbols.h"
+#include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/NetType.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
+#include "slang/diagnostics/TypesDiags.h"
 #include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxTree.h"
+#include "slang/util/ScopeGuard.h"
 
 namespace slang::ast {
 
@@ -686,6 +690,220 @@ void ConfigBlockSymbol::serializeTo(ASTSerializer&) const {
     // We don't serialize config blocks; they're never visited as
     // part of visiting the AST, they get resolved as part of
     // elaboration looking up definitions.
+}
+
+// GenericPackageDefSymbol implementation (IEEE 1800-2023 §26.2)
+
+bool GenericPackageDefSymbol::PackageSpecializationKey::operator==(
+    const PackageSpecializationKey& other) const {
+    if (paramValues.size() != other.paramValues.size() ||
+        typeParams.size() != other.typeParams.size()) {
+        return false;
+    }
+
+    for (size_t i = 0; i < paramValues.size(); i++) {
+        if (*paramValues[i] != *other.paramValues[i])
+            return false;
+    }
+
+    for (size_t i = 0; i < typeParams.size(); i++) {
+        if (!typeParams[i]->isEquivalent(*other.typeParams[i]))
+            return false;
+    }
+
+    return true;
+}
+
+size_t GenericPackageDefSymbol::PackageSpecializationHasher::operator()(
+    const PackageSpecializationKey& key) const {
+    size_t h = 0;
+    for (auto val : key.paramValues)
+        hash_combine(h, val->hash());
+    for (auto type : key.typeParams)
+        hash_combine(h, type->hash());
+    return h;
+}
+
+const Symbol& GenericPackageDefSymbol::fromSyntax(const Scope& scope,
+                                                   const ModuleDeclarationSyntax& syntax,
+                                                   const NetType& defaultNetType,
+                                                   std::optional<TimeScale> directiveTimeScale) {
+    auto& comp = scope.getCompilation();
+    auto result = comp.allocGenericPackage(syntax.header->name.valueText(),
+                                           syntax.header->name.location());
+    result->setSyntax(syntax);
+
+    // Extract parameter declarations
+    if (syntax.header->parameters) {
+        ParameterBuilder::createDecls(scope, *syntax.header->parameters, result->paramDecls);
+    }
+
+    // Store references for creating specializations later
+    result->originalSyntax = &syntax;
+    result->defaultNetType = &defaultNetType;
+    result->directiveTimeScale = directiveTimeScale;
+
+    return *result;
+}
+
+const PackageSymbol* GenericPackageDefSymbol::getDefaultSpecialization(const Scope& scope) const {
+    if (defaultSpecialization)
+        return *defaultSpecialization;
+
+    auto result = getSpecializationImpl(ASTContext(scope, LookupLocation::max), location,
+                                        /* forceInvalidParams */ false, nullptr);
+    if (!scope.isUninstantiated())
+        defaultSpecialization = result;
+    return result;
+}
+
+const PackageSymbol& GenericPackageDefSymbol::getSpecialization(
+    const ASTContext& context, const ParameterValueAssignmentSyntax& syntax) const {
+
+    auto result = getSpecializationImpl(context, syntax.getFirstToken().location(),
+                                        /* forceInvalidParams */ false, &syntax);
+    if (!result) {
+        // Return an invalid/error package
+        auto& comp = context.getCompilation();
+        auto errorPkg = comp.emplace<PackageSymbol>(comp, name, location,
+                                                     *defaultNetType, VariableLifetime::Static);
+        return *errorPkg;
+    }
+
+    return *result;
+}
+
+const PackageSymbol& GenericPackageDefSymbol::getInvalidSpecialization() const {
+    auto scope = getParentScope();
+    SLANG_ASSERT(scope);
+
+    auto result = getSpecializationImpl(ASTContext(*scope, LookupLocation::max), location,
+                                        /* forceInvalidParams */ true, nullptr);
+    if (!result) {
+        auto& comp = scope->getCompilation();
+        return *comp.emplace<PackageSymbol>(comp, name, location,
+                                            *defaultNetType, VariableLifetime::Static);
+    }
+
+    return *result;
+}
+
+const PackageSymbol* GenericPackageDefSymbol::getSpecializationImpl(
+    const ASTContext& context, SourceLocation instanceLoc, bool forceInvalidParams,
+    const ParameterValueAssignmentSyntax* syntax) const {
+
+    auto& comp = context.getCompilation();
+    auto scope = getParentScope();
+    SLANG_ASSERT(scope);
+
+    auto guard = ScopeGuard([this] { recursionDepth--; });
+    if (++recursionDepth > comp.getOptions().maxRecursiveClassSpecialization) {
+        context.addDiag(diag::RecursiveClassSpecialization, instanceLoc) << name;
+        return nullptr;
+    }
+
+    // Create the package symbol for this specialization
+    auto lifetime = SemanticFacts::getVariableLifetime(originalSyntax->header->lifetime);
+    auto pkgSymbol = comp.emplace<PackageSymbol>(comp, name, location, *defaultNetType,
+                                                  lifetime.value_or(VariableLifetime::Static));
+    pkgSymbol->setGenericPackage(this);
+    pkgSymbol->setSyntax(*originalSyntax);
+
+    // If this is for the default specialization, `syntax` will be null.
+    const bool isForDefault = syntax == nullptr;
+
+    ParameterBuilder paramBuilder(*context.scope, name, paramDecls);
+    paramBuilder.setForceInvalidValues(forceInvalidParams);
+    paramBuilder.setSuppressErrors(isForDefault);
+    paramBuilder.setInstanceContext(context);
+    if (syntax)
+        paramBuilder.setAssignments(*syntax, /* isFromConfig */ false);
+
+    SmallVector<const Symbol*> paramSymbols;
+    SmallVector<const ConstantValue*> paramValues;
+    SmallVector<const Type*> typeParams;
+
+    for (auto& decl : paramDecls) {
+        auto& param = paramBuilder.createParam(decl, *pkgSymbol, instanceLoc);
+        if (paramBuilder.hasErrors()) {
+            if (isForDefault)
+                return nullptr;
+            return pkgSymbol;  // Return with error state
+        }
+
+        if (!param.isLocalParam()) {
+            auto& sym = param.symbol;
+            paramSymbols.push_back(&sym);
+
+            if (sym.kind == SymbolKind::Parameter) {
+                auto& ps = sym.as<ParameterSymbol>();
+                SourceRange instRange = {instanceLoc, instanceLoc + 1};
+                paramValues.push_back(&ps.getValue(instRange));
+            }
+            else {
+                auto& tps = sym.as<TypeParameterSymbol>();
+                typeParams.push_back(&tps.targetType.getType());
+            }
+        }
+    }
+
+    if (!forceInvalidParams) {
+        PackageSpecializationKey key{paramValues.copy(comp), typeParams.copy(comp)};
+        bool isUninstantiated = forceInvalidParams || context.scope->isUninstantiated();
+
+        if (isUninstantiated) {
+            auto [it, inserted] = uninstantiatedSpecMap.emplace(key, pkgSymbol);
+            if (!inserted)
+                return it->second;
+        }
+        else {
+            auto [it, inserted] = specMap.emplace(key, pkgSymbol);
+            if (!inserted)
+                return it->second;
+        }
+    }
+
+    // Populate the package body from the original syntax
+    bool first = true;
+    std::optional<SourceRange> unitsRange;
+    std::optional<SourceRange> precisionRange;
+    SmallVector<const PackageImportItemSyntax*> exportDecls;
+
+    for (auto member : originalSyntax->members) {
+        if (member->kind == SyntaxKind::TimeUnitsDeclaration) {
+            if (!pkgSymbol->timeScale)
+                pkgSymbol->timeScale.emplace();
+
+            SemanticFacts::populateTimeScale(*pkgSymbol->timeScale, *scope,
+                                             member->as<TimeUnitsDeclarationSyntax>(), unitsRange,
+                                             precisionRange, first);
+            continue;
+        }
+
+        first = false;
+
+        if (member->kind == SyntaxKind::PackageExportAllDeclaration) {
+            pkgSymbol->hasExportAll = true;
+        }
+        else if (member->kind == SyntaxKind::PackageExportDeclaration) {
+            for (auto item : member->as<PackageExportDeclarationSyntax>().items)
+                exportDecls.push_back(item);
+        }
+
+        pkgSymbol->addMembers(*member);
+    }
+
+    pkgSymbol->exportDecls = exportDecls.copy(comp);
+
+    SemanticFacts::populateTimeScale(pkgSymbol->timeScale, *scope, directiveTimeScale, unitsRange,
+                                     precisionRange);
+
+    return pkgSymbol;
+}
+
+void GenericPackageDefSymbol::serializeTo(ASTSerializer& serializer) const {
+    serializer.write("numParameters", static_cast<int64_t>(paramDecls.size()));
+    serializer.write("numSpecializations", static_cast<int64_t>(specMap.size()));
 }
 
 } // namespace slang::ast

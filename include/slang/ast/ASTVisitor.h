@@ -190,6 +190,7 @@ decltype(auto) Symbol::visit(TVisitor&& visitor, Args&&... args) const {
         SYMBOL(InstanceBody);
         SYMBOL(InstanceArray);
         SYMBOL(Package);
+        SYMBOL(GenericPackageDef);
         SYMBOL(ExplicitImport);
         SYMBOL(WildcardImport);
         SYMBOL(GenerateBlock);
