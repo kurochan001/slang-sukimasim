@@ -71,6 +71,15 @@ public:
                                      std::optional<TimeScale> directiveTimeScale);
 
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::Package; }
+
+    /// Gets the generic package definition if this is a specialized package.
+    const class GenericPackageDefSymbol* getGenericPackage() const { return genericPackage; }
+
+    /// Sets the generic package definition for this specialized package.
+    void setGenericPackage(const class GenericPackageDefSymbol* pkg) { genericPackage = pkg; }
+
+private:
+    const class GenericPackageDefSymbol* genericPackage = nullptr;
 };
 
 /// Represents the entirety of a design, along with all contained compilation units.
@@ -217,6 +226,81 @@ public:
 
 private:
     mutable size_t instanceCount = 0;
+};
+
+/// Represents a generic package definition (IEEE 1800-2023 §26.2).
+/// A parameterized package that has not yet had its parameter values specified.
+class SLANG_EXPORT GenericPackageDefSymbol final : public Symbol {
+public:
+    using ParameterDecl = DefinitionSymbol::ParameterDecl;
+
+    GenericPackageDefSymbol(std::string_view name, SourceLocation loc) :
+        Symbol(SymbolKind::GenericPackageDef, name, loc) {}
+
+    /// Gets the default specialization for the package, or nullptr if the generic
+    /// package has no default specialization (because some parameters are not defaulted).
+    const PackageSymbol* getDefaultSpecialization(const Scope& scope) const;
+
+    /// Gets the specialization for the package given the specified parameter value
+    /// assignments. The result is cached and reused if requested more than once.
+    const PackageSymbol& getSpecialization(const ASTContext& context,
+                                           const syntax::ParameterValueAssignmentSyntax& syntax) const;
+
+    /// Forces a specialization with all parameters set to invalid values.
+    const PackageSymbol& getInvalidSpecialization() const;
+
+    /// Gets the number of specializations that have been made for this generic package.
+    size_t numSpecializations() const { return specMap.size(); }
+
+    /// Gets an iterator to the specializations created for the generic package.
+    auto specializations() const {
+        return std::views::transform(specMap,
+                                     [](auto& p) -> decltype(auto) { return *p.second; });
+    }
+
+    /// Gets the parameter declarations for this generic package.
+    std::span<const ParameterDecl> getParameters() const { return paramDecls; }
+
+    void serializeTo(ASTSerializer& serializer) const;
+
+    static const Symbol& fromSyntax(const Scope& scope,
+                                    const syntax::ModuleDeclarationSyntax& syntax,
+                                    const NetType& defaultNetType,
+                                    std::optional<TimeScale> directiveTimeScale);
+
+    static bool isKind(SymbolKind kind) { return kind == SymbolKind::GenericPackageDef; }
+
+private:
+    friend class PackageSymbol;
+
+    const PackageSymbol* getSpecializationImpl(const ASTContext& context, SourceLocation instanceLoc,
+                                               bool forceInvalidParams,
+                                               const syntax::ParameterValueAssignmentSyntax* syntax) const;
+
+    SmallVector<ParameterDecl, 8> paramDecls;
+
+    struct PackageSpecializationKey {
+        std::span<const ConstantValue* const> paramValues;
+        std::span<const Type* const> typeParams;
+
+        bool operator==(const PackageSpecializationKey& other) const;
+    };
+
+    struct PackageSpecializationHasher {
+        size_t operator()(const PackageSpecializationKey& key) const;
+    };
+
+    using SpecMap = flat_hash_map<PackageSpecializationKey, const PackageSymbol*,
+                                  PackageSpecializationHasher>;
+    mutable SpecMap specMap;
+    mutable SpecMap uninstantiatedSpecMap;
+    mutable std::optional<const PackageSymbol*> defaultSpecialization;
+    mutable uint32_t recursionDepth = 0;
+
+    // Store original syntax for creating specializations
+    const syntax::ModuleDeclarationSyntax* originalSyntax = nullptr;
+    const NetType* defaultNetType = nullptr;
+    std::optional<TimeScale> directiveTimeScale;
 };
 
 /// A rule that controls how a specific cell or instance in the design is configured.

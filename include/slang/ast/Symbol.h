@@ -71,6 +71,7 @@ enum class RandMode;
     x(InstanceBody) \
     x(InstanceArray) \
     x(Package) \
+    x(GenericPackageDef) \
     x(ExplicitImport) \
     x(WildcardImport) \
     x(Attribute) \

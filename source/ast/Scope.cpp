@@ -211,8 +211,20 @@ void Scope::addMembers(const SyntaxNode& syntax) {
         }
         case SyntaxKind::PackageDeclaration: {
             // Packages exist in their own namespace and are tracked in the Compilation.
-            auto& package = compilation.createPackage(*this, syntax.as<ModuleDeclarationSyntax>());
-            addMember(package);
+            // IEEE 1800-2023 §26.2: Parameterized packages use GenericPackageDefSymbol
+            auto& moduleSyntax = syntax.as<ModuleDeclarationSyntax>();
+            if (moduleSyntax.header->parameters) {
+                // Parameterized package - create generic package definition
+                auto& genericPkg = GenericPackageDefSymbol::fromSyntax(
+                    *this, moduleSyntax, getDefaultNetType(), std::nullopt);
+                addMember(genericPkg);
+                compilation.addGenericPackage(genericPkg.as<GenericPackageDefSymbol>());
+            }
+            else {
+                // Regular package - create normal package symbol
+                auto& package = compilation.createPackage(*this, moduleSyntax);
+                addMember(package);
+            }
             break;
         }
         case SyntaxKind::UdpDeclaration:

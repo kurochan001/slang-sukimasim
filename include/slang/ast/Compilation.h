@@ -33,6 +33,7 @@ class ConfigBlockSymbol;
 class DefinitionSymbol;
 class Expression;
 class GenericClassDefSymbol;
+class GenericPackageDefSymbol;
 class InstanceSymbol;
 class InterfacePortSymbol;
 class MethodPrototypeSymbol;
@@ -431,11 +432,23 @@ public:
     /// Gets the package with the give name, or nullptr if there is no such package.
     const PackageSymbol* getPackage(std::string_view name) const;
 
+    /// Gets the generic package definition with the given name, or nullptr if there is no such package.
+    /// IEEE 1800-2023 §26.2: Parameterized packages
+    const GenericPackageDefSymbol* getGenericPackage(std::string_view name) const;
+
+    /// Adds a generic package definition to the compilation.
+    /// IEEE 1800-2023 §26.2: Parameterized packages
+    void addGenericPackage(const GenericPackageDefSymbol& pkg);
+
     /// Gets the built-in 'std' package.
     const PackageSymbol& getStdPackage() const { return *stdPkg; }
 
     /// Gets a list of all packages in the design.
     std::vector<const PackageSymbol*> getPackages() const;
+
+    /// Gets a list of all generic package definitions in the design.
+    /// IEEE 1800-2023 §26.2: Parameterized packages
+    std::vector<const GenericPackageDefSymbol*> getGenericPackages() const;
 
     /// Gets the built-in gate type with the given name, or nullptr if there is no such gate.
     const PrimitiveSymbol* getGateType(std::string_view name) const;
@@ -735,6 +748,13 @@ public:
         return genericClassAllocator.emplace(std::forward<Args>(args)...);
     }
 
+    /// Allocates a generic package symbol (IEEE 1800-2023 §26.2).
+    template<typename... Args>
+    GenericPackageDefSymbol* allocGenericPackage(Args&&... args) {
+        SLANG_ASSERT(!isFrozen());
+        return genericPackageAllocator.emplace(std::forward<Args>(args)...);
+    }
+
     /// Allocates a config block symbol.
     ConfigBlockSymbol* allocConfigBlock(std::string_view name, SourceLocation loc);
 
@@ -861,6 +881,10 @@ private:
     // which is why they can't share the definitions name table.
     flat_hash_map<std::string_view, const PackageSymbol*> packageMap;
 
+    // The name map for generic package definitions (IEEE 1800-2023 §26.2).
+    // Parameterized packages have their own namespace separate from regular packages.
+    flat_hash_map<std::string_view, const GenericPackageDefSymbol*> genericPackageMap;
+
     // A list of known system subroutines, indexed via KnownSystemName values.
     std::vector<std::shared_ptr<SystemSubroutine>> systemSubroutines;
 
@@ -924,6 +948,7 @@ private:
     int nextUnionSystemId = 1;
 
     TypedBumpAllocator<GenericClassDefSymbol> genericClassAllocator;
+    TypedBumpAllocator<GenericPackageDefSymbol> genericPackageAllocator;
     TypedBumpAllocator<AssertionInstanceDetails> assertionDetailsAllocator;
     TypedBumpAllocator<ConfigBlockSymbol> configBlockAllocator;
     TypedBumpAllocator<Scope::WildcardImportData> wildcardImportAllocator;
