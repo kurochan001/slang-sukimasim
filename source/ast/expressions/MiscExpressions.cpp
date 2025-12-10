@@ -12,6 +12,7 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/diagnostics/AnalysisDiags.h"
 #include "slang/diagnostics/ConstEvalDiags.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
@@ -151,6 +152,15 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
             (symbol.kind == SymbolKind::ConstraintBlock && constraintAllowed) ||
             (symbol.kind == SymbolKind::Coverpoint && flags.has(ASTFlags::AllowCoverpoint))) {
             // Special case for event expressions and constraint block built-in methods.
+            return *comp.emplace<ArbitrarySymbolExpression>(*context.scope, symbol,
+                                                            comp.getVoidType(), hierRef,
+                                                            sourceRange);
+        }
+
+        // IEEE 1800-2023 §12.7.3: Interface arrays can be used in foreach loops
+        if (symbol.kind == SymbolKind::InstanceArray && flags.has(ASTFlags::ForeachLoopArray)) {
+            auto& instArray = symbol.as<InstanceArraySymbol>();
+            // Create an expression that represents the interface array for iteration
             return *comp.emplace<ArbitrarySymbolExpression>(*context.scope, symbol,
                                                             comp.getVoidType(), hierRef,
                                                             sourceRange);
