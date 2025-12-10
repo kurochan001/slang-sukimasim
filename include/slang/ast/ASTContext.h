@@ -180,8 +180,12 @@ enum class SLANG_EXPORT ASTFlags : uint64_t {
 
     /// AST binding is for a bind instantiation (port connection or param value).
     BindInstantiation = 1ull << 41,
+
+    /// AST binding is for a foreach loop array reference, which allows
+    /// interface arrays to be used (IEEE 1800-2023 §12.7.3).
+    ForeachLoopArray = 1ull << 42,
 };
-SLANG_BITMASK(ASTFlags, BindInstantiation)
+SLANG_BITMASK(ASTFlags, ForeachLoopArray)
 
 // clang-format off
 #define DK(x) \

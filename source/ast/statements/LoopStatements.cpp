@@ -11,6 +11,7 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/NumericDiags.h"
 #include "slang/diagnostics/StatementsDiags.h"
@@ -300,8 +301,11 @@ const Expression* ForeachLoopStatement::buildLoopDims(const ForeachLoopListSynta
     //    - Any kind of array
     //    - Any multi-dimensional integral type
     //    - A string
+    //    - An interface array (IEEE 1800-2023 §12.7.3)
     auto& comp = context.getCompilation();
-    auto& arrayRef = Expression::bind(*loopList.arrayName, context);
+    // Use ForeachLoopArray flag to allow interface arrays to be referenced
+    auto foreachContext = context.resetFlags(ASTFlags::ForeachLoopArray);
+    auto& arrayRef = Expression::bind(*loopList.arrayName, foreachContext);
     if (arrayRef.bad()) {
         // Create placeholder iterator symbols to prevent downstream errors.
         for (auto loopVar : loopList.loopVariables) {
@@ -318,6 +322,39 @@ const Expression* ForeachLoopStatement::buildLoopDims(const ForeachLoopListSynta
 
     const Type* type = arrayRef.type;
     auto arraySym = arrayRef.getSymbolReference();
+
+    // IEEE 1800-2023 §12.7.3: Handle interface arrays specially
+    bool isInterfaceArray = arraySym && arraySym->kind == SymbolKind::InstanceArray;
+    if (isInterfaceArray) {
+        // For interface arrays, we need to handle iteration differently
+        auto& instArray = arraySym->as<InstanceArraySymbol>();
+        auto& instRange = instArray.range;
+
+        // Build a single dimension for the interface array
+        for (auto loopVar : loopList.loopVariables) {
+            if (loopVar->kind == SyntaxKind::EmptyIdentifierName) {
+                dims.emplace_back();
+                continue;
+            }
+
+            auto& idName = loopVar->as<IdentifierNameSyntax>();
+            std::string_view name = idName.identifier.valueText();
+
+            if (name == arraySym->name) {
+                context.addDiag(diag::LoopVarShadowsArray, loopVar->sourceRange()) << name;
+                return nullptr;
+            }
+
+            // The type of the iterator is int for instance arrays
+            auto it = comp.emplace<IteratorSymbol>(name, idName.identifier.location(),
+                                                   comp.getVoidType(), comp.getIntType());
+            it->nextTemp = std::exchange(context.firstTempVar, it);
+            dims.push_back({instRange, it});
+        }
+
+        return &arrayRef;
+    }
+
     if (!arraySym || !type->isIterable()) {
         context.addDiag(diag::NotAnArray, arrayRef.sourceRange);
         return nullptr;
@@ -394,8 +431,14 @@ Statement& ForeachLoopStatement::fromSyntax(Compilation& compilation,
                                             const ASTContext& context, StatementContext& stmtCtx) {
     auto guard = stmtCtx.enterLoop();
 
-    auto& arrayRef = Expression::bind(*syntax.loopList->arrayName, context);
+    // Use ForeachLoopArray flag to allow interface arrays
+    auto foreachContext = context.resetFlags(ASTFlags::ForeachLoopArray);
+    auto& arrayRef = Expression::bind(*syntax.loopList->arrayName, foreachContext);
     SLANG_ASSERT(!arrayRef.bad());
+
+    // Check if this is an interface array
+    auto arraySym = arrayRef.getSymbolReference();
+    bool isInterfaceArray = arraySym && arraySym->kind == SymbolKind::InstanceArray;
 
     // Loop variables were already built in the containing block when it was elaborated,
     // so we just have to find them and associate them with the correct dim ranges here.
@@ -404,23 +447,40 @@ Statement& ForeachLoopStatement::fromSyntax(Compilation& compilation,
     auto range = context.scope->membersOfType<IteratorSymbol>();
     auto itIt = range.begin();
 
-    for (auto loopVar : syntax.loopList->loopVariables) {
-        if (type->hasFixedRange())
-            dims.push_back({type->getFixedRange()});
-        else
-            dims.emplace_back();
+    if (isInterfaceArray) {
+        // For interface arrays, use the instance array's range
+        auto& instArray = arraySym->as<InstanceArraySymbol>();
+        for (auto loopVar : syntax.loopList->loopVariables) {
+            if (loopVar->kind == SyntaxKind::EmptyIdentifierName) {
+                dims.emplace_back();
+                continue;
+            }
 
-        type = type->getArrayElementType();
+            SLANG_ASSERT(itIt != range.end());
+            IteratorSymbol* it = const_cast<IteratorSymbol*>(&*itIt);
+            dims.push_back({instArray.range, it});
+            itIt++;
+        }
+    }
+    else {
+        for (auto loopVar : syntax.loopList->loopVariables) {
+            if (type->hasFixedRange())
+                dims.push_back({type->getFixedRange()});
+            else
+                dims.emplace_back();
 
-        if (loopVar->kind == SyntaxKind::EmptyIdentifierName)
-            continue;
+            type = type->getArrayElementType();
 
-        SLANG_ASSERT(itIt != range.end());
-        SLANG_ASSERT(itIt->name == loopVar->as<IdentifierNameSyntax>().identifier.valueText());
+            if (loopVar->kind == SyntaxKind::EmptyIdentifierName)
+                continue;
 
-        IteratorSymbol* it = const_cast<IteratorSymbol*>(&*itIt);
-        dims.back().loopVar = it;
-        itIt++;
+            SLANG_ASSERT(itIt != range.end());
+            SLANG_ASSERT(itIt->name == loopVar->as<IdentifierNameSyntax>().identifier.valueText());
+
+            IteratorSymbol* it = const_cast<IteratorSymbol*>(&*itIt);
+            dims.back().loopVar = it;
+            itIt++;
+        }
     }
 
     SLANG_ASSERT(itIt == range.end());
