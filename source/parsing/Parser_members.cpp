@@ -2430,6 +2430,10 @@ PackageImportDeclarationSyntax& Parser::parseImportDeclaration(AttrList attribut
 
 PackageImportItemSyntax& Parser::parsePackageImportItem() {
     auto package = expect(TokenKind::Identifier);
+
+    // IEEE 1800-2023 §26.2: Support parameterized package imports (P#(N)::symbol)
+    auto paramAssignments = parseParameterValueAssignment();
+
     auto doubleColon = expect(TokenKind::DoubleColon);
 
     Token item;
@@ -2438,7 +2442,7 @@ PackageImportItemSyntax& Parser::parsePackageImportItem() {
     else
         item = expect(TokenKind::Identifier);
 
-    return factory.packageImportItem(package, doubleColon, item);
+    return factory.packageImportItem(package, paramAssignments, doubleColon, item);
 }
 
 MemberSyntax& Parser::parseExportDeclaration(AttrList attributes) {

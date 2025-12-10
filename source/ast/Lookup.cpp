@@ -783,6 +783,10 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
     if (lookForPackage) {
         symbol = context.getCompilation().getPackage(name.text);
         if (!symbol) {
+            // IEEE 1800-2023 §26.2: Also check for generic (parameterized) packages
+            symbol = context.getCompilation().getGenericPackage(name.text);
+        }
+        if (!symbol) {
             if (!context.scope->isUninstantiated()) {
                 result.addDiag(*context.scope, diag::UnknownClassOrPackage, name.range)
                     << name.text;
@@ -818,6 +822,20 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
                 symbol = parent;
             }
         }
+        // IEEE 1800-2023 §26.2: Handle generic packages with parameter assignments.
+        else if (symbol->kind == SymbolKind::GenericPackageDef) {
+            if (name.paramAssignments) {
+                auto& pkg = symbol->as<GenericPackageDefSymbol>().getSpecialization(
+                    context, *name.paramAssignments);
+                symbol = &pkg;
+                name.paramAssignments = nullptr;
+            }
+            else {
+                // Parameterized package requires parameter values for scope resolution
+                result.addDiag(*context.scope, diag::GenericClassScopeResolution, name.range);
+                return false;
+            }
+        }
         else if (name.paramAssignments) {
             auto& diag = result.addDiag(*context.scope, diag::NotAGenericClass, name.range);
             diag << symbol->name;
@@ -846,7 +864,9 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
         if (!symbol)
             return false;
 
-        if (symbol->kind != SymbolKind::Package) {
+        // IEEE 1800-2023 §26.2: Allow Package, GenericPackageDef (parameterized packages),
+        // class types, and covergroups for scoped name resolution
+        if (symbol->kind != SymbolKind::Package && symbol->kind != SymbolKind::GenericPackageDef) {
             auto isClass = isClassType(*symbol);
             if (!isClass.has_value())
                 return false;

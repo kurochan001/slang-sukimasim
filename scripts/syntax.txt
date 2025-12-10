@@ -582,6 +582,7 @@ token semi
 
 PackageImportItem
 token package
+ParameterValueAssignment? paramAssignments
 token doubleColon
 token item
 

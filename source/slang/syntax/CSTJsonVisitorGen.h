@@ -694,6 +694,7 @@
         writeSyntaxList("attributes", node.attributes);
         writeToken("keyword", node.keyword);
         writeToken("specString", node.specString);
+        writeToken("property", node.property);
         writeToken("c_identifier", node.c_identifier);
         writeToken("equals", node.equals);
         writeToken("functionOrTask", node.functionOrTask);
@@ -1531,6 +1532,13 @@
     }
     
 
+    void handle(const InterfaceClassPropertySyntax& node) {
+        writeSyntaxList("attributes", node.attributes);
+        writeToken("property", node.property);
+        writeNode("declaration", node.declaration);
+    }
+    
+
     void handle(const InterfacePortHeaderSyntax& node) {
         writeToken("nameOrKeyword", node.nameOrKeyword);
         writeOptionalNode("modport", node.modport);
@@ -1706,6 +1714,13 @@
 
     void handle(const MatchesClauseSyntax& node) {
         writeToken("matchesKeyword", node.matchesKeyword);
+        writeNode("pattern", node.pattern);
+    }
+    
+
+    void handle(const MatchesExpressionSyntax& node) {
+        writeNode("expr", node.expr);
+        writeToken("matches", node.matches);
         writeNode("pattern", node.pattern);
     }
     
@@ -2001,6 +2016,7 @@
 
     void handle(const PackageImportItemSyntax& node) {
         writeToken("package", node.package);
+        writeOptionalNode("paramAssignments", node.paramAssignments);
         writeToken("doubleColon", node.doubleColon);
         writeToken("item", node.item);
     }

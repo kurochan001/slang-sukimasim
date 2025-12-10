@@ -68,9 +68,28 @@ const PackageSymbol* ExplicitImportSymbol::package() const {
 }
 
 static const PackageSymbol* findPackage(std::string_view packageName, const Scope& lookupScope,
-                                        SourceLocation errorLoc, bool isFromExport) {
+                                        SourceLocation errorLoc, bool isFromExport,
+                                        const ParameterValueAssignmentSyntax* paramAssignments = nullptr) {
     auto& comp = lookupScope.getCompilation();
     auto package = comp.getPackage(packageName);
+
+    // IEEE 1800-2023 §26.2: If regular package not found, check for generic (parameterized) packages
+    if (!package) {
+        auto genericPkg = comp.getGenericPackage(packageName);
+        if (genericPkg) {
+            if (paramAssignments) {
+                // Get the specialized package using the parameter assignments
+                ASTContext context(lookupScope, LookupLocation::min);
+                package = &genericPkg->getSpecialization(context, *paramAssignments);
+            }
+            else {
+                // Generic package exists but no parameters provided
+                lookupScope.addDiag(diag::GenericClassScopeResolution, errorLoc);
+                return nullptr;
+            }
+        }
+    }
+
     if (!package) {
         if (!packageName.empty() && !comp.hasFlag(CompilationFlags::LintMode))
             lookupScope.addDiag(diag::UnknownPackage, errorLoc) << packageName;
@@ -103,10 +122,14 @@ const Symbol* ExplicitImportSymbol::importedSymbol() const {
         SLANG_ASSERT(scope);
 
         auto loc = location;
-        if (auto syntax = getSyntax())
-            loc = syntax->as<PackageImportItemSyntax>().package.location();
+        const ParameterValueAssignmentSyntax* paramAssignments = nullptr;
+        if (auto syntax = getSyntax()) {
+            auto& itemSyntax = syntax->as<PackageImportItemSyntax>();
+            loc = itemSyntax.package.location();
+            paramAssignments = itemSyntax.paramAssignments;
+        }
 
-        package_ = findPackage(packageName, *scope, loc, isFromExport);
+        package_ = findPackage(packageName, *scope, loc, isFromExport, paramAssignments);
         if (!package_)
             return nullptr;
 
@@ -144,10 +167,14 @@ const PackageSymbol* WildcardImportSymbol::getPackage() const {
         SLANG_ASSERT(scope);
 
         auto loc = location;
-        if (auto syntax = getSyntax(); syntax)
-            loc = syntax->as<PackageImportItemSyntax>().package.location();
+        const ParameterValueAssignmentSyntax* paramAssignments = nullptr;
+        if (auto syntax = getSyntax(); syntax) {
+            auto& itemSyntax = syntax->as<PackageImportItemSyntax>();
+            loc = itemSyntax.package.location();
+            paramAssignments = itemSyntax.paramAssignments;
+        }
 
-        package = findPackage(packageName, *scope, loc, isFromExport);
+        package = findPackage(packageName, *scope, loc, isFromExport, paramAssignments);
     }
     return *package;
 }
