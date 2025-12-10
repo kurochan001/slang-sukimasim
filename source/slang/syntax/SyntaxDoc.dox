@@ -1054,6 +1054,32 @@
     @brief Sets the child member (token or syntax node) at the provided index within this struct
 */
 
+/** @struct slang::syntax::MatchesExpressionSyntax
+    @brief Concrete syntax definition for a MatchesExpression
+    @var slang::syntax::MatchesExpressionSyntax::expr
+    @brief The expr member
+    @var slang::syntax::MatchesExpressionSyntax::matches
+    @brief The matches member
+    @var slang::syntax::MatchesExpressionSyntax::pattern
+    @brief The pattern member
+    @fn slang::syntax::MatchesExpressionSyntax::MatchesExpressionSyntax(ExpressionSyntax& expr, Token matches, PatternSyntax& pattern)
+    @brief Constructs a new instance of the MatchesExpressionSyntax struct
+    @fn slang::syntax::MatchesExpressionSyntax::MatchesExpressionSyntax(const MatchesExpressionSyntax&)
+    @brief Copy constructor
+    @fn slang::syntax::MatchesExpressionSyntax::isKind
+    @brief Returns true if the provided syntax kind is represented by this type
+    @fn static bool slang::syntax::MatchesExpressionSyntax::isChildOptional(size_t index);
+    @brief Returns true if child member (token or syntax node) at the provided index within this struct is a nullable pointer
+    @fn TokenOrSyntax slang::syntax::MatchesExpressionSyntax::getChild(size_t index)
+    @brief Gets the child member (token or syntax node) at the provided index within this struct
+    @fn ConstTokenOrSyntax slang::syntax::MatchesExpressionSyntax::getChild(size_t index) const
+    @brief Gets the child member (token or syntax node) as a pointer at the provided index within this struct
+    @fn PtrTokenOrSyntax slang::syntax::MatchesExpressionSyntax::getChildPtr(size_t index)
+    @brief Gets the child member (token or syntax node) at the provided index within this struct
+    @fn slang::syntax::MatchesExpressionSyntax::setChild
+    @brief Sets the child member (token or syntax node) at the provided index within this struct
+*/
+
 /** @struct slang::syntax::ConditionalExpressionSyntax
     @brief Concrete syntax definition for a ConditionalExpression
     @var slang::syntax::ConditionalExpressionSyntax::predicate
@@ -2636,11 +2662,13 @@
     @brief Concrete syntax definition for a PackageImportItem
     @var slang::syntax::PackageImportItemSyntax::package
     @brief The package member
+    @var slang::syntax::PackageImportItemSyntax::paramAssignments
+    @brief The paramAssignments member
     @var slang::syntax::PackageImportItemSyntax::doubleColon
     @brief The doubleColon member
     @var slang::syntax::PackageImportItemSyntax::item
     @brief The item member
-    @fn slang::syntax::PackageImportItemSyntax::PackageImportItemSyntax(Token package, Token doubleColon, Token item)
+    @fn slang::syntax::PackageImportItemSyntax::PackageImportItemSyntax(Token package, ParameterValueAssignmentSyntax* paramAssignments, Token doubleColon, Token item)
     @brief Constructs a new instance of the PackageImportItemSyntax struct
     @fn slang::syntax::PackageImportItemSyntax::PackageImportItemSyntax(const PackageImportItemSyntax&)
     @brief Copy constructor
@@ -6212,6 +6240,30 @@
     @brief Sets the child member (token or syntax node) at the provided index within this struct
 */
 
+/** @struct slang::syntax::InterfaceClassPropertySyntax
+    @brief Concrete syntax definition for an InterfaceClassProperty
+    @var slang::syntax::InterfaceClassPropertySyntax::property
+    @brief The property member
+    @var slang::syntax::InterfaceClassPropertySyntax::declaration
+    @brief The declaration member
+    @fn slang::syntax::InterfaceClassPropertySyntax::InterfaceClassPropertySyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token property, MemberSyntax& declaration)
+    @brief Constructs a new instance of the InterfaceClassPropertySyntax struct
+    @fn slang::syntax::InterfaceClassPropertySyntax::InterfaceClassPropertySyntax(const InterfaceClassPropertySyntax&)
+    @brief Copy constructor
+    @fn slang::syntax::InterfaceClassPropertySyntax::isKind
+    @brief Returns true if the provided syntax kind is represented by this type
+    @fn static bool slang::syntax::InterfaceClassPropertySyntax::isChildOptional(size_t index);
+    @brief Returns true if child member (token or syntax node) at the provided index within this struct is a nullable pointer
+    @fn TokenOrSyntax slang::syntax::InterfaceClassPropertySyntax::getChild(size_t index)
+    @brief Gets the child member (token or syntax node) at the provided index within this struct
+    @fn ConstTokenOrSyntax slang::syntax::InterfaceClassPropertySyntax::getChild(size_t index) const
+    @brief Gets the child member (token or syntax node) as a pointer at the provided index within this struct
+    @fn PtrTokenOrSyntax slang::syntax::InterfaceClassPropertySyntax::getChildPtr(size_t index)
+    @brief Gets the child member (token or syntax node) at the provided index within this struct
+    @fn slang::syntax::InterfaceClassPropertySyntax::setChild
+    @brief Sets the child member (token or syntax node) at the provided index within this struct
+*/
+
 /** @struct slang::syntax::ClassMethodDeclarationSyntax
     @brief Concrete syntax definition for a ClassMethodDeclaration
     @var slang::syntax::ClassMethodDeclarationSyntax::qualifiers
@@ -6788,6 +6840,8 @@
     @brief The keyword member
     @var slang::syntax::DPIExportSyntax::specString
     @brief The specString member
+    @var slang::syntax::DPIExportSyntax::property
+    @brief The property member
     @var slang::syntax::DPIExportSyntax::c_identifier
     @brief The c_identifier member
     @var slang::syntax::DPIExportSyntax::equals
@@ -6798,7 +6852,7 @@
     @brief The name member
     @var slang::syntax::DPIExportSyntax::semi
     @brief The semi member
-    @fn slang::syntax::DPIExportSyntax::DPIExportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token c_identifier, Token equals, Token functionOrTask, Token name, Token semi)
+    @fn slang::syntax::DPIExportSyntax::DPIExportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token property, Token c_identifier, Token equals, Token functionOrTask, Token name, Token semi)
     @brief Constructs a new instance of the DPIExportSyntax struct
     @fn slang::syntax::DPIExportSyntax::DPIExportSyntax(const DPIExportSyntax&)
     @brief Copy constructor
