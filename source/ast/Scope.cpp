@@ -367,6 +367,24 @@ void Scope::addMembers(const SyntaxNode& syntax) {
                 addMember(*param);
             break;
         }
+        case SyntaxKind::ParameterDeclaration: {
+            // Handle direct parameter declarations (e.g., from checker parameter lists)
+            SmallVector<ParameterSymbol*> params;
+            ParameterSymbol::fromSyntax(*this, syntax.as<ParameterDeclarationSyntax>(),
+                                        /* isLocal */ false, /* isPort */ true, params);
+            for (auto param : params)
+                addMember(*param);
+            break;
+        }
+        case SyntaxKind::TypeParameterDeclaration: {
+            // Handle direct type parameter declarations (e.g., from checker parameter lists)
+            SmallVector<TypeParameterSymbol*> params;
+            TypeParameterSymbol::fromSyntax(*this, syntax.as<TypeParameterDeclarationSyntax>(),
+                                            /* isLocal */ false, /* isPort */ true, params);
+            for (auto param : params)
+                addMember(*param);
+            break;
+        }
         case SyntaxKind::AlwaysBlock:
         case SyntaxKind::AlwaysCombBlock:
         case SyntaxKind::AlwaysLatchBlock:
