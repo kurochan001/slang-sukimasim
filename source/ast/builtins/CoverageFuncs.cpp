@@ -39,10 +39,15 @@ public:
         if (argIndex >= argTypes.size())
             return SystemSubroutine::bindArgument(argIndex, context, syntax, args);
 
-        if (argIndex == nameOrHierIndex && NameSyntax::isKind(syntax.kind)) {
-            return ArbitrarySymbolExpression::fromSyntax(context.getCompilation(),
-                                                         syntax.as<NameSyntax>(), context,
-                                                         LookupFlags::AllowRoot);
+        // For the nameOrHierIndex argument, accept hierarchical references, strings, or integers
+        if (argIndex == nameOrHierIndex) {
+            if (NameSyntax::isKind(syntax.kind)) {
+                return ArbitrarySymbolExpression::fromSyntax(context.getCompilation(),
+                                                             syntax.as<NameSyntax>(), context,
+                                                             LookupFlags::AllowRoot);
+            }
+            // Allow integers and strings for this argument too
+            return SystemSubroutine::bindArgument(argIndex, context, syntax, args);
         }
 
         return Expression::bindArgument(*argTypes[argIndex], ArgumentDirection::In, {}, syntax,
@@ -55,23 +60,30 @@ public:
         if (!checkArgCount(context, false, args, range, requiredArgs, argTypes.size()))
             return comp.getErrorType();
 
-        auto arg = args[nameOrHierIndex];
-        if (arg->kind == ExpressionKind::ArbitrarySymbol) {
-            auto& sym = *arg->as<ArbitrarySymbolExpression>().symbol;
-            if (sym.isValue()) {
-                auto& type = sym.as<ValueSymbol>().getType();
-                if (!type.isString()) {
-                    context.addDiag(diag::BadSystemSubroutineArg, arg->sourceRange)
-                        << type << kindStr();
+        // Only check the hierarchical reference argument if it was provided
+        // IEEE 1800-2023: This argument can be an integer, string, or hierarchical reference
+        if (nameOrHierIndex < args.size()) {
+            auto arg = args[nameOrHierIndex];
+            if (arg->kind == ExpressionKind::ArbitrarySymbol) {
+                auto& sym = *arg->as<ArbitrarySymbolExpression>().symbol;
+                if (sym.isValue()) {
+                    auto& type = sym.as<ValueSymbol>().getType();
+                    // Accept strings - valid for module name specification
+                    if (!type.isString()) {
+                        context.addDiag(diag::BadSystemSubroutineArg, arg->sourceRange)
+                            << type << kindStr();
+                        return comp.getErrorType();
+                    }
+                }
+                else if (sym.kind != SymbolKind::Root &&
+                         (sym.kind != SymbolKind::Instance || !sym.as<InstanceSymbol>().isModule())) {
+                    if (!context.scope->isUninstantiated())
+                        context.addDiag(diag::ExpectedModuleInstance, arg->sourceRange);
                     return comp.getErrorType();
                 }
             }
-            else if (sym.kind != SymbolKind::Root &&
-                     (sym.kind != SymbolKind::Instance || !sym.as<InstanceSymbol>().isModule())) {
-                if (!context.scope->isUninstantiated())
-                    context.addDiag(diag::ExpectedModuleInstance, arg->sourceRange);
-                return comp.getErrorType();
-            }
+            // Integers are also valid (e.g., 0 for all modules, 1 for instances)
+            // Non-ArbitrarySymbol expressions (like integer literals) are allowed
         }
 
         return *returnType;
@@ -137,9 +149,9 @@ void Builtins::registerCoverageFuncs() {
     // $coverage_control - System function (int return) per IEEE 1800-2023 Section 19.14.1
     // int $coverage_control(int control_constant, int coverage_type[, int scope_def[, int modules_or_instance]]);
     // First argument (control_constant) is required, remaining arguments are optional
-    // All arguments are integers (coverage_type, scope_def, modules_or_instance are all int enums/flags)
-    REGISTER(NonConstantFunction, KnownSystemName::CoverageControl, intType, 1,
-             std::vector<const Type*>{&intType, &intType, &intType, &intType});
+    // Fourth argument can be a hierarchy reference (like $root or $root.top.unit1) or a string
+    REGISTER(CoverageNameOrHierFunc, KnownSystemName::CoverageControl, intType, 3, 1,
+             std::vector<const Type*>{&intType, &intType, &intType, &stringType});
 
     // $coverage_get - System function (real return) per LRM 19.14.2
     // Arguments are optional - 0 to 3 arguments
@@ -165,7 +177,10 @@ void Builtins::registerCoverageFuncs() {
              std::vector<const Type*>{&intType, &stringType, &stringType});
 
     // Legacy coverage functions (kept for backward compatibility)
-    REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType);
+    // $get_coverage() - returns overall coverage (no args)
+    // $get_coverage("covergroup_name") - returns coverage for specific covergroup (optional string arg)
+    REGISTER(NonConstantFunction, KnownSystemName::GetCoverage, realType, 0,
+             std::vector<const Type*>{&stringType});
     REGISTER(SimpleSystemTask, KnownSystemName::SetCoverageDbName, voidType, 1,
              std::vector<const Type*>{&stringType});
     REGISTER(SimpleSystemTask, KnownSystemName::LoadCoverageDb, voidType, 1,
