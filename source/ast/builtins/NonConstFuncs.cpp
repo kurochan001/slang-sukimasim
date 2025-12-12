@@ -170,8 +170,10 @@ public:
         if (!checkArgCount(context, false, args, range, 2, 4))
             return comp.getErrorType();
 
-        // First argument is integral or an unpacked array.
-        if (!args[0]->type->isIntegral() && !args[0]->type->isUnpackedArray())
+        // First argument is integral, an unpacked array, or a string.
+        // IEEE 1800-2023 §21.3.4.4: $fread can read into string variables
+        if (!args[0]->type->isIntegral() && !args[0]->type->isUnpackedArray() &&
+            !args[0]->type->isString())
             return badArg(context, *args[0]);
 
         // Second argument is an fd (integral).
