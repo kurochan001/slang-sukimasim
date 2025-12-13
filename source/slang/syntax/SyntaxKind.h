@@ -435,6 +435,7 @@ enum class SLANG_EXPORT SyntaxKind {
     RsWeightClause,
     SUntilPropertyExpr,
     SUntilWithPropertyExpr,
+    SWithoutPropertyExpr,
     ScopedName,
     SequenceDeclaration,
     SequenceMatchList,
@@ -553,6 +554,7 @@ enum class SLANG_EXPORT SyntaxKind {
     WithFunctionClause,
     WithFunctionSample,
     WithinSequenceExpr,
+    WithoutPropertyExpr,
     XorAssignmentExpression,
 };
 

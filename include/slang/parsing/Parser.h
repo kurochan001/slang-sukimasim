@@ -355,9 +355,10 @@ private:
     syntax::TimingCheckArgSyntax& parseTimingCheckArg();
     syntax::EdgeDescriptorSyntax& parseEdgeDescriptor();
     syntax::SelectorSyntax* parseSequenceRange();
-    syntax::SequenceExprSyntax& parseDelayedSequenceExpr(syntax::SequenceExprSyntax* first);
+    syntax::SequenceExprSyntax& parseDelayedSequenceExpr(syntax::SequenceExprSyntax* first,
+                                                          bool isInProperty = false);
     syntax::SequenceExprSyntax& parseParenthesizedSeqExpr(Token openParen, syntax::SequenceExprSyntax& expr);
-    syntax::SequenceExprSyntax& parseSequencePrimary();
+    syntax::SequenceExprSyntax& parseSequencePrimary(bool isInProperty = false);
     syntax::SequenceExprSyntax& parseSequenceExpr(int precedence, bool isInProperty);
     syntax::SequenceExprSyntax& parseBinarySequenceExpr(syntax::SequenceExprSyntax* left, int precedence, bool isInProperty);
     syntax::PropertyExprSyntax& parseCasePropertyExpr();

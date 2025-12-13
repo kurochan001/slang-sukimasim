@@ -133,6 +133,8 @@ SyntaxKind SyntaxFacts::getBinaryPropertyExpr(TokenKind kind) {
         case TokenKind::SUntilKeyword: return SyntaxKind::SUntilPropertyExpr;
         case TokenKind::UntilWithKeyword: return SyntaxKind::UntilWithPropertyExpr;
         case TokenKind::SUntilWithKeyword: return SyntaxKind::SUntilWithPropertyExpr;
+        case TokenKind::WithoutKeyword: return SyntaxKind::WithoutPropertyExpr;
+        case TokenKind::SWithoutKeyword: return SyntaxKind::SWithoutPropertyExpr;
         case TokenKind::ImpliesKeyword: return SyntaxKind::ImpliesPropertyExpr;
         case TokenKind::OrMinusArrow: return SyntaxKind::ImplicationPropertyExpr;
         case TokenKind::OrEqualsArrow: return SyntaxKind::ImplicationPropertyExpr;
@@ -195,6 +197,8 @@ int SyntaxFacts::getPrecedence(SyntaxKind kind) {
         case SyntaxKind::SUntilPropertyExpr:
         case SyntaxKind::UntilWithPropertyExpr:
         case SyntaxKind::SUntilWithPropertyExpr:
+        case SyntaxKind::WithoutPropertyExpr:
+        case SyntaxKind::SWithoutPropertyExpr:
         case SyntaxKind::ImpliesPropertyExpr:
             return 2;
         case SyntaxKind::LogicalOrExpression:
@@ -272,6 +276,8 @@ bool SyntaxFacts::isRightAssociative(SyntaxKind kind) {
         case SyntaxKind::SUntilPropertyExpr:
         case SyntaxKind::UntilWithPropertyExpr:
         case SyntaxKind::SUntilWithPropertyExpr:
+        case SyntaxKind::WithoutPropertyExpr:
+        case SyntaxKind::SWithoutPropertyExpr:
         case SyntaxKind::ImpliesPropertyExpr:
         case SyntaxKind::ImplicationPropertyExpr:
         case SyntaxKind::FollowedByPropertyExpr:

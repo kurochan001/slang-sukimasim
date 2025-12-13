@@ -2088,6 +2088,7 @@ PropertyExpr right
 kindmap<BinaryPropertyExpr>
 AndPropertyExpr OrPropertyExpr IffPropertyExpr UntilPropertyExpr
 SUntilPropertyExpr UntilWithPropertyExpr SUntilWithPropertyExpr
+WithoutPropertyExpr SWithoutPropertyExpr
 ImpliesPropertyExpr ImplicationPropertyExpr FollowedByPropertyExpr
 
 ClockingPropertyExpr base=PropertyExpr

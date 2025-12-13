@@ -271,6 +271,7 @@ SEventuallyKeyword
 SNextTimeKeyword
 SUntilKeyword
 SUntilWithKeyword
+SWithoutKeyword
 ScalaredKeyword
 SequenceKeyword
 ShortIntKeyword
@@ -335,6 +336,7 @@ WhileKeyword
 WildcardKeyword
 WireKeyword
 WithKeyword
+WithoutKeyword
 WithinKeyword
 WOrKeyword
 XnorKeyword
