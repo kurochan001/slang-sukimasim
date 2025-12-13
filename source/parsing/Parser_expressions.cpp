@@ -1259,11 +1259,24 @@ TimingControlSyntax* Parser::parseTimingControl(bool inAssertion) {
             if (peek(TokenKind::OneStep))
                 return &factory.oneStepDelay(hash, consume());
 
-            auto& delay = parsePrimaryExpression(ExpressionOptions::DisallowVectors);
-            if (!isValidDelayExpr(delay.kind))
-                addDiag(diag::InvalidDelayValue, delay.sourceRange());
+            // IEEE 1800-2023 §14.5: Handle negative skew values (e.g., #-2ns for setup time)
+            ExpressionSyntax* delay;
+            if (peek(TokenKind::Minus)) {
+                auto minusToken = consume();
+                auto attributes = parseAttributes();  // Empty, but needed for API
+                auto& operand = parsePrimaryExpression(ExpressionOptions::DisallowVectors);
+                delay = &factory.prefixUnaryExpression(SyntaxKind::UnaryMinusExpression,
+                                                       minusToken, attributes, operand);
+            }
+            else {
+                delay = &parsePrimaryExpression(ExpressionOptions::DisallowVectors);
+            }
 
-            return &factory.delay(SyntaxKind::DelayControl, hash, delay);
+            if (!isValidDelayExpr(delay->kind) &&
+                delay->kind != SyntaxKind::UnaryMinusExpression)
+                addDiag(diag::InvalidDelayValue, delay->sourceRange());
+
+            return &factory.delay(SyntaxKind::DelayControl, hash, *delay);
         }
         case TokenKind::DoubleHash: {
             auto hash = consume();
