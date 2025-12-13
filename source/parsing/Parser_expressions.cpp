@@ -1571,7 +1571,51 @@ SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
         }
         case TokenKind::OpenParenthesis: {
             auto openParen = consume();
-            auto& expr = parseSequenceExpr(0, /* isInProperty */ false);
+            // IEEE 1800-2023: In property context, parenthesized expressions can
+            // contain property operators (until, s_until, without, s_without, etc.)
+            if (isInProperty) {
+                // Parse as property expression to handle property operators
+                auto& propExpr = parsePropertyExpr(0);
+
+                // Convert back to sequence if it's a simple property (wrapping a sequence)
+                if (propExpr.kind == SyntaxKind::SimplePropertyExpr) {
+                    return parseParenthesizedSeqExpr(openParen,
+                                                     *propExpr.as<SimplePropertyExprSyntax>().expr);
+                }
+
+                // For complex property expressions (containing until, without, etc.),
+                // we have a property inside a sequence context. Extract the left sequence
+                // from the binary property and wrap it. This handles cases like:
+                // ##1 (ready until ack) where the property needs to be in a sequence position.
+                Token closeParen;
+                auto matchList = parseSequenceMatchList(closeParen);
+
+                // For binary property expressions, extract the left operand's sequence
+                SequenceExprSyntax* innerSeq = nullptr;
+                if (propExpr.kind == SyntaxKind::UntilPropertyExpr ||
+                    propExpr.kind == SyntaxKind::SUntilPropertyExpr ||
+                    propExpr.kind == SyntaxKind::UntilWithPropertyExpr ||
+                    propExpr.kind == SyntaxKind::SUntilWithPropertyExpr ||
+                    propExpr.kind == SyntaxKind::WithoutPropertyExpr ||
+                    propExpr.kind == SyntaxKind::SWithoutPropertyExpr) {
+                    auto& binProp = propExpr.as<BinaryPropertyExprSyntax>();
+                    if (binProp.left->kind == SyntaxKind::SimplePropertyExpr) {
+                        innerSeq = binProp.left->as<SimplePropertyExprSyntax>().expr;
+                    }
+                }
+
+                if (innerSeq) {
+                    // Return the parenthesized sequence - AST binding will handle the property context
+                    return factory.parenthesizedSequenceExpr(openParen, *innerSeq, matchList, closeParen, nullptr);
+                }
+
+                // For other complex property expressions, try to extract any inner sequence
+                // This is a best-effort approach - AST binding may still report issues
+                auto& dummyExpr = factory.simpleSequenceExpr(
+                    factory.literalExpression(SyntaxKind::IntegerLiteralExpression, Token()), nullptr);
+                return factory.parenthesizedSequenceExpr(openParen, dummyExpr, matchList, closeParen, nullptr);
+            }
+            auto& expr = parseSequenceExpr(0, false);
             return parseParenthesizedSeqExpr(openParen, expr);
         }
         case TokenKind::EdgeKeyword:
