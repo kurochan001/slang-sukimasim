@@ -2737,6 +2737,8 @@ MemberSyntax* Parser::parseClockingItem() {
     ClockingSkewSyntax* outputSkew = nullptr;
     if (peek(TokenKind::InOutKeyword)) {
         input = consume();
+        // IEEE 1800-2023: inout clocking items can have a skew value
+        inputSkew = parseClockingSkew();
         if (def)
             addDiag(diag::InOutDefaultSkew, input.location());
     }
