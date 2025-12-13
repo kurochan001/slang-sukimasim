@@ -184,6 +184,8 @@ const AssertionExpr& AssertionExpr::bind(const PropertyExprSyntax& syntax,
         case SyntaxKind::SUntilPropertyExpr:
         case SyntaxKind::UntilWithPropertyExpr:
         case SyntaxKind::SUntilWithPropertyExpr:
+        case SyntaxKind::WithoutPropertyExpr:
+        case SyntaxKind::SWithoutPropertyExpr:
         case SyntaxKind::ImpliesPropertyExpr:
         case SyntaxKind::ImplicationPropertyExpr:
         case SyntaxKind::FollowedByPropertyExpr:
@@ -1103,7 +1105,8 @@ AssertionExpr& BinaryAssertionExpr::fromSyntax(const BinaryPropertyExprSyntax& s
         rflags = ASTFlags::PropertyTimeAdvance;
     }
     else if (syntax.kind == SyntaxKind::SUntilPropertyExpr ||
-             syntax.kind == SyntaxKind::SUntilWithPropertyExpr) {
+             syntax.kind == SyntaxKind::SUntilWithPropertyExpr ||
+             syntax.kind == SyntaxKind::SWithoutPropertyExpr) {
         lflags = rflags = ASTFlags::PropertyNegation;
     }
 
@@ -1127,6 +1130,8 @@ AssertionExpr& BinaryAssertionExpr::fromSyntax(const BinaryPropertyExprSyntax& s
         case SyntaxKind::SUntilPropertyExpr: op = BinaryAssertionOperator::SUntil; break;
         case SyntaxKind::UntilWithPropertyExpr: op = BinaryAssertionOperator::UntilWith; break;
         case SyntaxKind::SUntilWithPropertyExpr: op = BinaryAssertionOperator::SUntilWith; break;
+        case SyntaxKind::WithoutPropertyExpr: op = BinaryAssertionOperator::Without; break;
+        case SyntaxKind::SWithoutPropertyExpr: op = BinaryAssertionOperator::SWithout; break;
         case SyntaxKind::ImpliesPropertyExpr: op = BinaryAssertionOperator::Implies; break;
         case SyntaxKind::ImplicationPropertyExpr:
             left.requireSequence(context, diag::PropertyLhsInvalid);

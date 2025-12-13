@@ -325,6 +325,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "s_nexttime", TokenKind::SNextTimeKeyword },\
     { "s_until", TokenKind::SUntilKeyword },\
     { "s_until_with", TokenKind::SUntilWithKeyword },\
+    { "s_without", TokenKind::SWithoutKeyword },\
     { "strong", TokenKind::StrongKeyword },\
     { "sync_accept_on", TokenKind::SyncAcceptOnKeyword },\
     { "sync_reject_on", TokenKind::SyncRejectOnKeyword },\
@@ -332,7 +333,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "until", TokenKind::UntilKeyword },\
     { "until_with", TokenKind::UntilWithKeyword },\
     { "untyped", TokenKind::UntypedKeyword },\
-    { "weak", TokenKind::WeakKeyword }
+    { "weak", TokenKind::WeakKeyword },\
+    { "without", TokenKind::WithoutKeyword }
 
 #define NEWKEYWORDS_1800_2012 \
     { "implements", TokenKind::ImplementsKeyword },\
@@ -580,6 +582,7 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::SNextTimeKeyword:
         case TokenKind::SUntilKeyword:
         case TokenKind::SUntilWithKeyword:
+        case TokenKind::SWithoutKeyword:
         case TokenKind::ScalaredKeyword:
         case TokenKind::SequenceKeyword:
         case TokenKind::ShortIntKeyword:
@@ -628,6 +631,7 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::UntilKeyword:
         case TokenKind::UntilWithKeyword:
         case TokenKind::UntypedKeyword:
+        case TokenKind::WithoutKeyword:
         case TokenKind::UseKeyword:
         case TokenKind::UWireKeyword:
         case TokenKind::VarKeyword:
@@ -982,6 +986,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::SNextTimeKeyword: return "s_nexttime";
         case TokenKind::SUntilKeyword: return "s_until";
         case TokenKind::SUntilWithKeyword: return "s_until_with";
+        case TokenKind::SWithoutKeyword: return "s_without";
         case TokenKind::ScalaredKeyword: return "scalared";
         case TokenKind::SequenceKeyword: return "sequence";
         case TokenKind::ShortIntKeyword: return "shortint";
@@ -1029,6 +1034,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::UntilWithKeyword: return "until_with";
         case TokenKind::UntypedKeyword: return "untyped";
         case TokenKind::UseKeyword: return "use";
+        case TokenKind::WithoutKeyword: return "without";
         case TokenKind::UWireKeyword: return "uwire";
         case TokenKind::VarKeyword: return "var";
         case TokenKind::VectoredKeyword: return "vectored";

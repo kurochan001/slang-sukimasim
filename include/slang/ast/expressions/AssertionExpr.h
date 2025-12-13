@@ -56,6 +56,8 @@ SLANG_ENUM(UnaryAssertionOperator, OP)
     x(SUntil) \
     x(UntilWith) \
     x(SUntilWith) \
+    x(Without) \
+    x(SWithout) \
     x(Implies) \
     x(OverlappedImplication) \
     x(NonOverlappedImplication) \

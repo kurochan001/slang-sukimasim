@@ -1404,7 +1404,7 @@ SelectorSyntax* Parser::parseSequenceRange() {
     return result;
 }
 
-SequenceExprSyntax& Parser::parseDelayedSequenceExpr(SequenceExprSyntax* first) {
+SequenceExprSyntax& Parser::parseDelayedSequenceExpr(SequenceExprSyntax* first, bool isInProperty) {
     SmallVector<DelayedSequenceElementSyntax*> elements;
     do {
         Token op, openBracket, closeBracket;
@@ -1428,7 +1428,8 @@ SequenceExprSyntax& Parser::parseDelayedSequenceExpr(SequenceExprSyntax* first) 
             delayVal = &parsePrimaryExpression(ExpressionOptions::None);
         }
 
-        auto& expr = parseSequencePrimary();
+        // IEEE 1800-2023: Propagate property context to inner expressions
+        auto& expr = parseSequencePrimary(isInProperty);
         elements.push_back(&factory.delayedSequenceElement(hash, delayVal, openBracket, op,
                                                            selector, closeBracket, expr));
 
@@ -1548,11 +1549,11 @@ SequenceExprSyntax& Parser::parseParenthesizedSeqExpr(Token openParen, SequenceE
     return factory.parenthesizedSequenceExpr(openParen, expr, matchList, closeParen, repetition);
 }
 
-SequenceExprSyntax& Parser::parseSequencePrimary() {
+SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
     auto current = peek();
     switch (current.kind) {
         case TokenKind::DoubleHash:
-            return parseDelayedSequenceExpr(nullptr);
+            return parseDelayedSequenceExpr(nullptr, isInProperty);
         case TokenKind::At: {
             auto event = parseTimingControl(/* inAssertion */ true);
             SLANG_ASSERT(event);
@@ -1588,14 +1589,14 @@ SequenceExprSyntax& Parser::parseSequencePrimary() {
 SequenceExprSyntax& Parser::parseSequenceExpr(int precedence, bool isInProperty) {
     auto dg = setDepthGuard();
 
-    auto left = &parseSequencePrimary();
+    auto left = &parseSequencePrimary(isInProperty);
     return parseBinarySequenceExpr(left, precedence, isInProperty);
 }
 
 SequenceExprSyntax& Parser::parseBinarySequenceExpr(SequenceExprSyntax* left, int precedence,
                                                     bool isInProperty) {
     if (peek(TokenKind::DoubleHash))
-        left = &parseDelayedSequenceExpr(left);
+        left = &parseDelayedSequenceExpr(left, isInProperty);
 
     while (true) {
         // either a binary operator, or we're done

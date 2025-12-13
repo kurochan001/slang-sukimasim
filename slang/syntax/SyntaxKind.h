@@ -256,6 +256,7 @@ enum class SLANG_EXPORT SyntaxKind {
     ImmediateAssertionMember,
     ImmediateAssumeStatement,
     ImmediateCoverStatement,
+    ImmediateExpectStatement,
     ImplementsClause,
     ImplicationConstraint,
     ImplicationPropertyExpr,
@@ -274,6 +275,7 @@ enum class SLANG_EXPORT SyntaxKind {
     IntegerLiteralExpression,
     IntegerType,
     IntegerVectorExpression,
+    InterfaceClassProperty,
     InterfaceDeclaration,
     InterfaceHeader,
     InterfacePortHeader,
@@ -311,6 +313,7 @@ enum class SLANG_EXPORT SyntaxKind {
     MacroFormalArgumentList,
     MacroUsage,
     MatchesClause,
+    MatchesExpression,
     MemberAccessExpression,
     MinTypMaxExpression,
     ModAssignmentExpression,
@@ -432,6 +435,7 @@ enum class SLANG_EXPORT SyntaxKind {
     RsWeightClause,
     SUntilPropertyExpr,
     SUntilWithPropertyExpr,
+    SWithoutPropertyExpr,
     ScopedName,
     SequenceDeclaration,
     SequenceMatchList,
@@ -550,6 +554,7 @@ enum class SLANG_EXPORT SyntaxKind {
     WithFunctionClause,
     WithFunctionSample,
     WithinSequenceExpr,
+    WithoutPropertyExpr,
     XorAssignmentExpression,
 };
 
@@ -558,7 +563,7 @@ SLANG_EXPORT std::string_view toString(SyntaxKind kind);
 
 class SLANG_EXPORT SyntaxKind_traits {
 public:
-    static const std::array<SyntaxKind, 536> values;
+    static const std::array<SyntaxKind, 539> values;
 };
 
 SLANG_EXPORT const std::type_info* typeFromSyntaxKind(SyntaxKind kind);
