@@ -1167,6 +1167,8 @@ void BinaryAssertionExpr::requireSequence(const ASTContext& context, DiagCode co
         case BinaryAssertionOperator::SUntil:
         case BinaryAssertionOperator::UntilWith:
         case BinaryAssertionOperator::SUntilWith:
+        case BinaryAssertionOperator::Without:
+        case BinaryAssertionOperator::SWithout:
         case BinaryAssertionOperator::Implies:
         case BinaryAssertionOperator::OverlappedImplication:
         case BinaryAssertionOperator::NonOverlappedImplication:
@@ -1333,6 +1335,8 @@ bool BinaryAssertionExpr::canSucceedVacuouslyImpl() const {
         case BinaryAssertionOperator::SUntil:
         case BinaryAssertionOperator::UntilWith:
         case BinaryAssertionOperator::SUntilWith:
+        case BinaryAssertionOperator::Without:
+        case BinaryAssertionOperator::SWithout:
         case BinaryAssertionOperator::Implies:
         case BinaryAssertionOperator::OverlappedImplication:
         case BinaryAssertionOperator::NonOverlappedImplication:

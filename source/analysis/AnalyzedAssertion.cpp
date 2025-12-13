@@ -692,6 +692,8 @@ struct AssertionVisitor {
             case BinaryAssertionOperator::SUntil:
             case BinaryAssertionOperator::UntilWith:
             case BinaryAssertionOperator::SUntilWith:
+            case BinaryAssertionOperator::Without:
+            case BinaryAssertionOperator::SWithout:
                 visitProperty(expr.left, outerClock, flags);
                 visitProperty(expr.right, outerClock, flags);
                 return inheritedClock(expr, outerClock, flags);
