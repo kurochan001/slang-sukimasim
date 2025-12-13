@@ -894,9 +894,10 @@ CheckerInstanceBodySymbol::CheckerInstanceBodySymbol(Compilation& compilation,
 
     assertionDetails.prevContext = &this->originalContext;
 
-    auto parent = checker.getParentScope();
-    SLANG_ASSERT(parent);
-    setParent(*parent, checker.getIndex());
+    // Set parent to the CheckerSymbol itself so that parameter lookups work
+    // (parameters are stored in the CheckerSymbol's scope)
+    // Use INT32_MAX to ensure all parameters and ports in the checker are visible
+    setParent(checker, SymbolIndex(INT32_MAX));
 }
 
 void CheckerInstanceBodySymbol::serializeTo(ASTSerializer& serializer) const {
