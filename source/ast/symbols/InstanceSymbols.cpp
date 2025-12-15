@@ -758,6 +758,11 @@ const PortConnection* InstanceSymbol::getPortConnection(const PortSymbol& port) 
     if (!connectionMap)
         resolvePortConnections();
 
+    // If connectionMap is still null (e.g., instance has no parent scope),
+    // return null since we can't resolve connections.
+    if (!connectionMap)
+        return nullptr;
+
     auto it = connectionMap->find(reinterpret_cast<uintptr_t>(&port));
     if (it == connectionMap->end())
         return nullptr;
@@ -768,6 +773,11 @@ const PortConnection* InstanceSymbol::getPortConnection(const PortSymbol& port) 
 const PortConnection* InstanceSymbol::getPortConnection(const MultiPortSymbol& port) const {
     if (!connectionMap)
         resolvePortConnections();
+
+    // If connectionMap is still null (e.g., instance has no parent scope),
+    // return null since we can't resolve connections.
+    if (!connectionMap)
+        return nullptr;
 
     auto it = connectionMap->find(reinterpret_cast<uintptr_t>(&port));
     if (it == connectionMap->end())
@@ -780,6 +790,11 @@ const PortConnection* InstanceSymbol::getPortConnection(const InterfacePortSymbo
     if (!connectionMap)
         resolvePortConnections();
 
+    // If connectionMap is still null (e.g., instance has no parent scope),
+    // return null since we can't resolve connections.
+    if (!connectionMap)
+        return nullptr;
+
     auto it = connectionMap->find(reinterpret_cast<uintptr_t>(&port));
     if (it == connectionMap->end())
         return nullptr;
@@ -790,6 +805,9 @@ const PortConnection* InstanceSymbol::getPortConnection(const InterfacePortSymbo
 std::span<const PortConnection* const> InstanceSymbol::getPortConnections() const {
     if (!connectionMap)
         resolvePortConnections();
+    // If connectionMap is still null, return empty span
+    if (!connectionMap)
+        return {};
     return connections;
 }
 
@@ -811,12 +829,16 @@ void InstanceSymbol::resolvePortConnections() const {
     // which then requires evaluating $bits(foo) which then depends on the connection
     // provided to `iface`. In the code, this translates to a reetrant call to this
     // function; the first time we call getPortList() on the body will call back in here.
+
+    // Check parent scope first - if this instance was created via createDefault()
+    // and not added to any scope, we can't resolve connections.
+    auto scope = getParentScope();
+    if (!scope)
+        return;
+
     auto portList = body.getPortList();
     if (connectionMap)
         return;
-
-    auto scope = getParentScope();
-    SLANG_ASSERT(scope);
 
     auto& comp = scope->getCompilation();
     connectionMap = comp.allocPointerMap();

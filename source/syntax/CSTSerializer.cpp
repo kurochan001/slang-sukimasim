@@ -65,7 +65,8 @@ struct CSTJsonVisitor {
     }
 
     void writeToken(std::string_view name, parsing::Token token) {
-        if (token.valueText().empty())
+        // Check if token is valid before accessing its properties
+        if (!token.valid() || token.rawText().empty())
             return;
 
         writer.writeProperty(name);
@@ -90,8 +91,10 @@ struct CSTJsonVisitor {
 
         writer.writeProperty(name);
         writer.startArray();
-        for (auto token : tokenList)
-            writeTokenValue(token);
+        for (auto token : tokenList) {
+            if (token.valid())
+                writeTokenValue(token);
+        }
         writer.endArray();
     }
 
@@ -116,7 +119,7 @@ struct CSTJsonVisitor {
             }
             else {
                 auto token = node.childToken(i);
-                if (token)
+                if (token && token.valid())
                     writeTokenValue(token);
             }
         }
@@ -134,6 +137,10 @@ struct CSTJsonVisitor {
     }
 
     void writeTokenValue(parsing::Token token) {
+        // Check if token is valid before accessing its properties
+        if (!token.valid())
+            return;
+
         // If simple-tokens mode, just write the text value
         if (mode == CSTJsonMode::SimpleTokens) {
             writer.writeValue(token.rawText());

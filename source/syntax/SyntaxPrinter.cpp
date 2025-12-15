@@ -62,6 +62,10 @@ SyntaxPrinter& SyntaxPrinter::print(Trivia trivia) {
 }
 
 SyntaxPrinter& SyntaxPrinter::print(Token token) {
+    // Skip invalid tokens
+    if (!token.valid())
+        return *this;
+
     bool excluded = !shouldPrint(token.location());
 
     if (includeTrivia) {

@@ -1063,8 +1063,12 @@ Expression& AssertionInstanceExpression::fromLookup(const Symbol& symbol,
         bodyContext.flags |= ASTFlags::PropertyNegation;
 
     // Let declarations expand directly to an expression.
-    if (symbol.kind == SymbolKind::LetDecl)
+    // But if we detected recursion, return a bad expression to prevent infinite recursion.
+    if (symbol.kind == SymbolKind::LetDecl) {
+        if (instance.isRecursive)
+            return badExpr(comp, nullptr);
         return create(comp, *symbol.as<LetDeclSymbol>().exprSyntax, bodyContext);
+    }
 
     // Now instantiate by creating the assertion expression of the sequence / property body.
     auto bodySyntax = symbol.getSyntax();

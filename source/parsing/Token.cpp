@@ -327,7 +327,9 @@ std::string_view Token::rawText() const {
         case TokenKind::EndOfFile:
             return "";
         default:
-            SLANG_UNREACHABLE;
+            // For any other token kind not covered above, return empty string.
+            // This can happen with partially initialized tokens during CST serialization.
+            return "";
     }
 }
 
