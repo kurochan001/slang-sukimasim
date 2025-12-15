@@ -63,9 +63,50 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo& callInfo) const final {
-        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
-        // Array reduction methods compute values from runtime array state
-        return nullptr;
+        ConstantValue arr = args[0]->eval(context);
+        if (!arr)
+            return nullptr;
+
+        auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
+        if (iterExpr) {
+            SLANG_ASSERT(iterVar);
+            if (arr.empty()) {
+                auto elemType = iterExpr->type;
+                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
+            }
+
+            auto it = begin(arr);
+            auto guard = context.disableCaching();
+            auto iterVal = context.createLocal(iterVar, *it);
+            ConstantValue cv = iterExpr->eval(context);
+            if (!cv)
+                return nullptr;
+
+            SVInt result = cv.integer();
+            for (++it; it != end(arr); ++it) {
+                *iterVal = *it;
+                cv = iterExpr->eval(context);
+                if (!cv)
+                    return nullptr;
+
+                op(result, cv.integer());
+            }
+
+            return result;
+        }
+        else {
+            if (arr.empty()) {
+                auto elemType = args[0]->type->getArrayElementType();
+                return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
+            }
+
+            auto it = begin(arr);
+            SVInt result = it->integer();
+            for (++it; it != end(arr); ++it)
+                op(result, it->integer());
+
+            return result;
+        }
     }
 
 private:
@@ -74,8 +115,8 @@ private:
 
 class ArraySortMethod : public SystemSubroutine {
 public:
-    ArraySortMethod(KnownSystemName knownNameId, bool /* reversed */) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function) {
+    ArraySortMethod(KnownSystemName knownNameId, bool reversed) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), reversed(reversed) {
         withClauseMode = WithClauseMode::Iterator;
     }
 
@@ -106,10 +147,67 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo& callInfo) const final {
-        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
-        // Array sorting methods modify array state and should be runtime-evaluated
+        auto lval = args[0]->evalLValue(context);
+        if (!lval)
+            return nullptr;
+
+        auto target = lval.resolve();
+        if (!target)
+            return nullptr;
+
+        auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
+        if (iterExpr) {
+            SLANG_ASSERT(iterVar);
+            auto guard = context.disableCaching();
+            auto iterVal = context.createLocal(iterVar);
+
+            auto sortTarget = [&, ie = iterExpr](auto& target) {
+                auto pred = [&, ie = ie](ConstantValue& a, ConstantValue& b) {
+                    *iterVal = a;
+                    ConstantValue cva = ie->eval(context);
+
+                    *iterVal = b;
+                    ConstantValue cvb = ie->eval(context);
+
+                    return cva < cvb;
+                };
+
+                if (reversed)
+                    std::ranges::sort(target.rbegin(), target.rend(), pred);
+                else
+                    std::ranges::sort(target, pred);
+            };
+
+            if (target->isQueue()) {
+                sortTarget(*target->queue());
+            }
+            else {
+                auto& vec = std::get<ConstantValue::Elements>(target->getVariant());
+                sortTarget(vec);
+            }
+        }
+        else {
+            auto sortTarget = [&](auto& target) {
+                if (reversed)
+                    std::ranges::sort(target.rbegin(), target.rend(), std::less<>{});
+                else
+                    std::ranges::sort(target, std::less<>{});
+            };
+
+            if (target->isQueue()) {
+                sortTarget(*target->queue());
+            }
+            else {
+                auto& vec = std::get<ConstantValue::Elements>(target->getVariant());
+                sortTarget(vec);
+            }
+        }
+
         return nullptr;
     }
+
+private:
+    bool reversed;
 };
 
 class ArrayReverseMethod : public SystemSubroutine {
@@ -127,8 +225,19 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
-        // Array methods modify array state and should be runtime-evaluated
+        auto lval = args[0]->evalLValue(context);
+        if (!lval)
+            return nullptr;
+
+        auto target = lval.resolve();
+        if (!target)
+            return nullptr;
+
+        if (target->isQueue())
+            std::ranges::reverse(*target->queue());
+        else
+            std::ranges::reverse(std::get<ConstantValue::Elements>(target->getVariant()));
+
         return nullptr;
     }
 };
@@ -249,15 +358,9 @@ public:
 
 class ArrayMinMaxMethod : public SystemSubroutine {
 public:
-    ArrayMinMaxMethod(KnownSystemName knownNameId, bool /* isMin */) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function) {
+    ArrayMinMaxMethod(KnownSystemName knownNameId, bool isMin) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), isMin(isMin) {
         withClauseMode = WithClauseMode::Iterator;
-    }
-
-    static bool isLRMStrict() {
-        // IEEE 1800-2023 Ch.7.12.1: min()/max() SHALL return a queue
-        // Phase 61 Fix: Always return queue for LRM compliance
-        return true;
     }
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
@@ -280,76 +383,7 @@ public:
             return comp.getErrorType();
         }
 
-        // Strict LRM: return a queue of elements achieving min/max
-        if (isLRMStrict()) {
-            auto& arrayType = *args[0]->type;
-            switch (arrayType.kind) {
-                case SymbolKind::FixedSizeUnpackedArrayType:
-                case SymbolKind::DynamicArrayType:
-                case SymbolKind::QueueType:
-                    return *comp.emplace<QueueType>(*elemType, 0u);
-                case SymbolKind::AssociativeArrayType: {
-                    auto& aat = arrayType.as<AssociativeArrayType>();
-                    (void)aat;
-                    return *comp.emplace<QueueType>(*elemType, 0u);
-                }
-                default:
-                    return *comp.emplace<QueueType>(*elemType, 0u);
-            }
-        }
-        // Non-strict: return a single element (compatibility)
-        if (iterExpr)
-            return *iterExpr->type;
-        return *elemType;
-    }
-
-    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
-                       const CallExpression::SystemCallInfo& callInfo) const final {
-        // Phase 2.3: Disable constant evaluation - let SukimaSim handle at runtime
-        // Array min/max methods find extrema from runtime array state
-        return nullptr;
-    }
-};
-
-class ArrayMinMaxIndexMethod : public SystemSubroutine {
-public:
-    ArrayMinMaxIndexMethod(KnownSystemName knownNameId, bool isMin) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function), isMin(isMin) {
-        withClauseMode = WithClauseMode::Iterator;
-    }
-
-    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
-                               const Expression* iterExpr) const final {
-        auto& comp = context.getCompilation();
-        if (!checkArgCount(context, true, args, range, 0, 0))
-            return comp.getErrorType();
-
-        auto& arrayType = *args[0]->type;
-        auto elemType = arrayType.getArrayElementType();
-        SLANG_ASSERT(elemType);
-
-        if (iterExpr) {
-            if (!isComparable(*iterExpr->type)) {
-                context.addDiag(diag::ArrayMethodComparable, iterExpr->sourceRange) << name;
-                return comp.getErrorType();
-            }
-        }
-        else if (!isComparable(*elemType)) {
-            context.addDiag(diag::ArrayMethodComparable, args[0]->sourceRange) << name;
-            return comp.getErrorType();
-        }
-
-        // Return queue of indices: int queue for fixed/dynamic/queue; key-type queue for AA
-        if (arrayType.isAssociativeArray()) {
-            auto indexType = arrayType.getAssociativeIndexType();
-            if (!indexType) {
-                context.addDiag(diag::AssociativeWildcardNotAllowed, range) << name;
-                return comp.getErrorType();
-            }
-            return *comp.emplace<QueueType>(*indexType, 0u);
-        }
-
-        return *comp.emplace<QueueType>(comp.getIntType(), 0u);
+        return *comp.emplace<QueueType>(*elemType, 0u);
     }
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
@@ -358,105 +392,56 @@ public:
         if (!arr)
             return nullptr;
 
-        // Empty arrays: return empty queue
+        SVQueue result;
         if (arr.empty())
-            return SVQueue{};
+            return result;
 
         auto [iterExpr, iterVar] = callInfo.getIteratorInfo();
-        auto guard = context.disableCaching();
+        if (iterExpr) {
+            SLANG_ASSERT(iterVar);
 
-        if (arr.isMap()) {
-            // Associative array: return queue of keys that achieve min/max
-            SVQueue results;
-            ConstantValue bestMetric;
-            bool haveBest = false;
-            auto iterVal = iterExpr ? context.createLocal(iterVar) : nullptr;
-            for (auto& [key, val] : *arr.map()) {
-                ConstantValue metric;
-                if (iterExpr) {
-                    *iterVal = val;
-                    metric = iterExpr->eval(context);
-                    if (!metric)
-                        return nullptr;
+            auto it = begin(arr);
+            auto guard = context.disableCaching();
+            auto iterVal = context.createLocal(iterVar, *it);
+            ConstantValue elem = *it;
+            ConstantValue val = iterExpr->eval(context);
+
+            for (++it; it != end(arr); ++it) {
+                *iterVal = *it;
+                auto cv = iterExpr->eval(context);
+
+                if (isMin) {
+                    if (cv < val) {
+                        val = cv;
+                        elem = *it;
+                    }
                 }
                 else {
-                    metric = val;
-                }
-                if (!haveBest || (isMin ? (metric < bestMetric) : (bestMetric < metric))) {
-                    haveBest = true;
-                    bestMetric = metric;
-                    results.clear();
-                    results.emplace_back(key);
-                }
-                else if (!(bestMetric < metric) && !(metric < bestMetric)) {
-                    // equal
-                    results.emplace_back(key);
+                    if (val < cv) {
+                        val = cv;
+                        elem = *it;
+                    }
                 }
             }
-            return results;
-        }
-        else if (arr.isQueue()) {
-            // Queue: return queue of integer indices
-            SVQueue results;
-            ConstantValue bestMetric;
-            bool haveBest = false;
-            auto iterVal = iterExpr ? context.createLocal(iterVar) : nullptr;
-            uint32_t idx = 0;
-            for (auto& elem : *arr.queue()) {
-                ConstantValue metric;
-                if (iterExpr) {
-                    *iterVal = elem;
-                    metric = iterExpr->eval(context);
-                    if (!metric)
-                        return nullptr;
-                }
-                else {
-                    metric = elem;
-                }
-                if (!haveBest || (isMin ? (metric < bestMetric) : (bestMetric < metric))) {
-                    haveBest = true;
-                    bestMetric = metric;
-                    results.clear();
-                    results.emplace_back(SVInt(32, idx, true));
-                }
-                else if (!(bestMetric < metric) && !(metric < bestMetric)) {
-                    results.emplace_back(SVInt(32, idx, true));
-                }
-                ++idx;
-            }
-            return results;
+            result.emplace_back(std::move(elem));
         }
         else {
-            // Fixed-size unpacked array or dynamic array: queue of integer indices
-            SVQueue results;
-            ConstantValue bestMetric;
-            bool haveBest = false;
-            auto iterVal = iterExpr ? context.createLocal(iterVar) : nullptr;
-            uint32_t idx = 0;
-            for (auto& elem : std::get<ConstantValue::Elements>(arr.getVariant())) {
-                ConstantValue metric;
-                if (iterExpr) {
-                    *iterVal = elem;
-                    metric = iterExpr->eval(context);
-                    if (!metric)
-                        return nullptr;
+            auto it = begin(arr);
+            ConstantValue elem = *it;
+            for (++it; it != end(arr); ++it) {
+                if (isMin) {
+                    if (*it < elem)
+                        elem = *it;
                 }
                 else {
-                    metric = elem;
+                    if (elem < *it)
+                        elem = *it;
                 }
-                if (!haveBest || (isMin ? (metric < bestMetric) : (bestMetric < metric))) {
-                    haveBest = true;
-                    bestMetric = metric;
-                    results.clear();
-                    results.emplace_back(SVInt(32, idx, true));
-                }
-                else if (!(bestMetric < metric) && !(metric < bestMetric)) {
-                    results.emplace_back(SVInt(32, idx, true));
-                }
-                ++idx;
             }
-            return results;
+            result.emplace_back(std::move(elem));
         }
+
+        return result;
     }
 
 private:
@@ -634,66 +619,6 @@ public:
         }
         return nullptr;
     }
-};
-
-// General array exists method for dynamic and fixed arrays
-class ArrayExistsMethod : public SystemSubroutine {
-public:
-    ArrayExistsMethod() :
-        SystemSubroutine(KnownSystemName::Exists, SubroutineKind::Function) {}
-
-    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
-                               const Expression*) const final {
-        auto& comp = context.getCompilation();
-        if (!checkArgCount(context, true, args, range, 1, 1))
-            return comp.getErrorType();
-
-        if (!args[1]->type->isIntegral()) {
-            context.addDiag(diag::ArrayMethodIntegral, args[1]->sourceRange) << name;
-            return comp.getErrorType();
-        }
-
-        return comp.getIntType();
-    }
-
-    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
-                       const CallExpression::SystemCallInfo&) const final {
-        auto arr = args[0]->eval(context);
-        auto index = args[1]->eval(context);
-        if (!arr || !index)
-            return nullptr;
-
-        // For fixed and dynamic arrays, check if index is within bounds
-        auto& type = *args[0]->type;
-        if (type.kind == SymbolKind::DynamicArrayType) {
-            // Dynamic array - check against actual size
-            if (arr.isQueue()) {
-                size_t size = arr.queue()->size();
-                int64_t idx = index.integer().as<int64_t>().value();
-                return SVInt(32, idx >= 0 && idx < (int64_t)size ? 1 : 0, true);
-            } else if (!arr.empty()) {
-                size_t size = arr.size();
-                int64_t idx = index.integer().as<int64_t>().value();
-                return SVInt(32, idx >= 0 && idx < (int64_t)size ? 1 : 0, true);
-            }
-            return SVInt(32, 0, true);
-        } else if (type.kind == SymbolKind::FixedSizeUnpackedArrayType) {
-            // Fixed array - check against declared bounds
-            auto& fixedType = type.as<FixedSizeUnpackedArrayType>();
-            auto range = fixedType.range;
-            int64_t idx = index.integer().as<int64_t>().value();
-            if (range.isLittleEndian()) {
-                return SVInt(32, idx >= range.lower() && idx <= range.upper() ? 1 : 0, true);
-            } else {
-                return SVInt(32, idx <= range.lower() && idx >= range.upper() ? 1 : 0, true);
-            }
-        }
-
-        // Default case
-        return SVInt(32, 0, true);
-    }
-
-    std::optional<bitwidth_t> getEffectiveWidth() const final { return 1; }
 };
 
 class AssocArrayExistsMethod : public SystemSubroutine {
@@ -1148,8 +1073,6 @@ void Builtins::registerArrayMethods() {
 
         REGISTER(kind, ArrayMinMax, KnownSystemName::Min, true);
         REGISTER(kind, ArrayMinMax, KnownSystemName::Max, false);
-        REGISTER(kind, ArrayMinMaxIndex, KnownSystemName::MinIndex, true);
-        REGISTER(kind, ArrayMinMaxIndex, KnownSystemName::MaxIndex, false);
 
         REGISTER(kind, ArrayUnique, KnownSystemName::Unique, false);
         REGISTER(kind, ArrayUnique, KnownSystemName::UniqueIndex, true);
@@ -1181,10 +1104,6 @@ void Builtins::registerArrayMethods() {
     REGISTER(SymbolKind::AssociativeArrayType, AssocArrayDelete, );
     REGISTER(SymbolKind::QueueType, QueueDelete, );
 
-    // exists() method for all array types
-    REGISTER(SymbolKind::DynamicArrayType, ArrayExists, );
-    REGISTER(SymbolKind::FixedSizeUnpackedArrayType, ArrayExists, );
-    
     // Associative array methods.
     REGISTER(SymbolKind::AssociativeArrayType, AssocArrayExists, );
     REGISTER(SymbolKind::AssociativeArrayType, AssocArrayTraversal, KnownSystemName::First);
