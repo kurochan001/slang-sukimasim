@@ -645,7 +645,7 @@ Expression& CallExpression::createSystemCall(
     }
 
     const Type& type = subroutine.checkArguments(context, buffer, range, iterOrThis);
-    auto expr = compilation.emplace<CallExpression>(callInfo, type, iterOrThis,
+    auto expr = compilation.emplace<CallExpression>(callInfo, type, nullptr,
                                                     buffer.copy(compilation), context.getLocation(),
                                                     range);
 
