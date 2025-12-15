@@ -210,6 +210,7 @@ const Statement& Statement::bind(const StatementSyntax& syntax, const ASTContext
         case SyntaxKind::ImmediateAssertStatement:
         case SyntaxKind::ImmediateAssumeStatement:
         case SyntaxKind::ImmediateCoverStatement:
+        case SyntaxKind::ImmediateExpectStatement:
             result = &ImmediateAssertionStatement::fromSyntax(
                 comp, syntax.as<ImmediateAssertionStatementSyntax>(), context, stmtCtx);
             break;
@@ -584,7 +585,8 @@ static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
             return;
         case SyntaxKind::ImmediateAssertStatement:
         case SyntaxKind::ImmediateAssumeStatement:
-        case SyntaxKind::ImmediateCoverStatement: {
+        case SyntaxKind::ImmediateCoverStatement:
+        case SyntaxKind::ImmediateExpectStatement: {
             auto& ias = syntax.as<ImmediateAssertionStatementSyntax>();
             if (ias.action->statement)
                 recurse(ias.action->statement);

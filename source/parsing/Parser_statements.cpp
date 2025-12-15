@@ -530,13 +530,14 @@ StatementSyntax& Parser::parseAssertionStatement(NamedLabelSyntax* label, AttrLi
             break;
         case TokenKind::ExpectKeyword:
             // IEEE 1800-2023 §16.17: expect_property_statement ::= expect ( property_spec ) action_block
-            // property_spec can start with @ (clocking_event) or disable iff
-            // If 'property' keyword is present, or if '(' followed by '@' or 'disable', treat as concurrent
+            // property_spec can start with @ (clocking_event), disable iff, or sequence operators like ##
+            // If 'property' keyword is present, or if '(' followed by '@', 'disable', or '##', treat as concurrent
             if (nextKind == TokenKind::PropertyKeyword)
                 return parseConcurrentAssertion(label, attributes);
             if (nextKind == TokenKind::OpenParenthesis) {
                 auto thirdKind = peek(2).kind;
-                if (thirdKind == TokenKind::At || thirdKind == TokenKind::DisableKeyword)
+                if (thirdKind == TokenKind::At || thirdKind == TokenKind::DisableKeyword ||
+                    thirdKind == TokenKind::DoubleHash)
                     return parseConcurrentAssertion(label, attributes);
             }
             assertionKind = SyntaxKind::ImmediateExpectStatement;

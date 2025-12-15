@@ -77,6 +77,7 @@ AssertionKind SemanticFacts::getAssertKind(SyntaxKind kind) {
         case SyntaxKind::ImmediateAssertStatement: return AssertionKind::Assert;
         case SyntaxKind::ImmediateAssumeStatement: return AssertionKind::Assume;
         case SyntaxKind::ImmediateCoverStatement: return AssertionKind::CoverProperty;
+        case SyntaxKind::ImmediateExpectStatement: return AssertionKind::Expect;
         case SyntaxKind::AssertPropertyStatement: return AssertionKind::Assert;
         case SyntaxKind::AssumePropertyStatement: return AssertionKind::Assume;
         case SyntaxKind::CoverPropertyStatement: return AssertionKind::CoverProperty;
