@@ -7,8 +7,6 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/expressions/AssignmentExpressions.h"
 
-#include <iostream>
-
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Bitstream.h"
 #include "slang/ast/Compilation.h"
@@ -512,9 +510,7 @@ Expression& NewArrayExpression::fromSyntax(Compilation& compilation,
             assignmentTarget = &compilation.getErrorType();
     }
 
-    std::cerr << "[SLANG DEBUG] NewArrayExpression::fromSyntax - before selfDetermined" << std::endl;
     auto& sizeExpr = selfDetermined(compilation, *syntax.sizeExpr, context);
-    std::cerr << "[SLANG DEBUG] NewArrayExpression::fromSyntax - after selfDetermined" << std::endl;
 
     const Expression* initExpr = nullptr;
     if (syntax.initializer)

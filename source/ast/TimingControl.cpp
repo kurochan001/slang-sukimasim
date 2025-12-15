@@ -386,8 +386,19 @@ TimingControl& SignalEventControl::fromExpr(Compilation& compilation, EdgeKind e
     }
 
     // Warn if the expression is constant, since it'll never change to trigger off.
-    if (context.tryEval(expr))
-        context.addDiag(diag::EventExpressionConstant, expr.sourceRange);
+    // However, don't warn if the expression references any variables, since tryEval
+    // may succeed using default/initial values but the expression is not truly constant.
+    if (context.tryEval(expr)) {
+        bool hasVariableRef = false;
+        expr.visitSymbolReferences([&](const Expression&, const Symbol& sym) {
+            if (sym.kind == SymbolKind::Variable || sym.kind == SymbolKind::Net ||
+                sym.kind == SymbolKind::FormalArgument || sym.kind == SymbolKind::Field) {
+                hasVariableRef = true;
+            }
+        });
+        if (!hasVariableRef)
+            context.addDiag(diag::EventExpressionConstant, expr.sourceRange);
+    }
 
     return *result;
 }
