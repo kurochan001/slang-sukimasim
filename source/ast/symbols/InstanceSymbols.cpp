@@ -1003,6 +1003,45 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(Compilation& comp,
     for (auto import : declSyntax.header->imports)
         result->addMembers(*import);
 
+    // IEEE 1800-2023 §25.7: Handle interface inheritance
+    if (definition.definitionKind == DefinitionKind::Interface && definition.extendsClause) {
+        // Resolve the base interface using compilation lookup
+        auto& baseName = definition.extendsClause->baseName;
+        auto baseNameStr = baseName->getFirstToken().valueText();
+
+        // Find the base interface definition directly from compilation
+        auto parentScope = result->getParentScope();
+        if (parentScope) {
+            auto lookupResult = comp.tryGetDefinition(baseNameStr, *parentScope);
+            if (lookupResult.definition &&
+                lookupResult.definition->kind == SymbolKind::Definition) {
+                auto& baseDef = lookupResult.definition->as<DefinitionSymbol>();
+                if (baseDef.definitionKind == DefinitionKind::Interface) {
+                    auto baseSyntax = baseDef.getSyntax();
+                    if (baseSyntax) {
+                        auto& baseDecl = baseSyntax->as<ModuleDeclarationSyntax>();
+
+                        // Import package imports from base interface
+                        for (auto import : baseDecl.header->imports)
+                            result->addMembers(*import);
+
+                        // Import port list from base interface (ports become signals in interface)
+                        if (baseDef.portList)
+                            result->addMembers(*baseDef.portList);
+
+                        // Import members from base interface body (except parameters)
+                        for (auto member : baseDecl.members) {
+                            if (member->kind != SyntaxKind::ParameterDeclarationStatement &&
+                                member->kind != SyntaxKind::TimeUnitsDeclaration) {
+                                result->addMembers(*member);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Add in all parameter ports.
     SmallVector<const ParameterSymbolBase*> params;
     auto paramIt = definition.parameters.begin();
