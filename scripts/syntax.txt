@@ -1148,6 +1148,18 @@ token openParen
 separated_list<ParameterDeclarationBase> declarations
 token closeParen
 
+// Interface extends clause (moved here for ModuleHeader dependency)
+DefaultExtendsClauseArg
+token openParen
+token defaultKeyword
+token closeParen
+
+ExtendsClause
+token keyword
+Name baseName
+ArgumentList? arguments
+DefaultExtendsClauseArg? defaultedArg
+
 ModuleHeader multiKind=true
 token moduleKeyword
 token lifetime
@@ -1155,6 +1167,7 @@ token name
 list<PackageImportDeclaration> imports
 ParameterPortList? parameters
 PortList? ports
+ExtendsClause? extendsClause
 token semi
 
 kindmap<ModuleHeader>
@@ -1350,17 +1363,6 @@ AssertionItemPortList? portList
 token equals
 Expression expr
 token semi
-
-DefaultExtendsClauseArg
-token openParen
-token defaultKeyword
-token closeParen
-
-ExtendsClause
-token keyword
-Name baseName
-ArgumentList? arguments
-DefaultExtendsClauseArg? defaultedArg
 
 ImplementsClause
 token keyword

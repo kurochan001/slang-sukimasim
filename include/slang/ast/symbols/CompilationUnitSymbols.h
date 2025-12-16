@@ -188,6 +188,10 @@ public:
     /// A set of bind directives that apply to all instances of this definition.
     std::vector<BindDirectiveInfo> bindDirectives;
 
+    /// The extends clause syntax for interface inheritance (IEEE 1800-2023 §25.7),
+    /// or nullptr if no inheritance.
+    const syntax::ExtendsClauseSyntax* extendsClause = nullptr;
+
     /// The syntax tree that contains this definition, or nullptr if constructed
     /// outside of any specific syntax tree.
     const syntax::SyntaxTree* syntaxTree;

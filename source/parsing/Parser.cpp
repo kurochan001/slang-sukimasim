@@ -121,6 +121,34 @@ ModuleHeaderSyntax& Parser::parseModuleHeader() {
         }
     }
 
+    // IEEE 1800-2023 §25.7: Interface inheritance - parse extends clause for interfaces
+    ExtendsClauseSyntax* extendsClause = nullptr;
+    if (moduleKeyword.kind == TokenKind::InterfaceKeyword && peek(TokenKind::ExtendsKeyword)) {
+        auto extends = consume();
+        auto& baseName = parseName();
+
+        ArgumentListSyntax* arguments = nullptr;
+        DefaultExtendsClauseArgSyntax* defaultedArg = nullptr;
+        if (peek(TokenKind::OpenParenthesis)) {
+            if (peek(1).kind == TokenKind::DefaultKeyword) {
+                auto openParen = consume();
+                auto defaultKeyword = consume();
+                defaultedArg = &factory.defaultExtendsClauseArg(
+                    openParen, defaultKeyword, expect(TokenKind::CloseParenthesis));
+
+                if (parseOptions.languageVersion < LanguageVersion::v1800_2023) {
+                    addDiag(diag::WrongLanguageVersion, defaultedArg->sourceRange())
+                        << toString(parseOptions.languageVersion);
+                }
+            }
+            else {
+                arguments = &parseArgumentList();
+            }
+        }
+
+        extendsClause = &factory.extendsClause(extends, baseName, arguments, defaultedArg);
+    }
+
     if (moduleKeyword.kind == TokenKind::PackageKeyword) {
         std::optional<SourceRange> errorRange;
         if (!imports.empty())
@@ -141,7 +169,7 @@ ModuleHeaderSyntax& Parser::parseModuleHeader() {
 
     auto semi = expect(TokenKind::Semicolon);
     return factory.moduleHeader(getModuleHeaderKind(moduleKeyword.kind), moduleKeyword, lifetime,
-                                name, imports, parameterList, ports, semi);
+                                name, imports, parameterList, ports, extendsClause, semi);
 }
 
 ParameterPortListSyntax* Parser::parseParameterPortList() {

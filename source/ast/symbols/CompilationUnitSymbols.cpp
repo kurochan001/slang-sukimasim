@@ -327,6 +327,9 @@ DefinitionSymbol::DefinitionSymbol(const Scope& scope, LookupLocation lookupLoca
     portList = header->ports;
     hasNonAnsiPorts = portList && portList->kind == SyntaxKind::NonAnsiPortList;
 
+    // IEEE 1800-2023 §25.7: Store interface inheritance clause
+    extendsClause = header->extendsClause;
+
     // Find all port parameters.
     bool hasPortParams = header->parameters != nullptr;
     if (hasPortParams)

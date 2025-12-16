@@ -4634,6 +4634,52 @@ struct SLANG_EXPORT ParameterPortListSyntax : public SyntaxNode {
 
 };
 
+struct SLANG_EXPORT DefaultExtendsClauseArgSyntax : public SyntaxNode {
+    Token openParen;
+    Token defaultKeyword;
+    Token closeParen;
+
+    DefaultExtendsClauseArgSyntax(Token openParen, Token defaultKeyword, Token closeParen) :
+        SyntaxNode(SyntaxKind::DefaultExtendsClauseArg), openParen(openParen), defaultKeyword(defaultKeyword), closeParen(closeParen) {
+    }
+
+    explicit DefaultExtendsClauseArgSyntax(const DefaultExtendsClauseArgSyntax&) = default;
+
+    static bool isKind(SyntaxKind kind);
+
+    static bool isChildOptional(size_t index);
+    TokenOrSyntax getChild(size_t index);
+    ConstTokenOrSyntax getChild(size_t index) const;
+    PtrTokenOrSyntax getChildPtr(size_t index);
+    void setChild(size_t index, TokenOrSyntax child);
+
+};
+
+struct SLANG_EXPORT ExtendsClauseSyntax : public SyntaxNode {
+    Token keyword;
+    not_null<NameSyntax*> baseName;
+    ArgumentListSyntax* arguments;
+    DefaultExtendsClauseArgSyntax* defaultedArg;
+
+    ExtendsClauseSyntax(Token keyword, NameSyntax& baseName, ArgumentListSyntax* arguments, DefaultExtendsClauseArgSyntax* defaultedArg) :
+        SyntaxNode(SyntaxKind::ExtendsClause), keyword(keyword), baseName(&baseName), arguments(arguments), defaultedArg(defaultedArg) {
+        this->baseName->parent = this;
+        if (this->arguments) this->arguments->parent = this;
+        if (this->defaultedArg) this->defaultedArg->parent = this;
+    }
+
+    explicit ExtendsClauseSyntax(const ExtendsClauseSyntax&) = default;
+
+    static bool isKind(SyntaxKind kind);
+
+    static bool isChildOptional(size_t index);
+    TokenOrSyntax getChild(size_t index);
+    ConstTokenOrSyntax getChild(size_t index) const;
+    PtrTokenOrSyntax getChildPtr(size_t index);
+    void setChild(size_t index, TokenOrSyntax child);
+
+};
+
 struct SLANG_EXPORT ModuleHeaderSyntax : public SyntaxNode {
     Token moduleKeyword;
     Token lifetime;
@@ -4641,15 +4687,17 @@ struct SLANG_EXPORT ModuleHeaderSyntax : public SyntaxNode {
     SyntaxList<PackageImportDeclarationSyntax> imports;
     ParameterPortListSyntax* parameters;
     PortListSyntax* ports;
+    ExtendsClauseSyntax* extendsClause;
     Token semi;
 
-    ModuleHeaderSyntax(SyntaxKind kind, Token moduleKeyword, Token lifetime, Token name, const SyntaxList<PackageImportDeclarationSyntax>& imports, ParameterPortListSyntax* parameters, PortListSyntax* ports, Token semi) :
-        SyntaxNode(kind), moduleKeyword(moduleKeyword), lifetime(lifetime), name(name), imports(imports), parameters(parameters), ports(ports), semi(semi) {
+    ModuleHeaderSyntax(SyntaxKind kind, Token moduleKeyword, Token lifetime, Token name, const SyntaxList<PackageImportDeclarationSyntax>& imports, ParameterPortListSyntax* parameters, PortListSyntax* ports, ExtendsClauseSyntax* extendsClause, Token semi) :
+        SyntaxNode(kind), moduleKeyword(moduleKeyword), lifetime(lifetime), name(name), imports(imports), parameters(parameters), ports(ports), extendsClause(extendsClause), semi(semi) {
         this->imports.parent = this;
         for (auto child : this->imports)
             child->parent = this;
         if (this->parameters) this->parameters->parent = this;
         if (this->ports) this->ports->parent = this;
+        if (this->extendsClause) this->extendsClause->parent = this;
     }
 
     explicit ModuleHeaderSyntax(const ModuleHeaderSyntax&) = default;
@@ -5418,52 +5466,6 @@ struct SLANG_EXPORT LetDeclarationSyntax : public MemberSyntax {
     }
 
     explicit LetDeclarationSyntax(const LetDeclarationSyntax&) = default;
-
-    static bool isKind(SyntaxKind kind);
-
-    static bool isChildOptional(size_t index);
-    TokenOrSyntax getChild(size_t index);
-    ConstTokenOrSyntax getChild(size_t index) const;
-    PtrTokenOrSyntax getChildPtr(size_t index);
-    void setChild(size_t index, TokenOrSyntax child);
-
-};
-
-struct SLANG_EXPORT DefaultExtendsClauseArgSyntax : public SyntaxNode {
-    Token openParen;
-    Token defaultKeyword;
-    Token closeParen;
-
-    DefaultExtendsClauseArgSyntax(Token openParen, Token defaultKeyword, Token closeParen) :
-        SyntaxNode(SyntaxKind::DefaultExtendsClauseArg), openParen(openParen), defaultKeyword(defaultKeyword), closeParen(closeParen) {
-    }
-
-    explicit DefaultExtendsClauseArgSyntax(const DefaultExtendsClauseArgSyntax&) = default;
-
-    static bool isKind(SyntaxKind kind);
-
-    static bool isChildOptional(size_t index);
-    TokenOrSyntax getChild(size_t index);
-    ConstTokenOrSyntax getChild(size_t index) const;
-    PtrTokenOrSyntax getChildPtr(size_t index);
-    void setChild(size_t index, TokenOrSyntax child);
-
-};
-
-struct SLANG_EXPORT ExtendsClauseSyntax : public SyntaxNode {
-    Token keyword;
-    not_null<NameSyntax*> baseName;
-    ArgumentListSyntax* arguments;
-    DefaultExtendsClauseArgSyntax* defaultedArg;
-
-    ExtendsClauseSyntax(Token keyword, NameSyntax& baseName, ArgumentListSyntax* arguments, DefaultExtendsClauseArgSyntax* defaultedArg) :
-        SyntaxNode(SyntaxKind::ExtendsClause), keyword(keyword), baseName(&baseName), arguments(arguments), defaultedArg(defaultedArg) {
-        this->baseName->parent = this;
-        if (this->arguments) this->arguments->parent = this;
-        if (this->defaultedArg) this->defaultedArg->parent = this;
-    }
-
-    explicit ExtendsClauseSyntax(const ExtendsClauseSyntax&) = default;
 
     static bool isKind(SyntaxKind kind);
 
@@ -10026,7 +10028,7 @@ public:
     ModportSubroutinePortListSyntax& modportSubroutinePortList(const SyntaxList<AttributeInstanceSyntax>& attributes, Token importExport, const SeparatedSyntaxList<ModportPortSyntax>& ports);
     ModportSubroutinePortSyntax& modportSubroutinePort(FunctionPrototypeSyntax& prototype);
     ModuleDeclarationSyntax& moduleDeclaration(SyntaxKind kind, const SyntaxList<AttributeInstanceSyntax>& attributes, ModuleHeaderSyntax& header, const SyntaxList<MemberSyntax>& members, Token endmodule, NamedBlockClauseSyntax* blockName);
-    ModuleHeaderSyntax& moduleHeader(SyntaxKind kind, Token moduleKeyword, Token lifetime, Token name, const SyntaxList<PackageImportDeclarationSyntax>& imports, ParameterPortListSyntax* parameters, PortListSyntax* ports, Token semi);
+    ModuleHeaderSyntax& moduleHeader(SyntaxKind kind, Token moduleKeyword, Token lifetime, Token name, const SyntaxList<PackageImportDeclarationSyntax>& imports, ParameterPortListSyntax* parameters, PortListSyntax* ports, ExtendsClauseSyntax* extendsClause, Token semi);
     MultipleConcatenationExpressionSyntax& multipleConcatenationExpression(Token openBrace, ExpressionSyntax& expression, ConcatenationExpressionSyntax& concatenation, Token closeBrace);
     NameValuePragmaExpressionSyntax& nameValuePragmaExpression(Token name, Token equals, PragmaExpressionSyntax& value);
     NamedArgumentSyntax& namedArgument(Token dot, Token name, Token openParen, PropertyExprSyntax* expr, Token closeParen);
@@ -10628,6 +10630,7 @@ decltype(auto) visitSyntaxNode(TNode* node, TVisitor&& visitor, Args&&... args) 
         case SyntaxKind::RsWeightClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const RsWeightClauseSyntax*, RsWeightClauseSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::SUntilPropertyExpr: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryPropertyExprSyntax*, BinaryPropertyExprSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::SUntilWithPropertyExpr: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryPropertyExprSyntax*, BinaryPropertyExprSyntax*>>(node), std::forward<Args>(args)...);
+        case SyntaxKind::SWithoutPropertyExpr: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryPropertyExprSyntax*, BinaryPropertyExprSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::ScopedName: return visitor.visit(*static_cast<std::conditional_t<isConst, const ScopedNameSyntax*, ScopedNameSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::SequenceDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const SequenceDeclarationSyntax*, SequenceDeclarationSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::SequenceMatchList: return visitor.visit(*static_cast<std::conditional_t<isConst, const SequenceMatchListSyntax*, SequenceMatchListSyntax*>>(node), std::forward<Args>(args)...);
@@ -10746,6 +10749,7 @@ decltype(auto) visitSyntaxNode(TNode* node, TVisitor&& visitor, Args&&... args) 
         case SyntaxKind::WithFunctionClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const WithFunctionClauseSyntax*, WithFunctionClauseSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::WithFunctionSample: return visitor.visit(*static_cast<std::conditional_t<isConst, const WithFunctionSampleSyntax*, WithFunctionSampleSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::WithinSequenceExpr: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinarySequenceExprSyntax*, BinarySequenceExprSyntax*>>(node), std::forward<Args>(args)...);
+        case SyntaxKind::WithoutPropertyExpr: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryPropertyExprSyntax*, BinaryPropertyExprSyntax*>>(node), std::forward<Args>(args)...);
         case SyntaxKind::XorAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
     }
     SLANG_UNREACHABLE;
