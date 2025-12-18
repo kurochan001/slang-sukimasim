@@ -7,6 +7,9 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/expressions/SelectExpressions.h"
 
+#include <cstdlib>
+#include <iostream>
+
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
@@ -15,6 +18,7 @@
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/CoverSymbols.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
@@ -896,7 +900,21 @@ Expression& MemberAccessExpression::fromSelector(
     // This might look like a member access but actually be a built-in type method.
     const Type& type = expr.type->getCanonicalType();
     const Scope* scope = nullptr;
-    
+
+    // IEEE 1800-2023 §25.3: Debug output for interface instance method calls
+    if (std::getenv("SUKIMASIM_DEBUG_INTERFACE_METHOD")) {
+        std::cerr << "[DEBUG fromSelector] selector.name=" << selector.name
+                  << ", expr.kind=" << static_cast<int>(expr.kind)
+                  << ", type.kind=" << static_cast<int>(type.kind)
+                  << ", type=" << type.toString() << std::endl;
+        if (auto sym = expr.getSymbolReference()) {
+            std::cerr << "[DEBUG fromSelector] sym->kind=" << static_cast<int>(sym->kind)
+                      << ", sym->name=" << std::string(sym->name) << std::endl;
+        } else {
+            std::cerr << "[DEBUG fromSelector] getSymbolReference returned null" << std::endl;
+        }
+    }
+
     // Phase 18.3: Special handling for string literals
     // String literals have IntegralType but should be treated like StringType for method access
     if (expr.kind == ExpressionKind::StringLiteral) {
@@ -966,6 +984,16 @@ Expression& MemberAccessExpression::fromSelector(
                     // ConstraintBlock is also a Scope, so we can look up methods in it
                     scope = &sym->as<ConstraintBlockSymbol>();
                     break;
+                }
+                // IEEE 1800-2023 §25.3: Handle interface instance method calls
+                // Interface array element access (e.g., if_array[0].set_data())
+                else if (sym->kind == SymbolKind::Instance) {
+                    auto& inst = sym->as<InstanceSymbol>();
+                    if (inst.isInterface()) {
+                        // Use the interface body as the scope for member lookup
+                        scope = &inst.body;
+                        break;
+                    }
                 }
             }
             [[fallthrough]];
