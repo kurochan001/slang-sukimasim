@@ -124,6 +124,7 @@ $realtime RealTime
 $random Random
 $urandom URandom
 $urandom_range URandomRange
+$srandom SRandom
 $get_randstate GetRandstate
 $set_randstate SetRandstate
 $reset_count ResetCount
@@ -253,6 +254,8 @@ $save Save
 $restart Restart
 $incsave IncSave
 $showscopes ShowScopes
+$upscope UpScope
+$dumpscopes DumpScopes
 
 $q_initialize QInitialize
 $q_add QAdd
