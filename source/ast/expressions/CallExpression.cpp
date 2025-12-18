@@ -7,6 +7,9 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/expressions/CallExpression.h"
 
+#include <cstdlib>
+#include <iostream>
+
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Constraints.h"
 #include "slang/ast/EvalContext.h"
@@ -49,6 +52,13 @@ Expression& CallExpression::fromSyntaxImpl(Compilation& compilation, const Expre
                                            const InvocationExpressionSyntax* invocation,
                                            const ArrayOrRandomizeMethodExpressionSyntax* withClause,
                                            const ASTContext& context) {
+    // IEEE 1800-2023 §25.3: Debug output for interface method calls
+    if (std::getenv("SUKIMASIM_DEBUG_INTERFACE_METHOD")) {
+        std::cerr << "[DEBUG fromSyntaxImpl] left.kind=" << static_cast<int>(left.kind)
+                  << ", isMemberAccess=" << (left.kind == SyntaxKind::MemberAccessExpression)
+                  << ", isNameSyntax=" << NameSyntax::isKind(left.kind) << std::endl;
+    }
+
     if (left.kind == SyntaxKind::MemberAccessExpression) {
         return MemberAccessExpression::fromSyntax(compilation,
                                                   left.as<MemberAccessExpressionSyntax>(),

@@ -1309,6 +1309,8 @@ void Builtins::registerSystemTasks() {
     TASK(KnownSystemName::Restart, 1, &stringType);
     TASK(KnownSystemName::IncSave, 1, &stringType);
     TASK(KnownSystemName::ShowScopes, 0, &intType);
+    TASK(KnownSystemName::UpScope, 0, );
+    TASK(KnownSystemName::DumpScopes, 0, &stringType);
 
 #undef TASK
 

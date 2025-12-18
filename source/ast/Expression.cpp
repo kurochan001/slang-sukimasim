@@ -7,10 +7,16 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/Expression.h"
 
+#include <cstdlib>
+#include <iostream>
+
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/HierarchicalReference.h"
+#include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
@@ -1121,6 +1127,12 @@ Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result
         case SymbolKind::Subroutine: {
             SLANG_ASSERT(result.selectors.empty());
             SourceRange callRange = invocation ? invocation->sourceRange() : result.nameRange;
+
+            // IEEE 1800-2023 §25.3: For interface method calls, the interface instance
+            // context can be determined from the subroutine's parent scope (InstanceBody).
+            // We pass nullptr as thisClass since interface instances don't have a "this"
+            // expression like class methods do. The sukimasim evaluator will extract the
+            // interface instance path from the subroutine symbol's parent scope.
             expr = &CallExpression::fromLookup(comp, &symbol->as<SubroutineSymbol>(), nullptr,
                                                invocation, withClause, callRange, context);
             invocation = nullptr;

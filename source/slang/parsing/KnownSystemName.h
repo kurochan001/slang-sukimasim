@@ -258,6 +258,8 @@ enum class SLANG_EXPORT KnownSystemName {
     Restart,
     IncSave,
     ShowScopes,
+    UpScope,
+    DumpScopes,
     QInitialize,
     QAdd,
     QRemove,
