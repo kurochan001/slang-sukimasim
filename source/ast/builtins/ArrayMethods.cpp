@@ -41,7 +41,8 @@ public:
             return comp.getErrorType();
 
         if (iterExpr) {
-            if (!iterExpr->type->isIntegral()) {
+            // IEEE 1800-2023 §7.12.3: sum() and product() work on integral or real types
+            if (!iterExpr->type->isIntegral() && !iterExpr->type->isFloating()) {
                 context.addDiag(diag::ArrayMethodIntegral, iterExpr->sourceRange) << name;
                 return comp.getErrorType();
             }
@@ -52,7 +53,8 @@ public:
             auto elemType = args[0]->type->getArrayElementType();
             SLANG_ASSERT(elemType);
 
-            if (!elemType->isIntegral()) {
+            // IEEE 1800-2023 §7.12.3: sum() and product() work on integral or real types
+            if (!elemType->isIntegral() && !elemType->isFloating()) {
                 context.addDiag(diag::ArrayMethodIntegral, args[0]->sourceRange) << name;
                 return comp.getErrorType();
             }
@@ -72,6 +74,8 @@ public:
             SLANG_ASSERT(iterVar);
             if (arr.empty()) {
                 auto elemType = iterExpr->type;
+                if (elemType->isFloating())
+                    return real_t(0.0);
                 return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
             }
 
@@ -81,6 +85,23 @@ public:
             ConstantValue cv = iterExpr->eval(context);
             if (!cv)
                 return nullptr;
+
+            // IEEE 1800-2023 §7.12.3: Handle real types
+            if (iterExpr->type->isFloating()) {
+                double result = cv.real();
+                for (++it; it != end(arr); ++it) {
+                    *iterVal = *it;
+                    cv = iterExpr->eval(context);
+                    if (!cv)
+                        return nullptr;
+                    // For sum: add, for product: multiply
+                    if (name == "sum"sv)
+                        result += cv.real();
+                    else
+                        result *= cv.real();
+                }
+                return real_t(result);
+            }
 
             SVInt result = cv.integer();
             for (++it; it != end(arr); ++it) {
@@ -95,9 +116,25 @@ public:
             return result;
         }
         else {
+            auto elemType = args[0]->type->getArrayElementType();
             if (arr.empty()) {
-                auto elemType = args[0]->type->getArrayElementType();
+                if (elemType->isFloating())
+                    return real_t(0.0);
                 return SVInt(elemType->getBitWidth(), 0, elemType->isSigned());
+            }
+
+            // IEEE 1800-2023 §7.12.3: Handle real types
+            if (elemType->isFloating()) {
+                auto it = begin(arr);
+                double result = it->real();
+                for (++it; it != end(arr); ++it) {
+                    // For sum: add, for product: multiply
+                    if (name == "sum"sv)
+                        result += it->real();
+                    else
+                        result *= it->real();
+                }
+                return real_t(result);
             }
 
             auto it = begin(arr);
