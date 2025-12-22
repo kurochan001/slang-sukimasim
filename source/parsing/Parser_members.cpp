@@ -2061,7 +2061,7 @@ MemberSyntax* Parser::parseCoverCrossMember() {
     // IEEE 1800-2023 §20.6.1: Multiple expressions are combined with OR semantics
     BinsSelectExpressionSyntax* expr;
     if (peek(TokenKind::OpenBrace)) {
-        auto openBrace = consume(); // consume opening brace
+        (void)consume(); // consume opening brace
         expr = &parseBinsSelectExpression();
 
         // Handle comma-separated list - combine with OR semantics
