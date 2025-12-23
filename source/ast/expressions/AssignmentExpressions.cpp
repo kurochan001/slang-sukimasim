@@ -319,7 +319,8 @@ Expression& AssignmentExpression::fromSyntax(Compilation& compilation,
         op = OpInfo::getBinary(syntax.kind);
     }
     else {
-        extraFlags |= ASTFlags::StreamingAllowed;
+        // IEEE 1800-2023 §10.4: Allow chained assignments like a = b = c = 10
+        extraFlags |= ASTFlags::StreamingAllowed | ASTFlags::AssignmentAllowed;
     }
 
     const ExpressionSyntax* rightExpr = syntax.right;

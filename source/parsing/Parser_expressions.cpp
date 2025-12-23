@@ -82,9 +82,10 @@ ExpressionSyntax& Parser::parseSubExpression(bitmask<ExpressionOptions> options,
         if (options.has(ExpressionOptions::DisallowAttrs))
             errorIfAttributes(attributes);
 
-        auto& operand = parsePrimaryExpression(options);
-        auto& postfix = parsePostfixExpression(operand, options);
-        leftOperand = &factory.prefixUnaryExpression(opKind, opToken, attributes, postfix);
+        // Use parseSubExpression to allow consecutive unary operators like !!a
+        // IEEE 1800-2023 §11.4.2: unary operators are right-associative
+        auto& operand = parseSubExpression(options, INT_MAX);
+        leftOperand = &factory.prefixUnaryExpression(opKind, opToken, attributes, operand);
     }
     else {
         leftOperand = &parsePrimaryExpression(options);
@@ -184,30 +185,12 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
             auto attributes = parseAttributes();
             auto& rightOperand = parseSubExpression(options, newPrecedence);
 
-            // P1.2: Check for chained assignment (e.g., a <= b <= c)
-            // IEEE 1800-2017 §10.4: assignments cannot be chained
-            if (isAssignmentOperator(opKind)) {
-                if (rightOperand.kind == SyntaxKind::AssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::NonblockingAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::AddAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::SubtractAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::MultiplyAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::DivideAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::ModAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::AndAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::OrAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::XorAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::LogicalLeftShiftAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::LogicalRightShiftAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::ArithmeticLeftShiftAssignmentExpression ||
-                    rightOperand.kind == SyntaxKind::ArithmeticRightShiftAssignmentExpression) {
-                    addDiag(diag::ChainedAssignment, rightOperand.sourceRange());
-                }
-                // Special case: nonblocking assignment with <= comparison (e.g., b <= a <= c)
-                else if (opKind == SyntaxKind::NonblockingAssignmentExpression &&
-                         rightOperand.kind == SyntaxKind::LessThanEqualExpression) {
-                    addDiag(diag::ChainedAssignment, rightOperand.sourceRange());
-                }
+            // IEEE 1800-2023 §10.4: Chained assignments like a = b = c = 10 are allowed
+            // The value of an assignment is the RHS value after conversion
+            // Only flag <= ambiguity between nonblocking assignment and comparison
+            if (opKind == SyntaxKind::NonblockingAssignmentExpression &&
+                rightOperand.kind == SyntaxKind::LessThanEqualExpression) {
+                addDiag(diag::ChainedAssignment, rightOperand.sourceRange());
             }
 
             left = &factory.binaryExpression(opKind, *left, opToken, attributes, rightOperand);
