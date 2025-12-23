@@ -268,6 +268,23 @@ int SyntaxFacts::getPrecedence(SyntaxKind kind) {
 
 bool SyntaxFacts::isRightAssociative(SyntaxKind kind) {
     switch (kind) {
+        // IEEE 1800-2023 §10.4: Assignment operators are right-associative
+        // This enables chained assignments: a = b = c = 10
+        case SyntaxKind::AssignmentExpression:
+        case SyntaxKind::NonblockingAssignmentExpression:
+        case SyntaxKind::AddAssignmentExpression:
+        case SyntaxKind::SubtractAssignmentExpression:
+        case SyntaxKind::MultiplyAssignmentExpression:
+        case SyntaxKind::DivideAssignmentExpression:
+        case SyntaxKind::ModAssignmentExpression:
+        case SyntaxKind::AndAssignmentExpression:
+        case SyntaxKind::OrAssignmentExpression:
+        case SyntaxKind::XorAssignmentExpression:
+        case SyntaxKind::LogicalLeftShiftAssignmentExpression:
+        case SyntaxKind::LogicalRightShiftAssignmentExpression:
+        case SyntaxKind::ArithmeticLeftShiftAssignmentExpression:
+        case SyntaxKind::ArithmeticRightShiftAssignmentExpression:
+        // Logical and property expressions
         case SyntaxKind::LogicalImplicationExpression:
         case SyntaxKind::LogicalEquivalenceExpression:
         case SyntaxKind::ThroughoutSequenceExpr:
