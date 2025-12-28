@@ -571,8 +571,12 @@ static bool isValidForceLVal(const Expression& expr, const ASTContext& context, 
         case ExpressionKind::NamedValue:
         case ExpressionKind::HierarchicalValue:
             if (auto sym = expr.getSymbolReference()) {
-                if (inSelect && VariableSymbol::isKind(sym->kind))
-                    return false;
+                // IEEE 1800-2023 §10.6.2: Allow bit-select of variables as an extension
+                // This is commonly supported by commercial simulators (VCS, Xcelium)
+                // Original strict check was:
+                // if (inSelect && VariableSymbol::isKind(sym->kind))
+                //     return false;
+                // Now we allow force/release on variable bit-selects for compatibility
 
                 if (sym->kind == SymbolKind::Net && !sym->as<NetSymbol>().netType.isBuiltIn())
                     context.addDiag(diag::BadForceNetType, expr.sourceRange);
