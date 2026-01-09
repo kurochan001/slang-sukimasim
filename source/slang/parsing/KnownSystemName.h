@@ -96,6 +96,8 @@ enum class SLANG_EXPORT KnownSystemName {
     Rewind,
     FFlush,
     FEof,
+    FPutc,
+    FPuts,
     Rose,
     Fell,
     Stable,
@@ -402,7 +404,7 @@ SLANG_EXPORT KnownSystemName parseKnownSystemName(std::string_view str);
 
 class SLANG_EXPORT KnownSystemName_traits {
 public:
-    static const std::array<KnownSystemName, 373> values;
+    static const std::array<KnownSystemName, 375> values;
 };
 
 }

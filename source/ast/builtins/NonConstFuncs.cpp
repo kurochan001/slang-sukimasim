@@ -95,6 +95,73 @@ public:
     }
 };
 
+// IEEE 1800-2023 Section 21.3.1.2: $fputc
+// Writes a single character to a file
+// Syntax: $fputc(c, fd)
+// Returns: c on success, EOF (-1) on failure
+class FPutcFunc : public SystemSubroutine {
+public:
+    FPutcFunc() : SystemSubroutine(KnownSystemName::FPutc, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 2, 2))
+            return comp.getErrorType();
+
+        // First argument: character to write (integral)
+        if (!args[0]->type->isIntegral())
+            return badArg(context, *args[0]);
+
+        // Second argument: file descriptor (integral)
+        if (!args[1]->type->isIntegral())
+            return badArg(context, *args[1]);
+
+        return comp.getIntegerType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+};
+
+// IEEE 1800-2023 Section 21.3.1.3: $fputs
+// Writes a string to a file without newline
+// Syntax: $fputs(str, fd)
+// Returns: non-negative on success, EOF (-1) on failure
+class FPutsFunc : public SystemSubroutine {
+public:
+    FPutsFunc() : SystemSubroutine(KnownSystemName::FPuts, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 2, 2))
+            return comp.getErrorType();
+
+        // First argument: string to write
+        const Type& ft = *args[0]->type;
+        if (!ft.canBeStringLike()) {
+            context.addDiag(diag::InvalidStringArg, args[0]->sourceRange) << ft;
+            return comp.getErrorType();
+        }
+
+        // Second argument: file descriptor (integral)
+        if (!args[1]->type->isIntegral())
+            return badArg(context, *args[1]);
+
+        return comp.getIntegerType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+};
+
 class ScanfFunc : public SystemSubroutine {
 public:
     explicit ScanfFunc(bool isFscanf) :
@@ -753,6 +820,8 @@ void Builtins::registerNonConstFuncs() {
 
     addSystemSubroutine(std::make_shared<FErrorFunc>());
     addSystemSubroutine(std::make_shared<FGetsFunc>());
+    addSystemSubroutine(std::make_shared<FPutcFunc>());
+    addSystemSubroutine(std::make_shared<FPutsFunc>());
     addSystemSubroutine(std::make_shared<ScanfFunc>(true));
     addSystemSubroutine(std::make_shared<ScanfFunc>(false));
     addSystemSubroutine(std::make_shared<FReadFunc>());
