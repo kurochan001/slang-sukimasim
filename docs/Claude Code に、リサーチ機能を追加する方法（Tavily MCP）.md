@@ -1,19 +1,15 @@
-# Claude Code に、リサーチ機能を追加する方法（Tavily MCP）
+
+---
 
 ## はじめに
 
-Claude.ai には Web検索/リサーチ機能が用意されていて非常に便利です（プランや設定に依存）。
-では、Claude Codeにも同様の機能があるのでしょうか？
-
-**結論：Claude Code には内蔵の WebSearch ツールがありますが、利用不可になる場合があります。**
-
-より安定した高機能なウェブ検索を実現するには、MCP（Model Context Protocol）サーバーを追加することをお勧めします。本記事では、最も手軽な方法である **Tavily MCP** の導入手順を解説します。
+Claude Code には内蔵の WebSearch ツールがあり非常に便利ですが、より安定した高機能なウェブ検索を実現するには、MCP（Model Context Protocol）サーバーを追加することをお勧めします。本記事では、最も手軽な方法である **Tavily MCP** の導入手順を解説します。
 
 ## Claude Code 内蔵 WebSearch vs Tavily MCP
 
 | 項目 | Tavily MCP | Claude Code 内蔵 WebSearch |
 |------|------------|---------------------------|
-| **安定性** | ✅ 独立 API で安定 | ⚠️ 利用不可の場合あり |
+| **安定性** | ✅ 独立 API で安定 | ⚠️ 利用不可の場合もあり |
 | **検索エンジン** | Tavily AI 検索エンジン | Claude の標準検索 |
 | **結果数** | 最大 20 件指定可能 | 固定（約 10 件） |
 | **追加機能** | extract, crawl, map | 検索のみ |
@@ -65,7 +61,7 @@ Claude Code のサンドボックス設定やネットワーク制限により�
 | 可用性 | 不安定な場合あり | ✅ 安定した独立サービス |
 | 追加機能 | 検索のみ | ✅ extract, crawl, map |
 
-**結論**: 安定した検索機能や追加機能が必要な場合は、**Tavily MCP の導入を推奨** します。
+**結論**: 安定した検索機能や追加機能が必要な場合は、Tavily MCP の導入をおすすめします。
 
 ## Tavily MCPとは
 
@@ -88,7 +84,7 @@ Tavilyは、LLM向けに最適化されたWeb検索APIを提供するサービ�
 
 :::note info
 **無料枠について**
-- 月1,000 API credits が無料  
+- 月1,000 API credits が無料
 - クレジットカード登録不要
 :::
 
@@ -158,6 +154,80 @@ SUNDIALS 7.xの最新リリース情報を調べて
 ```
 https://example.com のページ内容を抽出して要約して
 ```
+
+## Tavily を優先的に使用する設定
+
+Claude Code には内蔵の WebSearch ツールがありますが、Tavily を優先的に使用したい場合は以下の方法があります。
+
+### 方法 1: プロンプトで直接指示
+
+検索時に明示的に Tavily を指定します：
+
+```
+Tavily を使って SystemVerilog の最新ニュースを検索して
+```
+
+または：
+
+```
+tavily-search で〜を調べて
+```
+
+### 方法 2: CLAUDE.md に設定（推奨）
+
+プロジェクトの `CLAUDE.md` またはグローバルの `~/.claude/CLAUDE.md` に以下を追加：
+
+```markdown
+# Web検索の設定
+- Web検索には内蔵 WebSearch ではなく、Tavily MCP (tavily-search, tavily-extract, tavily-crawl, tavily-map) を使用すること
+```
+
+**グローバル設定の場合**（すべてのプロジェクトに適用）:
+
+```bash
+echo -e "\n# Web検索の設定\n- Web検索には Tavily MCP を優先して使用すること" >> ~/.claude/CLAUDE.md
+```
+
+### 方法 3: 内蔵 WebSearch を無効化（確実）
+
+`~/.claude/settings.json` に permissions 設定を追加して、内蔵 WebSearch を完全に無効化できます：
+
+```json
+{
+  "permissions": {
+    "deny": ["WebSearch"]
+  }
+}
+```
+
+既存の設定ファイルがある場合は、`permissions` セクションを追加してください：
+
+```json
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": ["WebSearch"]
+  },
+  "その他の既存設定": "..."
+}
+```
+
+:::note info
+**設定ファイルの場所**
+- **ユーザー全体**: `~/.claude/settings.json`
+- **プロジェクト共有**: `.claude/settings.json`（Git にコミット可能）
+- **個人用プロジェクト**: `.claude/settings.local.json`（Git 除外推奨）
+:::
+
+### 方法の比較
+
+| 方法 | 説明 | 確実性 | 適用範囲 |
+|------|------|--------|----------|
+| プロンプトで指示 | 「Tavily で検索して」 | △ 毎回指示が必要 | その場限り |
+| CLAUDE.md に記載 | 優先使用の指示を追加 | ○ 自動的に考慮される | プロジェクト/グローバル |
+| WebSearch を deny | settings.json で無効化 | ◎ 完全にブロック | プロジェクト/グローバル |
+
+**推奨**: 確実に Tavily のみを使用したい場合は **方法 3**、柔軟性を残したい場合は **方法 2** をお勧めします。
 
 ## 各ツールの詳細パラメータ
 
@@ -254,9 +324,9 @@ claude mcp add tavily -e TAVILY_API_KEY=tvly-xxxxxxxx -- npx -y tavily-mcp@lates
 ```
 :::note warn
 **リスク**
-- APIキーが `~/.claude/settings.json` / `.claude/settings.json` / `.claude/settings.local.json` に平文で保存される  
-- MCP を **project scope** で追加した場合、`.mcp.json` に設定が書き込まれる  
-- Gitリポジトリに誤ってコミットしてしまう可能性がある  
+- APIキーが `~/.claude/settings.json` / `.claude/settings.json` / `.claude/settings.local.json` に平文で保存される
+- MCP を **project scope** で追加した場合、`.mcp.json` に設定が書き込まれる
+- Gitリポジトリに誤ってコミットしてしまう可能性がある
 - 他のユーザーやプロセスから読み取られる可能性がある
 :::
 
@@ -272,8 +342,8 @@ Tavily MCPを使用すると、検索クエリがTavilyのサーバーに送信�
 
 :::note alert
 **注意が必要なケース**
-- プロジェクト名や内部コードネームを含む検索  
-- 未公開の技術情報に関する検索  
+- プロジェクト名や内部コードネームを含む検索
+- 未公開の技術情報に関する検索
 - 顧客情報や機密データを含むクエリ
 :::
 
@@ -311,8 +381,8 @@ Tavily MCPは `npx` 経由でnpmパッケージとして実行されます。
 
 :::note warn
 **考慮すべき点**
-- npmパッケージはサプライチェーン攻撃のリスクがある  
-- パッケージの更新により意図しない動作変更が起こる可能性  
+- npmパッケージはサプライチェーン攻撃のリスクがある
+- パッケージの更新により意図しない動作変更が起こる可能性
 - `@latest` 指定は常に最新版を取得するため、破壊的変更の影響を受ける
 :::
 
@@ -356,7 +426,7 @@ claude mcp add --transport stdio tavily-mcp \
 
 ## 補足：Claude Agent SDK
 
-Anthropicは **Claude Agent SDK** を公式に提供しており、  
+Anthropicは **Claude Agent SDK** を公式に提供しており、
 コーディング用途だけでなく、汎用的なエージェント構築用途を想定しています。
 
 - ビジネス支援エージェント
