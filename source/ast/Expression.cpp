@@ -1001,6 +1001,11 @@ Expression& Expression::bindName(Compilation& comp, const NameSyntax& syntax,
         flags |= LookupFlags::AllowDeclaredAfter;
     }
 
+    // IEEE 1800-2023 §19.5: Covergroup expressions can reference variables
+    // that are declared later in the enclosing scope (forward references allowed)
+    if (context.flags.has(ASTFlags::AllowCoverageSampleFormal))
+        flags |= LookupFlags::AllowDeclaredAfter;
+
     if (context.flags.has(ASTFlags::StaticInitializer))
         flags |= LookupFlags::StaticInitializer;
 
