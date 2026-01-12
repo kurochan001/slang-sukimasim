@@ -1285,6 +1285,8 @@ void Builtins::registerSystemTasks() {
 
     TASK(KnownSystemName::MonitorOn, 0, );
     TASK(KnownSystemName::MonitorOff, 0, );
+    TASK(KnownSystemName::FMonitorOn, 0, );
+    TASK(KnownSystemName::FMonitorOff, 0, );
 
     TASK(KnownSystemName::DumpFile, 0, &stringType);
     TASK(KnownSystemName::DumpOn, 0, );
