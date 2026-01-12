@@ -208,6 +208,8 @@ $fmonitor FMonitor
 $fmonitorb FMonitorB
 $fmonitoro FMonitorO
 $fmonitorh FMonitorH
+$fmonitoron FMonitorOn
+$fmonitoroff FMonitorOff
 $swrite SWrite
 $swriteb SWriteB
 $swriteo SWriteO

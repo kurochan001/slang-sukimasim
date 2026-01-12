@@ -217,6 +217,8 @@ enum class SLANG_EXPORT KnownSystemName {
     FMonitorB,
     FMonitorO,
     FMonitorH,
+    FMonitorOn,
+    FMonitorOff,
     SWrite,
     SWriteB,
     SWriteO,
