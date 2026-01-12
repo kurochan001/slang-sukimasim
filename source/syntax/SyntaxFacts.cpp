@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #include "slang/syntax/SyntaxFacts.h"
 
+#include "slang/parsing/LexerFacts.h"
 #include "slang/syntax/AllSyntax.h"
 
 namespace slang::syntax {
@@ -735,6 +736,13 @@ bool SyntaxFacts::isCloseBrace(TokenKind kind) {
 
 bool SyntaxFacts::isIdentifierOrComma(TokenKind kind) {
     return kind == TokenKind::Identifier || kind == TokenKind::Comma;
+}
+
+bool SyntaxFacts::isIdentifierKeywordOrComma(TokenKind kind) {
+    // IEEE 1800-2023 §5.12: Attribute names are identifiers, but many simulators
+    // (and real-world code) use keywords as attribute names (e.g., (* always_latch *))
+    return kind == TokenKind::Identifier || kind == TokenKind::Comma ||
+           parsing::LexerFacts::isKeyword(kind);
 }
 
 bool SyntaxFacts::isNotIdOrComma(TokenKind kind) {
