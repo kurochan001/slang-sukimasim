@@ -136,6 +136,10 @@ public:
     /// @return true if the given token represents an identifier or a comma.
     static bool isIdentifierOrComma(TokenKind kind);
 
+    /// @return true if the given token represents an identifier, keyword, or a comma.
+    /// IEEE 1800-2023 §5.12: Attribute names can be keywords in practice.
+    static bool isIdentifierKeywordOrComma(TokenKind kind);
+
     /// @return true if the given token is not an identifier or a comma.
     static bool isNotIdOrComma(TokenKind kind);
 

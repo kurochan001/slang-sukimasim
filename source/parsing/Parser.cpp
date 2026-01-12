@@ -8,6 +8,7 @@
 #include "slang/parsing/Parser.h"
 
 #include "slang/diagnostics/ParserDiags.h"
+#include "slang/parsing/LexerFacts.h"
 #include "slang/util/SmallMap.h"
 
 namespace slang::parsing {
@@ -973,7 +974,8 @@ Parser::AttrList Parser::parseAttributes() {
         Token closeParen, openStar, closeStar;
 
         std::span<TokenOrSyntax> list;
-        parseList<isIdentifierOrComma, isEndOfAttribute>(
+        // IEEE 1800-2023 §5.12: Allow keywords as attribute names for compatibility
+        parseList<isIdentifierKeywordOrComma, isEndOfAttribute>(
             TokenKind::Star, TokenKind::Star, TokenKind::Comma, openStar, list, closeStar,
             RequireItems::True, diag::ExpectedAttribute, [this] { return &parseAttributeSpec(); });
 
@@ -990,7 +992,13 @@ Parser::AttrList Parser::parseAttributes() {
 }
 
 AttributeSpecSyntax& Parser::parseAttributeSpec() {
-    auto name = expect(TokenKind::Identifier);
+    // IEEE 1800-2023 §5.12: Allow keywords as attribute names for compatibility
+    // with common usage patterns (e.g., (* always_latch *) on always_latch blocks)
+    Token name;
+    if (LexerFacts::isKeyword(peek().kind))
+        name = consume();
+    else
+        name = expect(TokenKind::Identifier);
 
     EqualsValueClauseSyntax* initializer = nullptr;
     if (peek(TokenKind::Equals)) {
