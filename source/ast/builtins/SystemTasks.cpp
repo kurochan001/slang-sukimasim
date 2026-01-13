@@ -1285,8 +1285,9 @@ void Builtins::registerSystemTasks() {
 
     TASK(KnownSystemName::MonitorOn, 0, );
     TASK(KnownSystemName::MonitorOff, 0, );
-    TASK(KnownSystemName::FMonitorOn, 0, );
-    TASK(KnownSystemName::FMonitorOff, 0, );
+    // IEEE 1800-2023 §21.3.3: $fmonitoron and $fmonitoroff take optional mcd/fd argument
+    TASK(KnownSystemName::FMonitorOn, 0, &intType);
+    TASK(KnownSystemName::FMonitorOff, 0, &intType);
 
     TASK(KnownSystemName::DumpFile, 0, &stringType);
     TASK(KnownSystemName::DumpOn, 0, );
