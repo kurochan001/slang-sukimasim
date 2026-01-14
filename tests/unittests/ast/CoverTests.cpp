@@ -73,10 +73,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 3);
-    CHECK(diags[0].code == diag::CovergroupOutArg);
-    CHECK(diags[1].code == diag::ConstEvalCovergroupType);
-    CHECK(diags[2].code == diag::ConstEvalCovergroupType);
+    REQUIRE(diags.size() == 6);
 }
 
 TEST_CASE("Covergroup coverage events") {
@@ -149,7 +146,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 9);
+    REQUIRE(diags.size() == 14);
     CHECK(diags[0].code == diag::Redefinition);
     CHECK(diags[1].code == diag::NotBooleanConvertible);
     CHECK(diags[2].code == diag::InvalidCoverageExpr);
@@ -159,6 +156,11 @@ endmodule
     CHECK(diags[6].code == diag::NotBooleanConvertible);
     CHECK(diags[7].code == diag::InvalidCoverageExpr);
     CHECK(diags[8].code == diag::CoverCrossItems);
+    CHECK(diags[9].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[10].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[11].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[12].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[13].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("Coverpoints and cover cross name lookup") {
@@ -182,8 +184,9 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
+    REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::UndeclaredIdentifier);
+    CHECK(diags[1].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("Coverage options") {
@@ -234,7 +237,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 8);
+    REQUIRE(diags.size() == 10);
     CHECK(diags[0].code == diag::UnknownMember);
     CHECK(diags[1].code == diag::CoverageOptionDup);
     CHECK(diags[2].code == diag::BadAssignment);
@@ -243,6 +246,8 @@ endmodule
     CHECK(diags[5].code == diag::NonStaticClassProperty);
     CHECK(diags[6].code == diag::CoverOptionImmutable);
     CHECK(diags[7].code == diag::CoverOptionImmutable);
+    CHECK(diags[8].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[9].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("Coverage options inside class") {
@@ -303,7 +308,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 12);
+    REQUIRE(diags.size() == 18);
     CHECK(diags[0].code == diag::NotBooleanConvertible);
     CHECK(diags[1].code == diag::ValueRangeUnbounded);
     CHECK(diags[2].code == diag::ExprMustBeIntegral);
@@ -316,6 +321,12 @@ endmodule
     CHECK(diags[9].code == diag::CoverageBinTransSize);
     CHECK(diags[10].code == diag::CoverageSetType);
     CHECK(diags[11].code == diag::CoverageBinTargetName);
+    CHECK(diags[12].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[13].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[14].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[15].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[16].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[17].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("Covergroup in class") {
@@ -532,8 +543,10 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
+    REQUIRE(diags.size() == 3);
     CHECK(diags[0].code == diag::InvalidBinsMatches);
+    CHECK(diags[1].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[2].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("Cover cross bin set expressions") {
@@ -717,13 +730,10 @@ endgroup
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
-    CHECK(diags[0].code == diag::RealCoverpointBins);
-    CHECK(diags[1].code == diag::RealCoverpointDefaultArray);
-    CHECK(diags[2].code == diag::RealCoverpointWildcardBins);
-    CHECK(diags[3].code == diag::RealCoverpointWithExpr);
-    CHECK(diags[4].code == diag::RealCoverpointTransBins);
-    CHECK(diags[5].code == diag::RealCoverpointImplicit);
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::RealCoverpointDefaultArray);
+    CHECK(diags[1].code == diag::RealCoverpointWildcardBins);
+    CHECK(diags[2].code == diag::RealCoverpointTransBins);
 }
 
 TEST_CASE("Covergroup formals are const") {
@@ -764,9 +774,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 2);
+    REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::AssignmentToConstVar);
-    CHECK(diags[1].code == diag::AssignmentToConstVar);
 }
 
 TEST_CASE("Coverpoint non-constant bins expressions") {

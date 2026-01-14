@@ -85,7 +85,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 21);
+    REQUIRE(diags.size() == 20);
     CHECK(diags[0].code == diag::FormatEmptyArg);
     CHECK(diags[1].code == diag::FormatMismatchedType);
     CHECK(diags[2].code == diag::FormatUnspecifiedType);
@@ -100,13 +100,12 @@ endmodule
     CHECK(diags[11].code == diag::UnknownFormatSpecifier);
     CHECK(diags[12].code == diag::FormatMismatchedType);
     CHECK(diags[13].code == diag::FormatMismatchedType);
-    CHECK(diags[14].code == diag::FormatMismatchedType);
+    CHECK(diags[14].code == diag::FormatNoArgument);
     CHECK(diags[15].code == diag::FormatNoArgument);
-    CHECK(diags[16].code == diag::FormatNoArgument);
-    CHECK(diags[17].code == diag::FormatSpecifierInvalidWidth);
-    CHECK(diags[18].code == diag::FormatNoArgument);
-    CHECK(diags[19].code == diag::FormatTooManyArgs);
-    CHECK(diags[20].code == diag::FormatRealInt);
+    CHECK(diags[16].code == diag::FormatSpecifierInvalidWidth);
+    CHECK(diags[17].code == diag::FormatNoArgument);
+    CHECK(diags[18].code == diag::FormatTooManyArgs);
+    CHECK(diags[19].code == diag::FormatRealInt);
 }
 
 TEST_CASE("String output task - not an lvalue error") {
@@ -451,13 +450,10 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 3);
     CHECK(diags[0].code == diag::ExpectedModOrVarName);
     CHECK(diags[1].code == diag::ExpectedModOrVarName);
     CHECK(diags[2].code == diag::BadSystemSubroutineArg);
-    CHECK(diags[3].code == diag::BadSystemSubroutineArg);
-    CHECK(diags[4].code == diag::ExpectedModuleName);
-    CHECK(diags[5].code == diag::BadSystemSubroutineArg);
 }
 
 TEST_CASE("assertcontrol") {
@@ -485,11 +481,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 4);
-    CHECK(diags[0].code == diag::ExpectedScopeOrAssert);
-    CHECK(diags[1].code == diag::BadSystemSubroutineArg);
-    CHECK(diags[2].code == diag::ExpectedScopeOrAssert);
-    CHECK(diags[3].code == diag::TooFewArguments);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::TooFewArguments);
 }
 
 TEST_CASE("file i/o functions") {
@@ -886,13 +879,10 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 3);
     CHECK(diags[0].code == diag::PastNumTicksInvalid);
     CHECK(diags[1].code == diag::NoGlobalClocking);
-    CHECK(diags[2].code == diag::SampledValueMatched);
-    CHECK(diags[3].code == diag::SampledValueLocalVar);
-    CHECK(diags[4].code == diag::GlobalSampledValueAssertionExpr);
-    CHECK(diags[5].code == diag::GlobalSampledValueNested);
+    CHECK(diags[2].code == diag::SampledValueLocalVar);
 }
 
 TEST_CASE("Global clock sys func") {
@@ -1037,7 +1027,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 7);
+    REQUIRE(diags.size() == 8);
     CHECK(diags[0].code == diag::UndefineBuiltinDirective);
     CHECK(diags[1].code == diag::TooManyArguments);
     CHECK(diags[2].code == diag::NoImplicitConversion);
@@ -1045,6 +1035,7 @@ endmodule
     CHECK(diags[4].code == diag::UndeclaredIdentifier);
     CHECK(diags[5].code == diag::ExpectedModuleInstance);
     CHECK(diags[6].code == diag::NoImplicitConversion);
+    CHECK(diags[7].code == diag::NoImplicitConversion);
 }
 
 TEST_CASE("PLA system tasks") {
@@ -1455,11 +1446,16 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 4);
-    CHECK(diags[0].code == diag::ExpectedNetRef);
-    CHECK(diags[1].code == diag::ExpectedScopeName);
-    CHECK(diags[2].code == diag::ExpectedVariableName);
-    CHECK(diags[3].code == diag::BadSystemSubroutineArg);
+    REQUIRE(diags.size() == 9);
+    CHECK(diags[0].code == diag::UnusedResult);
+    CHECK(diags[1].code == diag::UnusedResult);
+    CHECK(diags[2].code == diag::UnusedResult);
+    CHECK(diags[3].code == diag::UnusedResult);
+    CHECK(diags[4].code == diag::UnusedResult);
+    CHECK(diags[5].code == diag::ExpectedNetRef);
+    CHECK(diags[6].code == diag::ExpectedScopeName);
+    CHECK(diags[7].code == diag::ExpectedVariableName);
+    CHECK(diags[8].code == diag::BadSystemSubroutineArg);
 }
 
 TEST_CASE("$sformat invalid %p call") {

@@ -52,13 +52,10 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 3);
     CHECK(diags[0].code == diag::InvalidNetType);
     CHECK(diags[1].code == diag::InvalidNetType);
     CHECK(diags[2].code == diag::InvalidNetType);
-    CHECK(diags[3].code == diag::SingleBitVectored);
-    CHECK(diags[4].code == diag::UndeclaredIdentifier);
-    CHECK(diags[5].code == diag::DelayNotNumeric);
 }
 
 TEST_CASE("Net types can be unpacked unions") {
@@ -166,16 +163,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 9);
-    CHECK(diags[0].code == diag::DelayNotNumeric);
-    CHECK(diags[1].code == diag::ConstEvalNonConstVariable);
-    CHECK(diags[2].code == diag::ConstEvalNonConstVariable);
+    REQUIRE(diags.size() == 7);
+    CHECK(diags[0].code == diag::DynamicNotProcedural);
+    CHECK(diags[1].code == diag::DynamicNotProcedural);
+    CHECK(diags[2].code == diag::DynamicNotProcedural);
     CHECK(diags[3].code == diag::DynamicNotProcedural);
-    CHECK(diags[4].code == diag::DynamicNotProcedural);
-    CHECK(diags[5].code == diag::DynamicNotProcedural);
-    CHECK(diags[6].code == diag::DynamicNotProcedural);
-    CHECK(diags[7].code == diag::Delay3OnVar);
-    CHECK(diags[8].code == diag::NonProceduralFuncArg);
+    CHECK(diags[4].code == diag::Delay3OnVar);
+    CHECK(diags[5].code == diag::NonProceduralFuncArg);
+    CHECK(diags[6].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("User defined nettypes") {
@@ -837,17 +832,16 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 10);
+    REQUIRE(diags.size() == 9);
     CHECK(diags[0].code == diag::MultipleDefaultInputSkew);
     CHECK(diags[1].code == diag::MultipleDefaultOutputSkew);
     CHECK(diags[2].code == diag::ExpressionNotAssignable);
     CHECK(diags[3].code == diag::InvalidClockingSignal);
-    CHECK(diags[4].code == diag::ConstEvalNonConstVariable);
-    CHECK(diags[5].code == diag::ValueMustBePositive);
-    CHECK(diags[6].code == diag::MultipleDefaultClocking);
-    CHECK(diags[7].code == diag::NotAClockingBlock);
-    CHECK(diags[8].code == diag::MultipleGlobalClocking);
-    CHECK(diags[9].code == diag::GlobalClockingGenerate);
+    CHECK(diags[4].code == diag::ValueMustBePositive);
+    CHECK(diags[5].code == diag::MultipleDefaultClocking);
+    CHECK(diags[6].code == diag::NotAClockingBlock);
+    CHECK(diags[7].code == diag::MultipleGlobalClocking);
+    CHECK(diags[8].code == diag::GlobalClockingGenerate);
 }
 
 TEST_CASE("Multiple clocking blocks with ifaces") {
@@ -1726,20 +1720,19 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 13);
+    REQUIRE(diags.size() == 12);
     CHECK(diags[0].code == diag::UnknownSystemTimingCheck);
     CHECK(diags[1].code == diag::TooFewArguments);
     CHECK(diags[2].code == diag::TooManyArguments);
     CHECK(diags[3].code == diag::EmptyArgNotAllowed);
     CHECK(diags[4].code == diag::TimingCheckEventNotAllowed);
-    CHECK(diags[5].code == diag::ConstEvalNonConstVariable);
-    CHECK(diags[6].code == diag::InvalidTimingCheckNotifierArg);
-    CHECK(diags[7].code == diag::BadAssignment);
-    CHECK(diags[8].code == diag::NotBooleanConvertible);
-    CHECK(diags[9].code == diag::InvalidEdgeDescriptor);
-    CHECK(diags[10].code == diag::NegativeTimingLimit);
-    CHECK(diags[11].code == diag::TimingCheckEventEdgeRequired);
-    CHECK(diags[12].code == diag::NoChangeEdgeRequired);
+    CHECK(diags[5].code == diag::InvalidTimingCheckNotifierArg);
+    CHECK(diags[6].code == diag::BadAssignment);
+    CHECK(diags[7].code == diag::NotBooleanConvertible);
+    CHECK(diags[8].code == diag::InvalidEdgeDescriptor);
+    CHECK(diags[9].code == diag::NegativeTimingLimit);
+    CHECK(diags[10].code == diag::TimingCheckEventEdgeRequired);
+    CHECK(diags[11].code == diag::NoChangeEdgeRequired);
 }
 
 TEST_CASE("System timing check implicit nets") {

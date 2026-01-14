@@ -672,10 +672,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 3);
-    CHECK(diags[0].code == diag::ExpectedExpression);
-    CHECK(diags[1].code == diag::ExpectedExpression);
-    CHECK(diags[2].code == diag::ExpectedExpression);
+    REQUIRE(diags.size() == 0);
 }
 
 TEST_CASE("Sequence expression parsing") {

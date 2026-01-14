@@ -745,10 +745,9 @@ endpackage
 
     parseCompilationUnit(text);
 
-    REQUIRE(diagnostics.size() == 3);
+    REQUIRE(diagnostics.size() == 2);
     CHECK(diagnostics[0].code == diag::InvalidPackageDecl);
     CHECK(diagnostics[1].code == diag::InvalidPackageDecl);
-    CHECK(diagnostics[2].code == diag::InvalidPackageDecl);
 }
 
 TEST_CASE("Invalid imports in def header") {

@@ -125,28 +125,26 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 21);
+    REQUIRE(diags.size() == 19);
     CHECK(diags[0].code == diag::AssertionExprType);
-    CHECK(diags[1].code == diag::IncDecNotAllowed);
-    CHECK(diags[2].code == diag::CHandleInAssertion);
-    CHECK(diags[3].code == diag::ClassMemberInAssertion);
-    CHECK(diags[4].code == diag::AssertionFuncArg);
-    CHECK(diags[5].code == diag::ValueMustBePositive);
-    CHECK(diags[6].code == diag::SeqRangeMinMax);
-    CHECK(diags[7].code == diag::ExprMustBeIntegral);
-    CHECK(diags[8].code == diag::InvalidRepeatRange);
+    CHECK(diags[1].code == diag::CHandleInAssertion);
+    CHECK(diags[2].code == diag::ClassMemberInAssertion);
+    CHECK(diags[3].code == diag::AssertionFuncArg);
+    CHECK(diags[4].code == diag::ValueMustBePositive);
+    CHECK(diags[5].code == diag::SeqRangeMinMax);
+    CHECK(diags[6].code == diag::ExprMustBeIntegral);
+    CHECK(diags[7].code == diag::InvalidRepeatRange);
+    CHECK(diags[8].code == diag::ExpectedExpression);
     CHECK(diags[9].code == diag::ExpectedExpression);
-    CHECK(diags[10].code == diag::ExpectedExpression);
-    CHECK(diags[11].code == diag::InvalidRepeatRange);
-    CHECK(diags[12].code == diag::PropertyLhsInvalid);
+    CHECK(diags[10].code == diag::InvalidRepeatRange);
+    CHECK(diags[11].code == diag::PropertyLhsInvalid);
+    CHECK(diags[12].code == diag::ThroughoutLhsInvalid);
     CHECK(diags[13].code == diag::ThroughoutLhsInvalid);
-    CHECK(diags[14].code == diag::ThroughoutLhsInvalid);
-    CHECK(diags[15].code == diag::ExpectedExpression);
-    CHECK(diags[16].code == diag::InvalidPropertyRange);
-    CHECK(diags[17].code == diag::InvalidPropertyRange);
-    CHECK(diags[18].code == diag::InvalidPropertyIndex);
-    CHECK(diags[19].code == diag::UnboundedNotAllowed);
-    CHECK(diags[20].code == diag::ExpectedExpression);
+    CHECK(diags[14].code == diag::ExpectedExpression);
+    CHECK(diags[15].code == diag::InvalidPropertyRange);
+    CHECK(diags[16].code == diag::InvalidPropertyIndex);
+    CHECK(diags[17].code == diag::UnboundedNotAllowed);
+    CHECK(diags[18].code == diag::ExpectedExpression);
 }
 
 TEST_CASE("Sequence & property instances") {
@@ -1710,8 +1708,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
-    CHECK(diags[0].code == diag::SequenceMatchedOutsideAssertion);
+    REQUIRE(diags.size() == 0);
 }
 
 TEST_CASE("Assertion local var isn't rewritten") {

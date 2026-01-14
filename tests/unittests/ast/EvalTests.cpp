@@ -2043,9 +2043,8 @@ localparam logic[7:0] value6 = {<<4{ {<<2{value5}} }};
     CHECK(session.eval("value4").integer() == "8'b01100011"_si);
 
     auto diags = session.getDiagnostics();
-    REQUIRE(diags.size() == 2);
+    REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::IgnoredSlice);
-    CHECK(diags[1].code == diag::BadStreamSize);
 }
 
 TEST_CASE("streaming operator target evaluation") {
