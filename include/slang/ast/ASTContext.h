@@ -184,8 +184,13 @@ enum class SLANG_EXPORT ASTFlags : uint64_t {
     /// AST binding is for a foreach loop array reference, which allows
     /// interface arrays to be used (IEEE 1800-2023 §12.7.3).
     ForeachLoopArray = 1ull << 42,
+
+    /// AST binding is for a procedural force/assign statement (IEEE 1800-2023 §10.6).
+    /// This allows nets to be assigned on the LHS while still permitting automatic
+    /// variables in the RHS expression.
+    ProceduralForceAssign = 1ull << 43,
 };
-SLANG_BITMASK(ASTFlags, ForeachLoopArray)
+SLANG_BITMASK(ASTFlags, ProceduralForceAssign)
 
 // clang-format off
 #define DK(x) \

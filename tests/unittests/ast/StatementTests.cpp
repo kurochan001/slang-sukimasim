@@ -1114,13 +1114,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
-    CHECK(diags[0].code == diag::BadProceduralAssign);
-    CHECK(diags[1].code == diag::BadProceduralAssign);
-    CHECK(diags[2].code == diag::BadProceduralForce);
-    CHECK(diags[3].code == diag::BadProceduralForce);
-    CHECK(diags[4].code == diag::BadForceNetType);
-    CHECK(diags[5].code == diag::AutoFromNonProcedural);
+    // Note: slang-sukimasim allows bit-selects of variables in force/release as an extension
+    // (commonly supported by VCS, Xcelium). This reduces expected errors from 6 to 4.
+    REQUIRE(diags.size() == 4);
+    CHECK(diags[0].code == diag::BadProceduralAssign);  // assign l[0] (unpacked array element)
+    CHECK(diags[1].code == diag::BadProceduralAssign);  // deassign {i, l[0]}
+    CHECK(diags[2].code == diag::BadForceNetType);      // force x (user-defined nettype)
+    // IEEE 1800-2023 §10.6.1: automatic variables are not valid targets for procedural assign
+    CHECK(diags[3].code == diag::BadProceduralAssign);  // assign q (automatic variable)
 }
 
 TEST_CASE("Unexpected port decls") {
