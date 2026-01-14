@@ -285,11 +285,25 @@ bool TaggedPattern::createVars(const ASTContext& context, const syntax::TaggedPa
 
 Pattern& TaggedPattern::fromSyntax(const TaggedPatternSyntax& syntax, const Type& targetType,
                                    const ASTContext& context) {
-    SLANG_ASSERT(targetType.isTaggedUnion());
+    auto& comp = context.getCompilation();
+
+    // Handle error case when target type is not a tagged union
+    if (!targetType.isTaggedUnion()) {
+        if (!targetType.isError()) {
+            context.addDiag(diag::PatternTaggedType, syntax.sourceRange()) << targetType;
+        }
+        return badPattern(comp, nullptr);
+    }
 
     auto memberName = syntax.memberName.valueText();
     auto member = targetType.getCanonicalType().as<Scope>().find(memberName);
-    SLANG_ASSERT(member);
+
+    // Handle error case when member is not found
+    if (!member) {
+        context.addDiag(diag::PatternTaggedMember, syntax.memberName.range())
+            << memberName << targetType;
+        return badPattern(comp, nullptr);
+    }
 
     auto& field = member->as<FieldSymbol>();
 
@@ -297,7 +311,6 @@ Pattern& TaggedPattern::fromSyntax(const TaggedPatternSyntax& syntax, const Type
     if (syntax.pattern)
         value = &Pattern::bind(context, *syntax.pattern, field.getType());
 
-    auto& comp = context.getCompilation();
     auto result = comp.emplace<TaggedPattern>(field, value, syntax.sourceRange());
     if (value && value->bad())
         return badPattern(comp, result);
