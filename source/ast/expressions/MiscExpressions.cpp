@@ -240,8 +240,9 @@ bool ValueExpressionBase::requireLValueImpl(const ASTContext& context, SourceLoc
             return false;
         }
     }
-    else {
-        // Nets can't be assigned in procedural contexts.
+    else if (!context.flags.has(ASTFlags::ProceduralForceAssign)) {
+        // Nets can't be assigned in procedural contexts, except for force/assign
+        // statements which can target nets (IEEE 1800-2023 §10.6).
         if (symbol.kind == SymbolKind::Net) {
             context.addDiag(diag::AssignToNet, sourceRange);
             return false;

@@ -552,8 +552,17 @@ static bool isValidAssignLVal(const Expression& expr) {
         case ExpressionKind::NamedValue:
         case ExpressionKind::HierarchicalValue:
         case ExpressionKind::Assignment:
-            if (auto sym = expr.getSymbolReference())
-                return VariableSymbol::isKind(sym->kind);
+            if (auto sym = expr.getSymbolReference()) {
+                if (!VariableSymbol::isKind(sym->kind))
+                    return false;
+                // IEEE 1800-2023 §10.6.1: Procedural assign targets must have
+                // static storage duration. Automatic variables are not valid targets.
+                auto& var = sym->as<VariableSymbol>();
+                if (var.lifetime == VariableLifetime::Automatic &&
+                    !var.flags.has(VariableFlags::RefStatic))
+                    return false;
+                return true;
+            }
             return false;
         case ExpressionKind::Concatenation:
             for (auto op : expr.as<ConcatenationExpression>().operands()) {
@@ -609,8 +618,13 @@ Statement& ProceduralAssignStatement::fromSyntax(Compilation& compilation,
                                                  const ProceduralAssignStatementSyntax& syntax,
                                                  const ASTContext& context) {
     bool isForce = syntax.keyword.kind == TokenKind::ForceKeyword;
+    // IEEE 1800-2023 §10.6: force/assign are procedural statements.
+    // Use ProceduralForceAssign flag to:
+    // - Allow nets to be assigned on LHS (for force statements)
+    // - Allow automatic variables in RHS expressions (e.g., loop indices)
+    // The LHS is further validated by isValidForceLVal/isValidAssignLVal.
     auto& assign = Expression::bind(*syntax.expr, context,
-                                    ASTFlags::NonProcedural | ASTFlags::AssignmentAllowed);
+                                    ASTFlags::ProceduralForceAssign | ASTFlags::AssignmentAllowed);
     auto result = compilation.emplace<ProceduralAssignStatement>(assign, isForce,
                                                                  syntax.sourceRange());
     if (assign.bad())
