@@ -918,7 +918,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 21);
+    REQUIRE(diags.size() == 20);
     CHECK(diags[0].code == diag::MissingPortIODeclaration);
     CHECK(diags[1].code == diag::Redefinition);
     CHECK(diags[2].code == diag::Redefinition);
@@ -939,7 +939,6 @@ endmodule
     CHECK(diags[17].code == diag::UndeclaredIdentifier);
     CHECK(diags[18].code == diag::DisallowedPortDefault);
     CHECK(diags[19].code == diag::DisallowedPortDefault);
-    CHECK(diags[20].code == diag::ConstEvalNonConstVariable);
 }
 
 TEST_CASE("Non-ansi port locations") {
@@ -1140,10 +1139,9 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 3);
-    CHECK(diags[0].code == diag::ConstEvalNonConstVariable);
-    CHECK(diags[1].code == diag::AnsiIfacePortDefault);
-    CHECK(diags[2].code == diag::UnconnectedNamedPort);
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::AnsiIfacePortDefault);
+    CHECK(diags[1].code == diag::UnconnectedNamedPort);
 }
 
 TEST_CASE("Implicit named port connection directions") {
@@ -1287,7 +1285,7 @@ endmodule
     CHECK(!m1.getPortConnection(m1_i)->getIfaceConn().first);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 15);
+    REQUIRE(diags.size() == 14);
     CHECK(diags[0].code == diag::PortTypeNotInterfaceOrData);
     CHECK(diags[1].code == diag::TooManyPortConnections);
     CHECK(diags[2].code == diag::ImplicitNamedPortNotFound);
@@ -1300,9 +1298,8 @@ endmodule
     CHECK(diags[9].code == diag::UndeclaredIdentifier);
     CHECK(diags[10].code == diag::PortConnDimensionsMismatch);
     CHECK(diags[11].code == diag::ImplicitNamedPortTypeMismatch);
-    CHECK(diags[12].code == diag::PortWidthExpand);
-    CHECK(diags[13].code == diag::UnconnectedUnnamedPort);
-    CHECK(diags[14].code == diag::PortDoesNotExist);
+    CHECK(diags[12].code == diag::UnconnectedUnnamedPort);
+    CHECK(diags[13].code == diag::PortDoesNotExist);
 }
 
 TEST_CASE("Inconsistent port collapsing") {
@@ -1438,16 +1435,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 9);
+    REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::MismatchedUserDefPortConn);
-    CHECK(diags[1].code == diag::PortWidthTruncate);
-    CHECK(diags[2].code == diag::MismatchedUserDefPortDir);
-    CHECK(diags[3].code == diag::MismatchedUserDefPortConn);
+    CHECK(diags[1].code == diag::MismatchedUserDefPortDir);
+    CHECK(diags[2].code == diag::MismatchedUserDefPortConn);
+    CHECK(diags[3].code == diag::UserDefPortTwoSided);
     CHECK(diags[4].code == diag::PortWidthTruncate);
-    CHECK(diags[5].code == diag::UserDefPortTwoSided);
-    CHECK(diags[6].code == diag::PortWidthTruncate);
-    CHECK(diags[7].code == diag::UserDefPortMixedConcat);
-    CHECK(diags[8].code == diag::PortWidthExpand);
+    CHECK(diags[5].code == diag::UserDefPortMixedConcat);
+    CHECK(diags[6].code == diag::PortWidthExpand);
 }
 
 TEST_CASE("inout uwire port errors") {

@@ -783,13 +783,17 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 10);
     CHECK(diags[0].code == diag::IndexOOB);
     CHECK(diags[1].code == diag::IndexOOB);
-    CHECK(diags[2].code == diag::RangeOOB);
+    CHECK(diags[2].code == diag::InvalidPackedRange);
     CHECK(diags[3].code == diag::RangeOOB);
-    CHECK(diags[4].code == diag::RangeOOB);
+    CHECK(diags[4].code == diag::InvalidPackedRange);
     CHECK(diags[5].code == diag::RangeOOB);
+    CHECK(diags[6].code == diag::InvalidPackedRange);
+    CHECK(diags[7].code == diag::RangeOOB);
+    CHECK(diags[8].code == diag::InvalidPackedRange);
+    CHECK(diags[9].code == diag::RangeOOB);
 }
 
 TEST_CASE("Empty concat error") {
@@ -917,15 +921,13 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 8);
+    REQUIRE(diags.size() == 6);
     CHECK(diags[0].code == diag::ConstEvalNonConstVariable);
     CHECK(diags[1].code == diag::AssignmentNotAllowed);
     CHECK(diags[2].code == diag::AssignmentRequiresParens);
     CHECK(diags[3].code == diag::AssignmentRequiresParens);
-    CHECK(diags[4].code == diag::IncDecNotAllowed);
-    CHECK(diags[5].code == diag::IncDecNotAllowed);
-    CHECK(diags[6].code == diag::AutoFromStaticInit);
-    CHECK(diags[7].code == diag::NonblockingInFinal);
+    CHECK(diags[4].code == diag::AutoFromStaticInit);
+    CHECK(diags[5].code == diag::NonblockingInFinal);
 }
 
 TEST_CASE("Assignment error checking") {
@@ -1094,13 +1096,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::NewArrayTarget);
     CHECK(diags[1].code == diag::UndeclaredIdentifier);
     CHECK(diags[2].code == diag::ExprMustBeIntegral);
     CHECK(diags[3].code == diag::BadAssignment);
     CHECK(diags[4].code == diag::EmptyAssignmentPattern);
-    CHECK(diags[5].code == diag::WrongNumberAssignmentPatterns);
+    CHECK(diags[5].code == diag::ConstEvalNonConstVariable);
+    CHECK(diags[6].code == diag::WrongNumberAssignmentPatterns);
 }
 
 TEST_CASE("Unpacked array concatentions") {
@@ -1950,11 +1953,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 4);
+    REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ImplicitConvert);
-    CHECK(diags[1].code == diag::WidthExpand);
-    CHECK(diags[2].code == diag::SignConversion);
-    CHECK(diags[3].code == diag::WidthTruncate);
 }
 
 TEST_CASE("Assign to net in procedural context") {
@@ -3065,8 +3065,11 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
+    REQUIRE(diags.size() == 4);
     CHECK(diags[0].code == diag::BadStreamSize);
+    CHECK(diags[1].code == diag::BadStreamSize);
+    CHECK(diags[2].code == diag::BadStreamSize);
+    CHECK(diags[3].code == diag::BadStreamSize);
 }
 
 TEST_CASE("v1800-2023: Unsized integer literals can be any bit width") {

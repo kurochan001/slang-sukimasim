@@ -508,12 +508,13 @@ endclass
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 5);
+    REQUIRE(diags.size() == 6);
     CHECK(diags[0].code == diag::UndeclaredIdentifier);
     CHECK(diags[1].code == diag::UndeclaredIdentifier);
     CHECK(diags[2].code == diag::UndeclaredIdentifier);
     CHECK(diags[3].code == diag::UndeclaredIdentifier);
     CHECK(diags[4].code == diag::UndeclaredIdentifier);
+    CHECK(diags[5].code == diag::UndeclaredIdentifier);
 }
 
 TEST_CASE("Inferred parameter type with range specification -- assignment-like context") {

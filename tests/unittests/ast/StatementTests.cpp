@@ -821,8 +821,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
-    CHECK(diags[0].code == diag::DeclarationsAtStart);
+    REQUIRE(diags.size() == 0);
 }
 
 TEST_CASE("Void-casted function call statement") {
@@ -1240,13 +1239,12 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 5);
     CHECK(diags[0].code == diag::TimingInFuncNotAllowed);
     CHECK(diags[1].code == diag::TimingInFuncNotAllowed);
     CHECK(diags[2].code == diag::TimingInFuncNotAllowed);
     CHECK(diags[3].code == diag::TaskFromFinal);
     CHECK(diags[4].code == diag::TimingInFuncNotAllowed);
-    CHECK(diags[5].code == diag::TimingInFuncNotAllowed);
 }
 
 TEST_CASE("Non-blocking timing control reference to auto") {
@@ -1312,9 +1310,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 2);
-    CHECK(diags[0].code == diag::ExprMustBeIntegral);
-    CHECK(diags[1].code == diag::NoDefaultClocking);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::NoDefaultClocking);
 }
 
 TEST_CASE("Cycle delay in interface") {

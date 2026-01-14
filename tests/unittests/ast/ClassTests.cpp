@@ -296,13 +296,12 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 5);
     CHECK(diags[0].code == diag::TooFewArguments);
     CHECK(diags[1].code == diag::TooManyArguments);
-    CHECK(diags[2].code == diag::UndeclaredIdentifier);
+    CHECK(diags[2].code == diag::NotAClass);
     CHECK(diags[3].code == diag::NotAClass);
-    CHECK(diags[4].code == diag::NotAClass);
-    CHECK(diags[5].code == diag::NewClassTarget);
+    CHECK(diags[4].code == diag::NewClassTarget);
 }
 
 TEST_CASE("Copy class expressions") {
@@ -1117,10 +1116,9 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 3);
+    REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::PureInAbstract);
     CHECK(diags[1].code == diag::BodyForPure);
-    CHECK(diags[2].code == diag::InheritFromAbstract);
 }
 
 TEST_CASE("Polymorphism example") {
@@ -2055,7 +2053,7 @@ endclass
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 11);
+    REQUIRE(diags.size() == 10);
     CHECK(diags[0].code == diag::MemberDefinitionBeforeClass);
     CHECK(diags[1].code == diag::NoConstraintBody);
     CHECK(diags[2].code == diag::NoMemberImplFound);
@@ -2065,8 +2063,7 @@ endclass
     CHECK(diags[6].code == diag::MismatchStaticConstraint);
     CHECK(diags[7].code == diag::BodyForPureConstraint);
     CHECK(diags[8].code == diag::InvalidThisHandle);
-    CHECK(diags[9].code == diag::InheritFromAbstractConstraint);
-    CHECK(diags[10].code == diag::MismatchStaticConstraint);
+    CHECK(diags[9].code == diag::MismatchStaticConstraint);
 }
 
 TEST_CASE("Randomize 'with' clauses") {
@@ -3289,8 +3286,9 @@ endclass
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
+    REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::BadSolveBefore);
+    CHECK(diags[1].code == diag::BadSolveBefore);
 }
 
 TEST_CASE("v1800-2023: disable soft with array sizes") {

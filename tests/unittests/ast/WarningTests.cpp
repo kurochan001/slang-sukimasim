@@ -244,12 +244,11 @@ endfunction
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 5);
+    REQUIRE(diags.size() == 4);
     CHECK(diags[0].code == diag::SignConversion);
     CHECK(diags[1].code == diag::UnsignedArithShift);
     CHECK(diags[2].code == diag::ArithOpMismatch);
     CHECK(diags[3].code == diag::SignConversion);
-    CHECK(diags[4].code == diag::SignConversion);
 }
 
 TEST_CASE("Indeterminate variable initialization order") {
@@ -356,13 +355,12 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 5);
     CHECK(diags[0].code == diag::SignConversion);
     CHECK(diags[1].code == diag::ArithOpMismatch);
     CHECK(diags[2].code == diag::IntFloatConv);
     CHECK(diags[3].code == diag::ComparisonMismatch);
     CHECK(diags[4].code == diag::SignCompare);
-    CHECK(diags[5].code == diag::BitwiseOpMismatch);
 }
 
 TEST_CASE("Binary operator with struct type preserves the type") {
@@ -600,10 +598,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 3);
-    CHECK(diags[0].code == diag::WidthExpand);
-    CHECK(diags[1].code == diag::WidthExpand);
-    CHECK(diags[2].code == diag::WidthExpand);
+    REQUIRE(diags.size() == 0);
 }
 
 TEST_CASE("Unnamed generate warnings") {

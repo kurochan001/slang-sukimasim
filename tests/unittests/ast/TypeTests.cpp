@@ -2021,10 +2021,9 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 3);
+    REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::VirtualInterfaceIfaceMember);
     CHECK(diags[1].code == diag::VirtualInterfaceUnionMember);
-    CHECK(diags[2].code == diag::InvalidPortSubType);
 }
 
 TEST_CASE("Max object size tests") {

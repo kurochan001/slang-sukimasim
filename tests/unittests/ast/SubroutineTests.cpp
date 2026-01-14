@@ -219,7 +219,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 7);
+    REQUIRE(diags.size() == 10);
     CHECK(diags[0].code == diag::ExpectedDPISpecString);
     CHECK(diags[1].code == diag::DPISpecDisallowed);
     CHECK(diags[2].code == diag::DPIRefArg);
@@ -227,6 +227,9 @@ endmodule
     CHECK(diags[4].code == diag::DPIPureArg);
     CHECK(diags[5].code == diag::InvalidDPIReturnType);
     CHECK(diags[6].code == diag::InvalidDPIArgType);
+    CHECK(diags[7].code == diag::UnusedResult);
+    CHECK(diags[8].code == diag::UnusedResult);
+    CHECK(diags[9].code == diag::UnusedResult);
 }
 
 TEST_CASE("DPI Exports") {
@@ -322,13 +325,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::DPISignatureMismatch);
     CHECK(diags[1].code == diag::DPISignatureMismatch);
     CHECK(diags[2].code == diag::DPISignatureMismatch);
     CHECK(diags[3].code == diag::DPISignatureMismatch);
     CHECK(diags[4].code == diag::DPISignatureMismatch);
     CHECK(diags[5].code == diag::DPIExportDuplicateCId);
+    CHECK(diags[6].code == diag::DPIExportDuplicateCId);
 }
 
 TEST_CASE("Non-const subroutine check failures") {

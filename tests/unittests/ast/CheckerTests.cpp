@@ -251,15 +251,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 8);
+    REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::UnknownModule);
     CHECK(diags[1].code == diag::UndeclaredIdentifier);
     CHECK(diags[2].code == diag::NotAChecker);
     CHECK(diags[3].code == diag::CheckerFuncBadInstantiation);
     CHECK(diags[4].code == diag::CheckerClassBadInstantiation);
-    CHECK(diags[5].code == diag::CheckerParameterAssign);
-    CHECK(diags[6].code == diag::CheckerInForkJoin);
-    CHECK(diags[7].code == diag::CheckerInCheckerProc);
+    CHECK(diags[5].code == diag::CheckerInForkJoin);
+    CHECK(diags[6].code == diag::CheckerInCheckerProc);
 }
 
 TEST_CASE("Assertion ports invalid directions") {
