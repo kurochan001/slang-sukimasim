@@ -1057,10 +1057,16 @@ bool SyntaxFacts::isDriveStrength(TokenKind kind) {
 }
 
 bool SyntaxFacts::isChargeStrength(TokenKind kind) {
-    // Phase 154: Obsolete Verilog keywords removed
-    // small, medium, large are no longer keywords
-    (void)kind;
-    return false;
+    // IEEE 1800-2023 §6.6.3: Charge strength for trireg nets
+    // small, medium, large are valid charge strength keywords
+    switch (kind) {
+        case TokenKind::SmallKeyword:
+        case TokenKind::MediumKeyword:
+        case TokenKind::LargeKeyword:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool SyntaxFacts::isGateType(TokenKind kind) {

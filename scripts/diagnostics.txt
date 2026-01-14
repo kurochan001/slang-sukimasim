@@ -732,6 +732,7 @@ error UserDefPartialDriver "net '{}' with user-defined nettype cannot be partial
 error LocalVarEventExpr "local variable '{}' cannot be referenced in an event expression"
 error RefArgForkJoin "cannot refer to 'ref' argument '{}' inside fork-join_any or fork-join_none block"
 error PatternTaggedType "expected pattern type {} is not a tagged union"
+error PatternTaggedMember "unknown tagged union member '{}' in type {}"
 error PatternStructType "structure pattern type {} is not a struct"
 error PatternStructTooFew "structure pattern has too few members for target type {}"
 error PatternStructTooMany "structure pattern has too many members for target type {}"
