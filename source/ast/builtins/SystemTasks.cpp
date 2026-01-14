@@ -1007,9 +1007,11 @@ public:
     }
 
 private:
+    // IEEE 1800-2023 Annex G: PLA functions accept both ascending [0:N] and descending [N:0] ranges
+    // No range direction restriction is specified in the standard
     static bool isValidRange(const Type& type) {
-        ConstantRange range = type.getFixedRange();
-        return range.right >= range.left;
+        (void)type;  // Range direction is not restricted per IEEE 1800-2023
+        return true;
     }
 
     static const Type& badRange(const ASTContext& context, const Expression& arg) {
