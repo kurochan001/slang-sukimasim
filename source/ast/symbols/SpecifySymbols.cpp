@@ -74,10 +74,14 @@ bool SpecifyBlockSymbol::checkPathTerminal(const ValueSymbol& terminal, const Ty
         diag.addNote(diag::NoteDeclarationHere, terminal.location);
     };
 
-    // Inputs must be nets (or modport ports) and outputs must
-    // be nets or variables (or modport ports).
+    // Inputs and outputs can be nets, variables (including logic ports),
+    // or modport ports. The port direction check below will validate
+    // that the terminal has the correct direction.
+    // NOTE: IEEE 1800-2023 §29.2 traditionally required inputs to be nets,
+    // but modern SystemVerilog commonly uses 'logic' for ports, which are
+    // stored as Variables. We allow this and rely on port direction checking.
     if (terminal.kind != SymbolKind::Net && terminal.kind != SymbolKind::ModportPort &&
-        (terminal.kind != SymbolKind::Variable || dir == SpecifyTerminalDir::Input)) {
+        terminal.kind != SymbolKind::Variable) {
         reportErr();
         return false;
     }
