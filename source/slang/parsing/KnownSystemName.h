@@ -73,6 +73,7 @@ enum class SLANG_EXPORT KnownSystemName {
     Pow,
     Atan2,
     Hypot,
+    Abs,
     ValuePlusArgs,
     GlobalClock,
     SFormatF,
@@ -406,7 +407,7 @@ SLANG_EXPORT KnownSystemName parseKnownSystemName(std::string_view str);
 
 class SLANG_EXPORT KnownSystemName_traits {
 public:
-    static const std::array<KnownSystemName, 375> values;
+    static const std::array<KnownSystemName, 376> values;
 };
 
 }

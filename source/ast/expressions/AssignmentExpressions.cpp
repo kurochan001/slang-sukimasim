@@ -742,23 +742,30 @@ Expression& NewCovergroupExpression::fromSyntax(Compilation& compilation,
     auto& coverType = assignmentTarget.getCanonicalType().as<CovergroupType>();
 
     SmallVector<const Expression*> args;
-    SmallVector<const FormalArgumentSymbol*> formalArgs;
 
-    // IEEE 1800-2023 Section 19.3.1: Covergroup constructor can optionally take a string name
-    // Allow a single optional string argument for naming the instance
-    if (syntax.argList && !syntax.argList->parameters.empty()) {
-        auto& stringType = compilation.getStringType();
-        auto formalArg = compilation.emplace<FormalArgumentSymbol>(
-            "name"sv, SourceLocation(), ArgumentDirection::In, VariableLifetime::Automatic);
-        formalArg->setType(stringType);
-        formalArgs.push_back(formalArg);
-    }
+    // IEEE 1800-2023 §19.3: Covergroup constructor behavior depends on formal arguments
+    auto formalArgs = coverType.getArguments();
 
-    // Phase 145: Covergroup formal arguments (from portList) are for sample(), not for new()
-    // But we allow an optional string name parameter as per IEEE 1800-2023
-    if (!CallExpression::bindArgs(syntax.argList, formalArgs, "new"sv, range, context,
-                                  args)) {
-        return badExpr(compilation, nullptr);
+    if (!formalArgs.empty()) {
+        // Covergroup has formal arguments - use them for new()
+        if (!CallExpression::bindArgs(syntax.argList, formalArgs, "new"sv, range, context, args)) {
+            return badExpr(compilation, nullptr);
+        }
+    } else {
+        // IEEE 1800-2023 §19.3.1: Covergroup without formal arguments can optionally
+        // take a string name parameter for naming the instance
+        SmallVector<const FormalArgumentSymbol*> optionalNameArg;
+        if (syntax.argList && !syntax.argList->parameters.empty()) {
+            auto& stringType = compilation.getStringType();
+            auto formalArg = compilation.emplace<FormalArgumentSymbol>(
+                "name"sv, SourceLocation(), ArgumentDirection::In, VariableLifetime::Automatic);
+            formalArg->setType(stringType);
+            optionalNameArg.push_back(formalArg);
+        }
+        if (!CallExpression::bindArgs(syntax.argList, optionalNameArg, "new"sv, range, context,
+                                      args)) {
+            return badExpr(compilation, nullptr);
+        }
     }
 
     return *compilation.emplace<NewCovergroupExpression>(assignmentTarget, args.copy(compilation),

@@ -332,6 +332,7 @@ void Builtins::registerMathFuncs() {
     REGISTER(KnownSystemName::Asinh, std::asinh);
     REGISTER(KnownSystemName::Acosh, std::acosh);
     REGISTER(KnownSystemName::Atanh, std::atanh);
+    REGISTER(KnownSystemName::Abs, std::fabs);
 
 #undef REGISTER
 #define REGISTER(name, func) \
