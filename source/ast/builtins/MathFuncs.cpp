@@ -272,6 +272,56 @@ public:
     }
 };
 
+// IEEE 1800-2023: $abs function accepts both integer and real types
+// - For integer/bit-vector input: returns absolute value as same type
+// - For real input: returns absolute value as real
+class AbsFunction : public SystemSubroutine {
+public:
+    explicit AbsFunction(const Builtins& builtins) :
+        SystemSubroutine(KnownSystemName::Abs, SubroutineKind::Function), builtins(builtins) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+
+        auto& type = *args[0]->type;
+        // Accept both integral and real types
+        if (type.isIntegral()) {
+            // For integral types, return the same type (preserving width and signedness)
+            return type;
+        }
+        if (type.isFloating()) {
+            // For real/shortreal, return real
+            return builtins.realType;
+        }
+        return badArg(context, *args[0]);
+    }
+
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
+                       const CallExpression::SystemCallInfo&) const final {
+        ConstantValue v = args[0]->eval(context);
+        if (!v)
+            return nullptr;
+
+        auto& type = *args[0]->type;
+        if (type.isIntegral()) {
+            // For integral types, compute absolute value
+            SVInt val = v.integer();
+            if (val.isSigned() && val.isNegative()) {
+                val = -val;
+            }
+            return val;
+        }
+        // For real types
+        return real_t(std::fabs(v.real()));
+    }
+
+private:
+    const Builtins& builtins;
+};
+
 template<double Func(double, double)>
 class RealMath2Function : public SimpleSystemSubroutine {
 public:
@@ -332,9 +382,12 @@ void Builtins::registerMathFuncs() {
     REGISTER(KnownSystemName::Asinh, std::asinh);
     REGISTER(KnownSystemName::Acosh, std::acosh);
     REGISTER(KnownSystemName::Atanh, std::atanh);
-    REGISTER(KnownSystemName::Abs, std::fabs);
 
 #undef REGISTER
+
+    // $abs supports both integer and real types (IEEE 1800-2023)
+    addSystemSubroutine(std::make_shared<AbsFunction>(*this));
+
 #define REGISTER(name, func) \
     addSystemSubroutine(std::make_shared<RealMath2Function<(func)>>(*this, name))
 
