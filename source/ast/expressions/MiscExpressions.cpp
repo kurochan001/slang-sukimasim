@@ -893,25 +893,32 @@ Expression& AssertionInstanceExpression::fromLookup(const Symbol& symbol,
 
     // Check for recursive instantiation. This is illegal for sequences, and allowed in
     // some forms for properties.
+    // For let declarations, we need to distinguish between:
+    // - True recursion: let body directly references itself (e.g., let F(x) = F(x-1))
+    // - Nested calls: let arguments contain another let call (e.g., SUM(SUM(a,b), c))
+    // We track whether we traversed via argExpansionLoc (argument expansion path).
     auto currInst = context.assertionInstance;
+    bool viaArgExpansion = false;
+
     while (currInst) {
+        // If argExpansionLoc is set, we're traversing through argument expansion
+        if (currInst->argExpansionLoc)
+            viaArgExpansion = true;
+
         if (currInst->symbol == &symbol) {
             if (symbol.kind == SymbolKind::Sequence) {
                 context.addDiag(diag::RecursiveSequence, range) << symbol.name;
                 return badExpr(comp, nullptr);
             }
             else if (symbol.kind == SymbolKind::LetDecl) {
-                // NOTE: Nested let calls like SUM(SUM(a,b), c) are NOT recursion.
-                // True recursion is when let body references itself (e.g., let F(x) = F(x-1)).
-                // We detect this by checking if we're expanding the SAME let instance.
-                // For nested calls, each instance is independent, so allow them.
-                // Only flag as recursive if the let body directly calls itself.
-                // Since we can't easily distinguish here, downgrade to warning for now.
-                // TODO: Implement proper recursion detection in let body analysis.
+                if (viaArgExpansion) {
+                    // Nested let call like SUM(SUM(a,b), c) - this is NOT true recursion.
+                    // Break out of the loop and continue with normal expansion.
+                    break;
+                }
+                // True recursion: let body directly calls itself
                 context.addDiag(diag::RecursiveLet, range) << symbol.name;
-                // Allow nested let calls by not returning badExpr - continue expansion
-                instance.isRecursive = true;  // Mark but don't abort
-                break;  // Exit the while loop to continue with expansion
+                return badExpr(comp, nullptr);
             }
 
             // Properties are allowed to be recursive, but we should avoid trying
@@ -1064,10 +1071,7 @@ Expression& AssertionInstanceExpression::fromLookup(const Symbol& symbol,
         bodyContext.flags |= ASTFlags::PropertyNegation;
 
     // Let declarations expand directly to an expression.
-    // But if we detected recursion, return a bad expression to prevent infinite recursion.
     if (symbol.kind == SymbolKind::LetDecl) {
-        if (instance.isRecursive)
-            return badExpr(comp, nullptr);
         return create(comp, *symbol.as<LetDeclSymbol>().exprSyntax, bodyContext);
     }
 
