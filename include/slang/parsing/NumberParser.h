@@ -129,10 +129,18 @@ public:
                 addDiag(diag::RealLiteralUnderflow, literal.location())
                     << real_t(std::numeric_limits<double>::denorm_min());
             }
-            else {
-                SLANG_ASSERT(!std::isfinite(literal.realValue()));
+            else if (!std::isfinite(literal.realValue())) {
+                // True overflow: strtod returned +inf
                 addDiag(diag::RealLiteralOverflow, literal.location())
                     << real_t(std::numeric_limits<double>::max());
+            }
+            else {
+                // Subnormal range: strtod set ERANGE but returned a valid
+                // finite non-zero value (e.g., 1.0e-308). This is a loss-of-
+                // precision underflow, not a true overflow. Issue the underflow
+                // diagnostic rather than asserting infinity.
+                addDiag(diag::RealLiteralUnderflow, literal.location())
+                    << real_t(std::numeric_limits<double>::denorm_min());
             }
         }
 
