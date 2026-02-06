@@ -1573,14 +1573,21 @@ SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
                 Token closeParen;
                 auto matchList = parseSequenceMatchList(closeParen);
 
-                // For binary property expressions, extract the left operand's sequence
+                // For binary property expressions, extract the left operand's sequence.
+                // This handles property operators used in sequence context, e.g.:
+                //   ##1 (ready until ack)   - until/s_until/without/s_without
+                //   ##1 (b |-> ##1 c)       - implication/followed_by/implies
+                // The left operand's sequence is extracted as a best-effort conversion.
                 SequenceExprSyntax* innerSeq = nullptr;
                 if (propExpr.kind == SyntaxKind::UntilPropertyExpr ||
                     propExpr.kind == SyntaxKind::SUntilPropertyExpr ||
                     propExpr.kind == SyntaxKind::UntilWithPropertyExpr ||
                     propExpr.kind == SyntaxKind::SUntilWithPropertyExpr ||
                     propExpr.kind == SyntaxKind::WithoutPropertyExpr ||
-                    propExpr.kind == SyntaxKind::SWithoutPropertyExpr) {
+                    propExpr.kind == SyntaxKind::SWithoutPropertyExpr ||
+                    propExpr.kind == SyntaxKind::ImplicationPropertyExpr ||
+                    propExpr.kind == SyntaxKind::FollowedByPropertyExpr ||
+                    propExpr.kind == SyntaxKind::ImpliesPropertyExpr) {
                     auto& binProp = propExpr.as<BinaryPropertyExprSyntax>();
                     if (binProp.left->kind == SyntaxKind::SimplePropertyExpr) {
                         innerSeq = binProp.left->as<SimplePropertyExprSyntax>().expr;
@@ -1592,10 +1599,12 @@ SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
                     return factory.parenthesizedSequenceExpr(openParen, *innerSeq, matchList, closeParen, nullptr);
                 }
 
-                // For other complex property expressions, try to extract any inner sequence
-                // This is a best-effort approach - AST binding may still report issues
+                // For other complex property expressions, create a valid placeholder sequence.
+                // Use a missing token to avoid SIGSEGV from default-constructed Token().
                 auto& dummyExpr = factory.simpleSequenceExpr(
-                    factory.literalExpression(SyntaxKind::IntegerLiteralExpression, Token()), nullptr);
+                    factory.literalExpression(SyntaxKind::IntegerLiteralExpression,
+                        Token::createMissing(alloc, TokenKind::IntegerLiteral, openParen.location())),
+                    nullptr);
                 return factory.parenthesizedSequenceExpr(openParen, dummyExpr, matchList, closeParen, nullptr);
             }
             auto& expr = parseSequenceExpr(0, false);
