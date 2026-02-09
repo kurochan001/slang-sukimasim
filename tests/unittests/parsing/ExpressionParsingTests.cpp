@@ -989,17 +989,17 @@ endmodule
     CHECK(diagnostics[0].code == diag::ExpectedExpression);
 }
 
-TEST_CASE("Invalid select expression parsing") {
+TEST_CASE("Parenthesized expression select parsing") {
+    // IEEE 1800-2023: part-select on parenthesized expression is valid
     auto& text = R"(
-module signal_wrong (input logic [3:0] a,b, output logic [1:0] c);
+module signal_ok (input logic [3:0] a,b, output logic [1:0] c);
     assign c = (a & b)[3:2];
 endmodule
 )";
 
     parseCompilationUnit(text);
 
-    REQUIRE(diagnostics.size() == 1);
-    CHECK(diagnostics[0].code == diag::InvalidSelectExpression);
+    CHECK(diagnostics.empty());
 }
 
 TEST_CASE("Invalid timing control parsing") {

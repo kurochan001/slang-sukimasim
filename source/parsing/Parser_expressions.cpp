@@ -629,6 +629,7 @@ ExpressionSyntax& Parser::parsePostfixExpression(ExpressionSyntax& lhs,
             case SyntaxKind::InvocationExpression:
             case SyntaxKind::ArrayOrRandomizeMethodExpression:
             case SyntaxKind::ElementSelectExpression:
+            case SyntaxKind::ParenthesizedExpression:
                 return true;
             default:
                 return NameSyntax::isKind(expr->kind);
