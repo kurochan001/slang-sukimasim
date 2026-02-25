@@ -59,6 +59,7 @@ $pow Pow
 $atan2 Atan2
 $hypot Hypot
 $abs Abs
+$sgn Sgn
 
 $value$plusargs ValuePlusArgs
 $global_clock GlobalClock
