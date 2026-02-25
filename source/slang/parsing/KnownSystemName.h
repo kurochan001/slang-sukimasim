@@ -74,6 +74,7 @@ enum class SLANG_EXPORT KnownSystemName {
     Atan2,
     Hypot,
     Abs,
+    Sgn,
     ValuePlusArgs,
     GlobalClock,
     SFormatF,

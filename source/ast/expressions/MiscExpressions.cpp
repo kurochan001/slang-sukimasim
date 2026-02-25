@@ -76,7 +76,11 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
             return badExpr(comp, nullptr);
         }
         else if (!var.flags.has(VariableFlags::RefStatic) && flags.has(DisallowedAutoVarContexts) &&
-                 var.kind != SymbolKind::PatternVar) {
+                 var.kind != SymbolKind::PatternVar && var.kind != SymbolKind::Iterator) {
+            // Iterator symbols are foreach loop variables -- they are always loop-scoped and
+            // should never be blocked by StaticInitializer or other context restrictions,
+            // just as PatternVar is exempted. This fixes inline 'randomize() with { foreach(...) }'
+            // constraints where the outer context may have StaticInitializer set.
             if (flags.has(ASTFlags::NonProcedural)) {
                 context.addDiag(diag::AutoFromNonProcedural, sourceRange) << symbol.name;
                 return badExpr(comp, nullptr);

@@ -7,7 +7,6 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/expressions/SelectExpressions.h"
 
-#include <cstdlib>
 #include <iostream>
 
 #include "slang/ast/ASTSerializer.h"
@@ -258,6 +257,12 @@ ConstantValue ElementSelectExpression::evalImpl(EvalContext& context) const {
     SLANG_ASSERT(range->left == range->right);
     if (valType.isString())
         return cv.getSlice(range->left, range->right, nullptr);
+
+    // Guard against out-of-bounds access on queues and dynamic arrays.
+    // evalIndex allows index == size for queues (for write/push_back semantics),
+    // but reads must stay within actual bounds.
+    if (size_t(range->left) >= cv.size())
+        return type->getDefaultValue();
 
     return std::move(cv).at(size_t(range->left));
 }

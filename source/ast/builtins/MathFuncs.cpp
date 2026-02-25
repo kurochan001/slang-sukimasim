@@ -322,6 +322,57 @@ private:
     const Builtins& builtins;
 };
 
+// IEEE 1800-2023 §20.8: $sgn function — returns signum of input
+// - For positive values: returns 1
+// - For negative values: returns -1
+// - For zero: returns 0
+class SgnFunction : public SystemSubroutine {
+public:
+    explicit SgnFunction(const Builtins&) :
+        SystemSubroutine(KnownSystemName::Sgn, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+
+        auto& type = *args[0]->type;
+        if (type.isIntegral() || type.isFloating()) {
+            // $sgn always returns a 32-bit integer
+            return comp.getIntegerType();
+        }
+        return badArg(context, *args[0]);
+    }
+
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
+                       const CallExpression::SystemCallInfo&) const final {
+        ConstantValue v = args[0]->eval(context);
+        if (!v)
+            return nullptr;
+
+        auto& type = *args[0]->type;
+        if (type.isFloating()) {
+            double val = v.real();
+            int result = (val > 0.0) ? 1 : ((val < 0.0) ? -1 : 0);
+            return SVInt(32, (uint64_t)(int64_t)result, true);
+        }
+        // For integral types
+        SVInt val = v.integer();
+        if (val.hasUnknown()) {
+            // X/Z input returns X per IEEE 1800-2023
+            return SVInt::createFillX(32, true);
+        }
+        if (val == 0) {
+            return SVInt(32, 0, true);
+        }
+        if (val.isSigned() && val.isNegative()) {
+            return SVInt(32, (uint64_t)(int64_t)-1, true);
+        }
+        return SVInt(32, 1, true);
+    }
+};
+
 template<double Func(double, double)>
 class RealMath2Function : public SimpleSystemSubroutine {
 public:
@@ -387,6 +438,9 @@ void Builtins::registerMathFuncs() {
 
     // $abs supports both integer and real types (IEEE 1800-2023)
     addSystemSubroutine(std::make_shared<AbsFunction>(*this));
+
+    // $sgn returns signum (-1, 0, 1) (IEEE 1800-2023 §20.8)
+    addSystemSubroutine(std::make_shared<SgnFunction>(*this));
 
 #define REGISTER(name, func) \
     addSystemSubroutine(std::make_shared<RealMath2Function<(func)>>(*this, name))
