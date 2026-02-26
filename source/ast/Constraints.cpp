@@ -142,6 +142,26 @@ struct ConstraintExprVisitor {
                     childrenHaveRand = sawRandVars;
                     sawRandVars = oldSawRand || childrenHaveRand;
                 }
+                else if (isSoft) {
+                    // B178: For soft constraints, detect rand variable references in
+                    // Call/MemberAccess/ElementSelect sub-expressions that are excluded
+                    // from visitExprs above. This ensures arr.size() on a rand dynamic
+                    // array is recognized as referencing a rand variable per
+                    // IEEE 1800-2023 §18.5.3.
+                    expr.visitSymbolReferences(
+                        [&](const Expression& subExpr, const Symbol& sym) {
+                            RandMode mode = context.getRandMode(sym);
+                            if (mode == RandMode::Rand) {
+                                sawRandVars = true;
+                            }
+                            else if (mode == RandMode::RandC) {
+                                sawRandVars = true;
+                                auto& diag = context.addDiag(diag::RandCInSoft,
+                                                             subExpr.sourceRange);
+                                diag << sym.name;
+                            }
+                        });
+                }
             }
 
             switch (expr.kind) {
