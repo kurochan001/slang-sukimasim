@@ -160,11 +160,11 @@ public:
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const override {
         auto& comp = context.getCompilation();
-        if (!checkArgCount(context, false, args, range, 1, 1))
+        if (!checkArgCount(context, false, args, range, 1, 2))
             return comp.getErrorType();
         return args[0]->type->getCanonicalType();
     }
-    
+
     ConstantValue eval(EvalContext&, const Args&, SourceRange,
                       const CallExpression::SystemCallInfo&) const override {
         return nullptr;  // Runtime evaluation only
@@ -180,7 +180,7 @@ public:
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const override {
         auto& comp = context.getCompilation();
-        if (!checkArgCount(context, false, args, range, 1, 1))
+        if (!checkArgCount(context, false, args, range, 1, 2))
             return comp.getErrorType();
         return args[0]->type->getCanonicalType();
     }
