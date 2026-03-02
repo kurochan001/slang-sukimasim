@@ -985,38 +985,15 @@ public:
                 if (!elemType.isSimpleBitVector() || elemType.isPredefinedInteger()) {
                     return badArg(context, *args[i]);
                 }
-
-                if (elemType.hasFixedRange() && args[i]->kind != ExpressionKind::Concatenation &&
-                    !isValidRange(elemType)) {
-                    return badRange(context, *args[i]);
-                }
             }
             else {
                 if (!type.isSimpleBitVector() || type.isPredefinedInteger()) {
                     return badArg(context, *args[i]);
                 }
             }
-
-            if (type.hasFixedRange() && args[i]->kind != ExpressionKind::Concatenation &&
-                !isValidRange(type)) {
-                return badRange(context, *args[i]);
-            }
         }
 
         return comp.getVoidType();
-    }
-
-private:
-    // IEEE 1800-2023 Annex G: PLA functions accept both ascending [0:N] and descending [N:0] ranges
-    // No range direction restriction is specified in the standard
-    static bool isValidRange(const Type& type) {
-        (void)type;  // Range direction is not restricted per IEEE 1800-2023
-        return true;
-    }
-
-    static const Type& badRange(const ASTContext& context, const Expression& arg) {
-        context.addDiag(diag::PlaRangeInAscendingOrder, arg.sourceRange) << *arg.type;
-        return context.getCompilation().getErrorType();
     }
 };
 
@@ -1089,6 +1066,7 @@ public:
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
                                    const ExpressionSyntax& syntax, const Args&) const final {
         // Second argument (memory array) needs to be an lvalue
+        // sukimasim runtime arg order: string_data, memory, [start], [finish]
         if (argIndex == 1)
             return Expression::bindLValue(syntax, context);
         return Expression::bind(syntax, context);
@@ -1097,8 +1075,7 @@ public:
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
         auto& comp = context.getCompilation();
-        // $sreadmemb/$sreadmemh need at least 2 args: string data and memory array
-        // Optional args: start address, finish address
+        // sukimasim runtime: $sreadmemb(string_data, memory, [start_addr], [finish_addr])
         if (!checkArgCount(context, false, args, range, 2, 4))
             return comp.getErrorType();
 

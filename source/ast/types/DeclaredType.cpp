@@ -440,7 +440,8 @@ void DeclaredType::resolveAt(const ASTContext& context) const {
     }
 
     // Phase 1 Fix: Check if we're in a procedural context and should defer evaluation
-    if (std::getenv("SUKIMASIM_DEFER_PROCEDURAL_INIT")) {
+    static const bool defer_proc_init = std::getenv("SUKIMASIM_DEFER_PROCEDURAL_INIT") != nullptr;
+    if (defer_proc_init) {
         // Check if parent is a variable declaration inside a procedural block
         bool inProceduralContext = false;
         const Scope* currScope = context.scope;

@@ -1345,7 +1345,7 @@ const Type& PortSymbol::getType() const {
     if (!type->isValidForPort(&errorType)) {
         // IEEE 1800-2023: Allow more flexible port types for advanced interface features
         // Interface ports, virtual interfaces, and enhanced types are now allowed
-        if (!type->isClass() && !type->isVoid() && 
+        if (!type->isClass() &&
             !(errorType && errorType->getCanonicalType().kind == SymbolKind::VirtualInterfaceType)) {
             // Allow interface-related types for IEEE 1800-2023 compliance
             if (errorType == type)

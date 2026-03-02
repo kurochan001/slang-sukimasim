@@ -52,8 +52,8 @@ Expression& CallExpression::fromSyntaxImpl(Compilation& compilation, const Expre
                                            const InvocationExpressionSyntax* invocation,
                                            const ArrayOrRandomizeMethodExpressionSyntax* withClause,
                                            const ASTContext& context) {
-    // IEEE 1800-2023 §25.3: Debug output for interface method calls
-    if (std::getenv("SUKIMASIM_DEBUG_INTERFACE_METHOD")) {
+    static const bool dbg_ifmethod = std::getenv("SUKIMASIM_DEBUG_INTERFACE_METHOD") != nullptr;
+    if (dbg_ifmethod) {
         std::cerr << "[DEBUG fromSyntaxImpl] left.kind=" << static_cast<int>(left.kind)
                   << ", isMemberAccess=" << (left.kind == SyntaxKind::MemberAccessExpression)
                   << ", isNameSyntax=" << NameSyntax::isKind(left.kind) << std::endl;

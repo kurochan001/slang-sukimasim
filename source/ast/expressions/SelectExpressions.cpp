@@ -906,8 +906,8 @@ Expression& MemberAccessExpression::fromSelector(
     const Type& type = expr.type->getCanonicalType();
     const Scope* scope = nullptr;
 
-    // IEEE 1800-2023 §25.3: Debug output for interface instance method calls
-    if (std::getenv("SUKIMASIM_DEBUG_INTERFACE_METHOD")) {
+    static const bool dbg_ifmethod = std::getenv("SUKIMASIM_DEBUG_INTERFACE_METHOD") != nullptr;
+    if (dbg_ifmethod) {
         std::cerr << "[DEBUG fromSelector] selector.name=" << selector.name
                   << ", expr.kind=" << static_cast<int>(expr.kind)
                   << ", type.kind=" << static_cast<int>(type.kind)

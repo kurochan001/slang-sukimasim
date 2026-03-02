@@ -557,8 +557,7 @@ ConstantValue NewArrayExpression::evalImpl(EvalContext& context) const {
     // Each ConstantValue is roughly 64 bytes, so 16M elements = ~1GB
     constexpr size_t MAX_REASONABLE_SIZE = 16 * 1024 * 1024;
     if (count > MAX_REASONABLE_SIZE) {
-        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange)
-            << "Array size too large: " + std::to_string(count);
+        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange) << count;
         return nullptr;
     }
 
