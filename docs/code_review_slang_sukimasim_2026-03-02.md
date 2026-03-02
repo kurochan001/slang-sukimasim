@@ -113,12 +113,23 @@ Cached `std::getenv()` calls to `static const bool` to avoid repeated syscalls:
 | M-05 | ArrayMethods_phase176.cpp | File does not exist |
 | M-04 | isValidForPort relaxation | Required for class/virtual interface port support |
 
+## Codex Follow-up Review (2026-03-02)
+
+3 findings from codex review — all resolved:
+
+1. **High (Closed)**: Annex D unit test / fork implementation mismatch
+   - `$getpattern` call updated to 4-arg form, `$sreadmemb`/`$sreadmemh` arg order fixed
+   - Expected diagnostics updated (9→6)
+2. **Medium (Closed)**: `PlaRangeInAscendingOrder` diagnostic definition removed from `diagnostics.txt`
+3. **Low (Closed)**: getenv static cache constraint documented in CLAUDE.md
+
 ## Verification
 
 - slang-sukimasim: Build clean (no errors/warnings)
+- slang-sukimasim unit tests: PLA, Annex D, I/O, drive strength — all pass
 - sukimasim: Build clean
-- CTest: 1,258/1,258 (100%)
+- CTest: 1,263/1,263 (100%)
 - Extended tests: 16,705/16,705 (100%)
 
 ---
-Reviewed by: Claude Code (2026-03-02)
+Reviewed by: Claude Code + Codex (2026-03-02)

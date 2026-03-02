@@ -1422,11 +1422,11 @@ module m;
     end
 
     logic [1:4] in_mem[100];
-    assign {i1,i2,i3,i4} = $getpattern(in_mem[n]);
+    assign {i1,i2,i3,i4} = $getpattern(in_mem, 0, 3, "SDF");
 
     initial begin
-        $sreadmemb(in_mem, 0, 1, "SDF");
-        $sreadmemh(in_mem, 0, 1, "SDF", "BAZ");
+        $sreadmemb("SDF", in_mem, 0, 1);
+        $sreadmemh("SDF", in_mem, 0, 1);
     end
 
     var v;
@@ -1435,7 +1435,7 @@ module m;
         b = $countdrivers(v);
         $list(m.n);
         $showvars(v + 1);
-        $sreadmemh(in_mem, 0, 1, "SDF", in_mem);
+        $sreadmemh("SDF", in_mem, 0, in_mem);
     end
 endmodule
 )");
@@ -1444,16 +1444,13 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 9);
-    CHECK(diags[0].code == diag::UnusedResult);
-    CHECK(diags[1].code == diag::UnusedResult);
-    CHECK(diags[2].code == diag::UnusedResult);
-    CHECK(diags[3].code == diag::UnusedResult);
-    CHECK(diags[4].code == diag::UnusedResult);
-    CHECK(diags[5].code == diag::ExpectedNetRef);
-    CHECK(diags[6].code == diag::ExpectedScopeName);
-    CHECK(diags[7].code == diag::ExpectedVariableName);
-    CHECK(diags[8].code == diag::BadSystemSubroutineArg);
+    REQUIRE(diags.size() == 6);
+    CHECK(diags[0].code == diag::TooFewArguments);
+    CHECK(diags[1].code == diag::BadSystemSubroutineArg);
+    CHECK(diags[2].code == diag::ExpectedNetRef);
+    CHECK(diags[3].code == diag::ExpectedScopeName);
+    CHECK(diags[4].code == diag::ExpectedVariableName);
+    CHECK(diags[5].code == diag::BadSystemSubroutineArg);
 }
 
 TEST_CASE("$sformat invalid %p call") {
