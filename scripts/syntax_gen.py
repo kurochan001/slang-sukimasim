@@ -1093,7 +1093,7 @@ def generateSystemNames(ourdir, builddir):
     inf = open(os.path.join(ourdir, "systemnames.txt"))
     for line in [x.strip("\n") for x in inf]:
         line = line.strip()
-        if not line:
+        if not line or line.startswith("#"):
             continue
 
         names.append(line.split())

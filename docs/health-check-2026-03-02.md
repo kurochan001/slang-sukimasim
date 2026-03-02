@@ -62,7 +62,7 @@ C++11 magic statics 保証によりスレッドセーフ。
 
 ## 改善推奨事項 (緊急性なし)
 
-### 1. ソースツリーの古い生成ファイル (Medium)
+### 1. ソースツリーの古い生成ファイル (Medium, 修正済み)
 
 **場所**: `source/slang/parsing/KnownSystemName.h`, `source/slang/syntax/KnownSystemName.cpp`
 
@@ -71,7 +71,11 @@ C++11 magic statics 保証によりスレッドセーフ。
 - `KnownSystemName.cpp` に `"#"` キーの重複エントリあり (L654, L655, L796)
 - `$srandom`, timing check 関連の新エントリがソースツリー版に欠落
 
-**推奨**: 古いファイルを削除するか、`.gitignore` に追加
+**対応**:
+- `scripts/syntax_gen.py` にコメント行フィルタ (`line.startswith("#")`) を追加 — `"#"` 重複エントリの根本原因を修正
+- ソースツリーの古い生成ファイル3件を `git rm` で削除 (`source/slang/parsing/KnownSystemName.h`, `slang/parsing/KnownSystemName.h`, `slang/slang/parsing/KnownSystemName.h`)
+- 未追跡の `source/slang/syntax/KnownSystemName.cpp` も削除
+- ビルド・テスト回帰なし
 
 ### 2. CLAUDE.md のテスト件数 (Low, 修正済み)
 
