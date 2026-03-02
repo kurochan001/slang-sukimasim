@@ -1086,16 +1086,14 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 9);
+    // IEEE 1800-2023 Annex G: PLA functions accept both ascending and descending ranges
+    // So only 5 diagnostics remain (the range ordering errors are no longer issued)
+    REQUIRE(diags.size() == 5);
     CHECK(diags[0].code == diag::TooManyArguments);
     CHECK(diags[1].code == diag::BadSystemSubroutineArg);
     CHECK(diags[2].code == diag::BadSystemSubroutineArg);
     CHECK(diags[3].code == diag::BadSystemSubroutineArg);
     CHECK(diags[4].code == diag::BadSystemSubroutineArg);
-    CHECK(diags[5].code == diag::PlaRangeInAscendingOrder);
-    CHECK(diags[6].code == diag::PlaRangeInAscendingOrder);
-    CHECK(diags[7].code == diag::PlaRangeInAscendingOrder);
-    CHECK(diags[8].code == diag::PlaRangeInAscendingOrder);
 }
 
 TEST_CASE("Non-standard system funcs") {

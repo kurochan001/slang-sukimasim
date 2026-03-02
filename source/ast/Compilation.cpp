@@ -2112,6 +2112,8 @@ void Compilation::checkElemTimeScale(std::optional<TimeScale> timeScale, SourceR
 
 void Compilation::resolveBindTargets(const BindDirectiveSyntax& syntax, const Scope& scope,
                                      ResolvedBind& resolvedBind) {
+    static const bool dbg_bind = std::getenv("SUKIMASIM_DEBUG_BIND") != nullptr;
+
     auto checkValidTarget = [&](const Symbol& symbol, const SyntaxNode& nameSyntax) {
         if (symbol.kind == SymbolKind::Instance) {
             auto defKind = symbol.as<InstanceSymbol>().getDefinition().definitionKind;
@@ -2146,8 +2148,7 @@ void Compilation::resolveBindTargets(const BindDirectiveSyntax& syntax, const Sc
             LookupResult result;
             Lookup::name(*inst, context, flags, result);
 
-            // DEBUG: Output bind instance resolution status
-            if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+            if (dbg_bind) {
                 std::cerr << "[BIND_DEBUG] Looking for instance: " << inst->toString() << "\n";
                 std::cerr << "[BIND_DEBUG] Scope: " << scope.asSymbol().name << "\n";
                 std::cerr << "[BIND_DEBUG] Found: " << (result.found ? result.found->name : "<not found>") << "\n";
@@ -2165,14 +2166,14 @@ void Compilation::resolveBindTargets(const BindDirectiveSyntax& syntax, const Sc
                     }
                     resolvedBind.instTargets.push_back(result.found);
 
-                    if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                    if (dbg_bind) {
                         std::cerr << "[BIND_DEBUG] Added instance to targets: " << result.found->name << "\n";
                     }
                 }
             }
         }
 
-        if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+        if (dbg_bind) {
             std::cerr << "[BIND_DEBUG] Total instance targets: " << resolvedBind.instTargets.size() << "\n";
         }
     }
@@ -2368,8 +2369,9 @@ void Compilation::resolveDefParamsAndBinds() {
             }
         }
 
+        static const bool dbg_bind = std::getenv("SUKIMASIM_DEBUG_BIND") != nullptr;
         for (auto& entry : binds) {
-            if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+            if (dbg_bind) {
                 std::cerr << "[BIND_RESOLVE] Processing bind entry\n";
                 std::cerr << "[BIND_RESOLVE] definitionTarget: " << (entry.definitionTarget ? "yes" : "no") << "\n";
                 std::cerr << "[BIND_RESOLVE] path.empty(): " << (entry.path.empty() ? "yes" : "no") << "\n";
@@ -2382,7 +2384,7 @@ void Compilation::resolveDefParamsAndBinds() {
                     auto node = getNodeFor(entry.path, c);
                     node->binds.push_back({entry.info, entry.definitionTarget});
 
-                    if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                    if (dbg_bind) {
                         std::cerr << "[BIND_RESOLVE] Added bind to override node (instance path bind)\n";
                     }
                 }
@@ -2393,7 +2395,7 @@ void Compilation::resolveDefParamsAndBinds() {
                         // through a public interface that added the const on top.
                         const_cast<DefinitionSymbol*>(def)->bindDirectives.push_back(entry.info);
 
-                        if (std::getenv("SUKIMASIM_DEBUG_BIND")) {
+                        if (dbg_bind) {
                             std::cerr << "[BIND_RESOLVE] Added bind to definition: " << def->name << " (type bind)\n";
                         }
                     }

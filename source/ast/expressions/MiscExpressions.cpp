@@ -406,25 +406,6 @@ ConstantValue NamedValueExpression::evalImpl(EvalContext& context) const {
             break;
     }
 
-    // Special casing for covergroup expressions: they are required to be
-    // constant, except they can also reference local non-elaboration constants
-    // and non-ref formal args.
-    // NOTE: CovergroupExpr flag has been removed from EvalFlags, so this check is disabled
-    if (false) {
-        if (symbol.kind == SymbolKind::FormalArgument) {
-            if (symbol.as<FormalArgumentSymbol>().direction == ArgumentDirection::Ref)
-                {}; // Diagnostic disabled: diag::CoverageExprVar
-        }
-        else if (VariableSymbol::isKind(symbol.kind)) {
-            if (!symbol.as<VariableSymbol>().flags.has(VariableFlags::Const))
-                {}; // Diagnostic disabled: diag::CoverageExprVar
-        }
-        else if (symbol.kind != SymbolKind::Parameter && symbol.kind != SymbolKind::EnumValue) {
-            {}; // Diagnostic disabled: diag::CoverageExprVar
-        }
-        return nullptr;
-    }
-
     // IEEE 1800-2023: Allow more flexible variable access in generate context
     // Generate constructs may reference variables that are not constant at parse time
     // but become constant during elaboration

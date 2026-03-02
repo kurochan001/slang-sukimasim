@@ -708,8 +708,7 @@ public:
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
         auto& comp = context.getCompilation();
-        // IEEE 1800-2023 LRM: $getpattern(memory, start_addr, end_addr, pattern_string)
-        // Returns an integer status code
+        // sukimasim runtime: $getpattern(memory, start_addr, end_addr, output_string)
         if (!checkArgCount(context, false, args, range, 4, 4))
             return comp.getErrorType();
 
@@ -728,7 +727,6 @@ public:
         if (!args[3]->type->isString())
             return badArg(context, *args[3]);
 
-        // Return type is int (status code)
         return comp.getIntType();
     }
 
