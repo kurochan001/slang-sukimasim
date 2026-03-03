@@ -400,6 +400,23 @@ $sukimasim_tlm_bridge SukimaSimTlmBridge
 $sukimasim_formal_link SukimaSimFormalLink
 $nc_get_hostname NcGetHostname
 $socket_open SocketOpen
+$scope_set ScopeSet
+$scope_get ScopeGet
+$cadence_probe CadenceProbe
+$nc_debug NcDebug
+$binary_dump BinaryDump
+$binary_load BinaryLoad
+$compressed_dump CompressedDump
+$network_socket NetworkSocket
+$memory_snapshot MemorySnapshot
+$simulation_speed SimulationSpeed
+$cpu_utilization CpuUtilization
+$coverage_report_txt CoverageReportTxt
+$coverage_report_xml CoverageReportXml
+$coverage_report_html CoverageReportHtml
+$toggle_coverage_control ToggleCoverageControl
+$licensing_status LicensingStatus
+$command_line_args CommandLineArgs
 
 # IEEE 1800-2023 Section 31: Timing Checks
 $setup Setup

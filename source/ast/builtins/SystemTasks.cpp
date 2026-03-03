@@ -1165,6 +1165,64 @@ void Builtins::registerSystemTasks() {
     // $socket_open returns a socket handle (integer), so it's a function
     addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SocketOpen));
 
+    // Phase 2+: Advanced SukimaSim Extensions (24 tasks)
+    // Debug and Control
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimDebugInfo));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimDebugScope));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimDebugSignal));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimFinishTime));
+    // Coverage Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimCoverageEnable));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimCoverageDisable));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimCoverageSaveIncremental));
+    // Performance Monitoring
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimPerfStart));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimPerfStop));
+    // File I/O
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SukimaSimFopenExclusive));
+    // DPI Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimDpiExport));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimDpiImport));
+    // VPI Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimVpiRegister));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimVpiIterate));
+    // PLI Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimPliTfCall));
+    // Waveform Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimWaveExtended));
+    // Profiling Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimProfileHier));
+    // Advanced Feature Extensions
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimDistSim));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimMemProfile));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::SukimaSimDebugRealtime));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimInteractiveDbg));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimAssertAdvanced));
+    // External Tool Integration
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimTlmBridge));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SukimaSimFormalLink));
+
+    // Phase 1 sub-tasks (previously missing registrations)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ScopeSet));
+    // $scope_get returns scope name (used as function in test code)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::ScopeGet));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CadenceProbe));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::NcDebug));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::BinaryDump));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::BinaryLoad));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CompressedDump));
+    // $network_socket returns socket handle (integer)
+    addSystemSubroutine(std::make_shared<SukimaSimSystemFunc>(KnownSystemName::NetworkSocket));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::MemorySnapshot));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::SimulationSpeed));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CpuUtilization));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CoverageReportTxt));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CoverageReportXml));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CoverageReportHtml));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::ToggleCoverageControl));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::LicensingStatus));
+    addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::CommandLineArgs));
+
     // IEEE 1800-2023 Section 31: Timing Check Tasks
     // These can be used outside of specify blocks
     addSystemSubroutine(std::make_shared<SukimaSimSystemTask>(KnownSystemName::Setup));
