@@ -186,11 +186,45 @@ ConditionalStatementSyntax& Parser::parseConditionalStatement(NamedLabelSyntax* 
     auto openParen = expect(TokenKind::OpenParenthesis);
 
     Token closeParen;
-    // Use PatternContext to prevent early matches keyword interception
-    // This allows parseConditionalPredicate to properly handle matchesClause
-    auto& predicate = parseConditionalPredicate(
-        parseSubExpression(ExpressionOptions::PatternContext, 0),
-        TokenKind::CloseParenthesis, closeParen);
+    // IEEE 1800-2023 §12.4 / §11.4.11: The condition in if() can contain ternary
+    // operators (cond ? a : b) or pattern matching (expr matches pattern).
+    // Use PatternContext only when 'matches' or '&&&' follows, so that ternary
+    // operators are parsed normally by parseBinaryExpression.
+    auto& firstExpr = parseSubExpression(ExpressionOptions::PatternContext, 0);
+    ConditionalPredicateSyntax* predicatePtr;
+    if (peek(TokenKind::MatchesKeyword) || peek(TokenKind::TripleAnd)) {
+        // Pattern matching context — use parseConditionalPredicate for matches/&&&
+        predicatePtr = &parseConditionalPredicate(firstExpr,
+            TokenKind::CloseParenthesis, closeParen);
+    }
+    else if (peek(TokenKind::Question)) {
+        // Ternary operator inside if(): re-parse the '? expr : expr' portion
+        // and wrap the complete ternary expression as the predicate.
+        auto question = consume();
+        int logicalOrPrecedence = getPrecedence(SyntaxKind::LogicalOrExpression);
+        auto& lhs = parseSubExpression(ExpressionOptions::None, logicalOrPrecedence - 1);
+        auto colon = expect(TokenKind::Colon);
+        auto& rhs = parseSubExpression(ExpressionOptions::None, logicalOrPrecedence - 1);
+        closeParen = expect(TokenKind::CloseParenthesis);
+
+        // Build: conditionalPredicate(conditionalPattern(firstExpr)) ? lhs : rhs
+        SmallVector<TokenOrSyntax, 4> predBuf;
+        predBuf.push_back(&factory.conditionalPattern(firstExpr, nullptr));
+        auto& innerPred = factory.conditionalPredicate(predBuf.copy(alloc));
+        auto attrs = parseAttributes();
+        auto& condExpr = factory.conditionalExpression(innerPred, question, attrs, lhs, colon, rhs);
+
+        // Wrap the conditional expression as a simple predicate
+        SmallVector<TokenOrSyntax, 4> outerBuf;
+        outerBuf.push_back(&factory.conditionalPattern(condExpr, nullptr));
+        predicatePtr = &factory.conditionalPredicate(outerBuf.copy(alloc));
+    }
+    else {
+        // Simple expression — wrap in predicate directly
+        predicatePtr = &parseConditionalPredicate(firstExpr,
+            TokenKind::CloseParenthesis, closeParen);
+    }
+    auto& predicate = *predicatePtr;
     auto& statement = parseStatement();
     auto elseClause = parseElseClause();
 
