@@ -537,8 +537,13 @@ Expression& RangeSelectExpression::fromSyntax(Compilation& compilation, Expressi
                 return badExpr(compilation, result);
 
             // If the lhs is a known constant, we can check that now too.
+            // Skip validation when the value contains unknown (X/Z) bits, as this
+            // indicates a variable index evaluated at compile time with a default
+            // value (e.g., in continuous assign context). IEEE 1800-2023 §11.5.1
+            // permits variable indexed part-selects in continuous assigns.
             ConstantValue leftVal;
-            if (!context.inUnevaluatedBranch() && (leftVal = context.tryEval(left))) {
+            if (!context.inUnevaluatedBranch() && (leftVal = context.tryEval(left))
+                && leftVal.isInteger() && !leftVal.integer().hasUnknown()) {
                 std::optional<int32_t> index = leftVal.integer().as<int32_t>();
                 if (!index) {
                     auto& diag = context.addDiag(diag::IndexValueInvalid, left.sourceRange);

@@ -93,6 +93,7 @@ $fell Fell
 $stable Stable
 $changed Changed
 $past_gclk PastGclk
+$current_gclk CurrentGclk
 $rose_gclk RoseGclk
 $fell_gclk FellGclk
 $stable_gclk StableGclk
