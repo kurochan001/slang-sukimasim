@@ -690,9 +690,19 @@ const Type& PackedArrayType::fromDim(const Scope& scope, const Type& elementType
     // P1.3: Check for invalid packed array range with negative indices
     // IEEE 1800-2017 §7.4.1: packed array ranges must have non-negative bounds
     if (dim.left < 0 || dim.right < 0) {
+        // Downgrade to warning: parameter-dependent packed ranges (e.g.,
+        // logic [CVA6Cfg.XLEN-1:0]) may evaluate to invalid bounds when using
+        // a zero-initialized default parameter (config_pkg::cva6_cfg_empty).
+        // The correct bounds are resolved when the module is instantiated with
+        // actual parameter values. Return a 1-bit placeholder type so that
+        // downstream elaboration can continue.
         scope.addDiag(diag::InvalidPackedRange, sourceRange.get())
             << dim.left << dim.right;
-        return comp.getErrorType();
+        ConstantRange placeholder{0, 0};
+        auto result = comp.emplace<PackedArrayType>(elementType, placeholder, bitwidth_t(1));
+        if (auto syntax = sourceRange.syntax())
+            result->setSyntax(*syntax);
+        return *result;
     }
 
     auto width = checkedMulU32(elementType.getBitWidth(), dim.width());

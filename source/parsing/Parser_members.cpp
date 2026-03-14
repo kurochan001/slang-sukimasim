@@ -1911,8 +1911,10 @@ CoverCrossSyntax* Parser::parseCoverCross(AttrList attributes, NamedLabelSyntax*
 
     SmallVector<TokenOrSyntax, 8> buffer;
     while (true) {
-        auto name = expect(TokenKind::Identifier);
-        buffer.push_back(&factory.identifierName(name));
+        // IEEE 1800-2023 §19.6.1: cross items can be coverpoint names
+        // or hierarchical variable references (e.g., id_stage_i.field).
+        auto& name = parseName();
+        buffer.push_back(&name);
         if (!peek(TokenKind::Comma))
             break;
 

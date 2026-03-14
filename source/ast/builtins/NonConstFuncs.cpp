@@ -804,6 +804,7 @@ void Builtins::registerNonConstFuncs() {
 #define GCLK_FUNC(name, acceptsOptional) \
     addSystemSubroutine(std::make_shared<SukimaSimGclkFunc>(name, acceptsOptional))
     GCLK_FUNC(KnownSystemName::PastGclk, true);     // accepts optional cycles argument
+    GCLK_FUNC(KnownSystemName::CurrentGclk, false); // IEEE 1800-2023 §16.9.3
     GCLK_FUNC(KnownSystemName::RoseGclk, false);
     GCLK_FUNC(KnownSystemName::FellGclk, false);
     GCLK_FUNC(KnownSystemName::StableGclk, false);
