@@ -998,7 +998,13 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
             }
             else {
                 auto& tps = sym.as<TypeParameterSymbol>();
-                typeParams.push_back(&tps.targetType.getType());
+                auto& resolvedType = tps.targetType.getType();
+                // Guard against unresolved or error types that can cause
+                // null dereference during hash computation.
+                if (resolvedType.isError()) {
+                    forceInvalidParams = true;
+                }
+                typeParams.push_back(&resolvedType);
             }
         }
     }

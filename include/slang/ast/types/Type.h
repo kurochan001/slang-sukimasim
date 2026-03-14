@@ -55,7 +55,8 @@ public:
     const Type& getCanonicalType() const {
         if (!canonical)
             resolveCanonical();
-        return *canonical;
+        // Guard: if resolveCanonical() failed, return *this as fallback
+        return canonical ? *canonical : *this;
     }
 
     /// Gets the declared width of the numeric type in bits. Returns zero if the type is not
