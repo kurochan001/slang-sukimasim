@@ -292,6 +292,9 @@ public:
     /// so will result in an exception.
     const RootSymbol& getRoot();
 
+    /// Gets the root of the design, optionally skipping defparam and bind resolution.
+    const RootSymbol& getRoot(bool skipDefParamsAndBinds);
+
     /// Gets the root of the design without attempting to finalize it.
     /// This means that (if the design has not been finalized previously) things like
     /// defparams will not be resolved, root instances will not have been created, etc.
@@ -803,7 +806,6 @@ private:
 
     Diagnostic& addDiag(Diagnostic diag);
 
-    const RootSymbol& getRoot(bool skipDefParamsAndBinds);
     void elaborate();
     void insertDefinition(Symbol& symbol, const Scope& scope);
     void parseParamOverrides(bool skipDefParams,
