@@ -437,7 +437,15 @@ bool Preprocessor::expandMacro(MacroDef macro, MacroExpansion& expansion,
     SLANG_ASSERT(actualArgs);
     auto& formalList = directive->formalArguments->args;
     auto& actualList = actualArgs->args;
-    if (actualList.size() > formalList.size()) {
+
+    // Check if this is a variadic macro (last param is __VA_ARGS__)
+    bool isVariadic = false;
+    if (!formalList.empty()) {
+        auto lastFormal = formalList[formalList.size() - 1];
+        isVariadic = (lastFormal->name.valueText() == "__VA_ARGS__"sv);
+    }
+
+    if (actualList.size() > formalList.size() && !isVariadic) {
         addDiag(diag::TooManyActualMacroArgs, actualArgs->getFirstToken().location());
         return false;
     }
@@ -448,6 +456,9 @@ bool Preprocessor::expandMacro(MacroDef macro, MacroExpansion& expansion,
         bool isExpanded = false;
     };
     SmallMap<std::string_view, ArgTokens, 8> argumentMap;
+
+    // Collect variadic extra argument tokens (comma-separated)
+    SmallVector<Token, 32> vaArgsTokens;
 
     for (size_t i = 0; i < formalList.size(); i++) {
         auto formal = formalList[i];
@@ -462,6 +473,10 @@ bool Preprocessor::expandMacro(MacroDef macro, MacroExpansion& expansion,
             // if we've run out of actual args make sure we have a default for this one
             if (formal->defaultValue)
                 tokenList = &formal->defaultValue->tokens;
+            else if (isVariadic && formal->name.valueText() == "__VA_ARGS__"sv) {
+                // __VA_ARGS__ with no actual args — use empty list
+                tokenList = nullptr;
+            }
             else {
                 addDiag(diag::NotEnoughMacroArgs, actualArgs->closeParen.location());
                 return false;
@@ -469,8 +484,31 @@ bool Preprocessor::expandMacro(MacroDef macro, MacroExpansion& expansion,
         }
 
         auto name = formal->name.valueText();
-        if (!name.empty())
-            argumentMap.emplace(name, ArgTokens(*tokenList));
+        if (!name.empty()) {
+            if (isVariadic && name == "__VA_ARGS__"sv) {
+                // For __VA_ARGS__, concatenate this arg plus all remaining actual args
+                if (tokenList) {
+                    for (auto t : *tokenList)
+                        vaArgsTokens.push_back(t);
+                }
+                // Append remaining actual arguments with commas
+                for (size_t j = i + 1; j < actualList.size(); j++) {
+                    // Insert a comma token between variadic arguments
+                    if (!vaArgsTokens.empty()) {
+                        auto loc = actualList[j]->getFirstToken().location();
+                        vaArgsTokens.push_back(Token(alloc, TokenKind::Comma, {}, ","sv, loc));
+                    }
+                    for (auto t : actualList[j]->tokens)
+                        vaArgsTokens.push_back(t);
+                }
+                auto vaSpan = vaArgsTokens.copy(alloc);
+                argumentMap.emplace(name, ArgTokens(vaSpan));
+            }
+            else {
+                if (tokenList)
+                    argumentMap.emplace(name, ArgTokens(*tokenList));
+            }
+        }
     }
 
     Token endOfArgs = actualArgs->getLastToken();
@@ -836,10 +874,26 @@ MacroActualArgumentSyntax* Preprocessor::MacroParser::parseActualArgument() {
 
 MacroFormalArgumentSyntax* Preprocessor::MacroParser::parseFormalArgument() {
     Token arg = peek();
-    if (arg.kind == TokenKind::Identifier || LF::isKeyword(arg.kind))
+    if (arg.kind == TokenKind::Identifier || LF::isKeyword(arg.kind)) {
         consume();
-    else
+    }
+    else if (arg.kind == TokenKind::Dot) {
+        // Variadic macro support: treat `...` as a special parameter __VA_ARGS__
+        // This is a common extension used by VCS/Xcelium for assertion macros.
+        auto dot1 = consume();
+        if (peek().kind == TokenKind::Dot) {
+            consume();
+            if (peek().kind == TokenKind::Dot) {
+                consume();
+            }
+        }
+        // Create a synthetic identifier token named "__VA_ARGS__"
+        arg = Token(pp.alloc, TokenKind::Identifier, dot1.trivia(),
+                    "__VA_ARGS__"sv, dot1.location());
+    }
+    else {
         arg = expect(TokenKind::Identifier);
+    }
 
     MacroArgumentDefaultSyntax* argDef = nullptr;
     if (peek(TokenKind::Equals)) {
