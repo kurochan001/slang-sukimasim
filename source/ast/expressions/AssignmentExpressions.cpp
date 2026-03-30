@@ -686,6 +686,19 @@ Expression& NewClassExpression::fromSyntax(Compilation& comp,
             Lookup::ensureVisible(*constructor, context, range);
             constructorCall = &CallExpression::fromArgs(comp, &constructor->as<SubroutineSymbol>(),
                                                         nullptr, syntax.argList, range, context);
+            // In LintMode, if argument binding failed (e.g., UVM classes with
+            // unresolved base types), unwrap the InvalidExpression to expose
+            // the underlying CallExpression with its bound arguments.
+            // This allows downstream tools to extract constructor args even
+            // when type checking is incomplete.
+            if (constructorCall && constructorCall->bad() &&
+                comp.getOptions().flags.has(CompilationFlags::LintMode)) {
+                if (auto* invalid = constructorCall->as_if<InvalidExpression>()) {
+                    if (invalid->child && invalid->child->kind == ExpressionKind::Call) {
+                        constructorCall = const_cast<Expression*>(invalid->child);
+                    }
+                }
+            }
         }
     }
     else if (syntax.argList && !syntax.argList->parameters.empty()) {
