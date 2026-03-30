@@ -1055,7 +1055,7 @@ static const flat_hash_map<DiagCode, std::tuple<std::string_view, std::string_vi
     {diag::LocalVarMatchItem, std::make_tuple("LocalVarMatchItem"sv, "sequence match items can only modify local variables"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::LoopVarShadowsArray, std::make_tuple("LoopVarShadowsArray"sv, "loop variable '{}' shadows foreach array target"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::MatchItemsAdmitEmpty, std::make_tuple("MatchItemsAdmitEmpty"sv, "sequences with match items cannot admit an empty match"sv, DiagnosticSeverity::Error, ""sv)},
-    {diag::NestedDisableIff, std::make_tuple("NestedDisableIff"sv, "cannot instantiate '{}' here because it has a disable iff condition"sv, DiagnosticSeverity::Error, ""sv)},
+    {diag::NestedDisableIff, std::make_tuple("NestedDisableIff"sv, "cannot instantiate '{}' here because it has a disable iff condition"sv, DiagnosticSeverity::Warning, ""sv)},
     {diag::NoDefaultClocking, std::make_tuple("NoDefaultClocking"sv, "cycle delay cannot be used because no default clocking has been specified"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::NonIntegralConstraintLiteral, std::make_tuple("NonIntegralConstraintLiteral"sv, "literals in constraints must be integers"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::NotAnArray, std::make_tuple("NotAnArray"sv, "name must refer to an iterable array"sv, DiagnosticSeverity::Error, ""sv)},

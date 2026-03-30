@@ -604,7 +604,6 @@ void GenerateBlockSymbol::fromSyntax(Compilation& compilation, const IfGenerateS
     ConstantValue cv = context.eval(cond);
     if (cv && context.requireBooleanConvertible(cond) && !isUninstantiated)
         selector = cv.isTrue();
-
     createCondGenBlock(compilation, *syntax.block, context, constructIndex,
                        !selector.has_value() || !selector.value(), syntax.attributes, results);
     if (syntax.elseClause) {

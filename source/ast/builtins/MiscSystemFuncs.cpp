@@ -467,6 +467,9 @@ void Builtins::registerMiscSystemFuncs() {
                     std::make_shared<SequenceMethod>(KnownSystemName::Triggered, false));
     addSystemMethod(SymbolKind::SequenceType,
                     std::make_shared<SequenceMethod>(KnownSystemName::Matched, true));
+    // IEEE 1800-2023 §16.9.4: sequence.ended method
+    addSystemMethod(SymbolKind::SequenceType,
+                    std::make_shared<SequenceMethod>(KnownSystemName::Ended, false));
     
     // Phase 143: Add constraint_mode support for named constraints (LRM compliance)
     // This allows constraint_mode() to be called on void-typed MemberAccessExpression

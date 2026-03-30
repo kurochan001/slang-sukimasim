@@ -70,6 +70,7 @@ $inferred_disable InferredDisable
 randomize Randomize
 triggered Triggered
 matched Matched
+ended Ended
 
 $ferror FError
 $fgets FGets
