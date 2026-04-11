@@ -1342,7 +1342,9 @@ void Builtins::registerSystemTasks() {
     addSystemSubroutine(std::make_shared<InputTask>(KnownSystemName::Input));
     TASK(KnownSystemName::Key, 0, &stringType);
     TASK(KnownSystemName::NoKey, 0, );
-    // TASK(KnownSystemName::Log, 0, &stringType); // REMOVED: VCD $log conflicts with IEEE 1800-2023 math $log
+    // IEEE 1800 transcript control. SystemVerilog uses $ln/$log10 for logarithms,
+    // so $log is a task here and must not be dropped as an unknown system name.
+    TASK(KnownSystemName::Log, 0, &stringType);
     TASK(KnownSystemName::NoLog, 0, );
     TASK(KnownSystemName::Reset, 0, &intType, &intType, &intType);
     TASK(KnownSystemName::Save, 1, &stringType);
