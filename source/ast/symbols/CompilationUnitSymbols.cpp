@@ -179,6 +179,32 @@ const Symbol* PackageSymbol::findForImport(std::string_view lookupName) const {
         }
     }
 
+    // A qualified lookup such as "pkg::item" does not itself perform the
+    // unqualified wildcard import lookup that populates importedSymbols above.
+    // IEEE 1800 packages can nevertheless re-export wildcard-imported names via
+    // "export other_pkg::*", so resolve those candidates directly here.
+    for (auto import : wildcardData->wildcardImports) {
+        auto package = import->getPackage();
+        if (!package)
+            continue;
+
+        bool exportsPackage = hasExportAll;
+        if (!exportsPackage) {
+            for (auto decl : exportDecls) {
+                if (decl->item.kind == TokenKind::Star && decl->package.valueText() == package->name) {
+                    exportsPackage = true;
+                    break;
+                }
+            }
+        }
+
+        if (!exportsPackage)
+            continue;
+
+        if (auto symbol = package->findForImport(lookupName))
+            return symbol;
+    }
+
     return nullptr;
 }
 
