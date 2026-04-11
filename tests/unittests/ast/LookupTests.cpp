@@ -2437,6 +2437,38 @@ endmodule
     CHECK(diags[0].code == diag::PackageExportNotImported);
 }
 
+TEST_CASE("Package wildcard export supports qualified lookup") {
+    auto tree = SyntaxTree::fromText(R"(
+package P1;
+  typedef logic [7:0] data_t;
+  function int add(int a, int b);
+    return a + b;
+  endfunction
+endpackage
+
+package P2;
+  import P1::*;
+  export P1::*;
+endpackage
+
+package P3;
+  import P2::*;
+  export P2::*;
+endpackage
+
+module test;
+  P2::data_t d2 = 8'h5a;
+  P3::data_t d3 = 8'ha5;
+  int x = P2::add(2, 3);
+  int y = P3::add(4, 5);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("Upwards genblk collision") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
