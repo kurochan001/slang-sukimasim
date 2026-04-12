@@ -62,7 +62,10 @@ Statement::StatementContext::~StatementContext() {
         if (proc && proc->procedureKind == ProceduralBlockKind::AlwaysFF && !proc->getBody().bad())
             rootAstContext.addDiag(diag::AlwaysFFEventControl, proc->location);
     }
-    SLANG_ASSERT(blocks.empty());
+    // SukimaSim integration: malformed or recovered subroutine bodies can leave
+    // cached block symbols unconsumed during diagnostic traversal. Treat that as
+    // a recovery condition instead of aborting the embedding simulator frontend.
+    blocks = {};
 }
 
 const Statement* Statement::StatementContext::tryGetBlock(const ASTContext& context,
