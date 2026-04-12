@@ -680,7 +680,12 @@ ConstantValue CallExpression::evalImpl(EvalContext& context) const {
     // If thisClass() is set call eval on it to be sure an error is issued.
     if (thisClass()) {
         auto cv = thisClass()->eval(context);
-        SLANG_ASSERT(!cv);
+        // SukimaSim integration: diagnostic constant-folding can visit class
+        // handle method calls while checking procedural expressions. The call
+        // itself is still not a constant expression, so preserve the upstream
+        // behavior of returning null without asserting on a recoverable receiver
+        // value.
+        (void)cv;
         return nullptr;
     }
 

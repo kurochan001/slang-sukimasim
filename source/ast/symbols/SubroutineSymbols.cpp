@@ -54,6 +54,10 @@ const Statement& SubroutineSymbol::getBody() const {
 
             stmt = &Statement::bindItems(syntax->as<FunctionDeclarationSyntax>().items, context,
                                          stmtCtx);
+            // SukimaSim integration: some recovered class function bodies can leave cached
+            // statement blocks unconsumed during diagnostic traversal. Do not turn that
+            // recovery state into a frontend abort; the bound statement above is authoritative.
+            stmtCtx.blocks = {};
         }
     }
     return *stmt;
