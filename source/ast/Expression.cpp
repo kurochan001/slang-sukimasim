@@ -1082,6 +1082,9 @@ Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result
     if (!symbol)
         return badExpr(comp, nullptr);
 
+    if (!result.nameRange.start())
+        result.nameRange = SourceRange::NoLocation;
+
     auto errorIfInvoke = [&]() {
         // If we require a subroutine, enforce that now. The invocation syntax will have been
         // nulled out if we used it elsewhere in this function.

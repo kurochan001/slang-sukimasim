@@ -1988,6 +1988,15 @@ BinsSelectExpressionSyntax& Parser::parseBinsSelectPrimary() {
             result = &factory.parenthesizedBinsSelectExpr(openParen, expr, closeParen);
             break;
         }
+        case TokenKind::DefaultKeyword: {
+            // IEEE 1800-2023 §19.6: cross bin selections allow `default`,
+            // for example `ignore_bins others = default;`.
+            auto& expr =
+                factory.literalExpression(SyntaxKind::DefaultPatternKeyExpression, consume());
+            auto matches = parseMatches();
+            result = &factory.simpleBinsSelectExpr(expr, matches);
+            break;
+        }
         default: {
             auto& expr = parseSubExpression(ExpressionOptions::BinsSelectContext, 0);
             auto matches = parseMatches();
