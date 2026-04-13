@@ -565,6 +565,12 @@ CoverageBinSymbol& CoverageBinSymbol::fromSyntax(const Scope& scope,
     else if (syntax.keyword.kind == TokenKind::IllegalBinsKeyword)
         result->binsKind = IllegalBins;
 
+    if (syntax.expr->kind == SyntaxKind::SimpleBinsSelectExpr &&
+        syntax.expr->as<SimpleBinsSelectExprSyntax>().expr->kind ==
+            SyntaxKind::DefaultPatternKeyExpression) {
+        result->isDefault = true;
+    }
+
     return *result;
 }
 
@@ -1257,6 +1263,13 @@ BinsSelectExpr& SetExprBinsSelectExpr::fromSyntax(const SimpleBinsSelectExprSynt
     // we're selecting the whole cross (which is otherwise not an expression).
     auto& comp = context.getCompilation();
     auto& cross = parent->asSymbol().as<CoverCrossSymbol>();
+    if (syntax.expr->kind == SyntaxKind::DefaultPatternKeyExpression) {
+        if (syntax.matchesClause)
+            context.addDiag(diag::InvalidBinsMatches, syntax.matchesClause->sourceRange());
+
+        return *comp.emplace<CrossIdBinsSelectExpr>();
+    }
+
     if (syntax.expr->kind == SyntaxKind::IdentifierName &&
         syntax.expr->as<IdentifierNameSyntax>().identifier.valueText() == cross.name) {
 
