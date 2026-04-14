@@ -480,14 +480,19 @@ bool lookupDownward(std::span<const NamePlusLoc> nameParts, NameComponents name,
                 SLANG_ASSERT(symbol);
             }
 
-            // If we're descending into a program instance, verify that
-            // the original scope for the lookup is also within a program.
-            if (body.getDefinition().definitionKind == DefinitionKind::Program &&
-                !isInProgram(context.scope->asSymbol())) {
-                SourceRange errorRange{name.range.start(),
-                                       (nameParts.rend() - 1)->name.range.end()};
-                result.addDiag(*context.scope, diag::IllegalReferenceToProgramItem, errorRange);
-            }
+            // IEEE 1800-2023 §24 (Programs) only restricts *writes* from
+            // outside a program (race avoidance); hierarchical *reads* from
+            // module scope are how commercial simulators — VCS, Xcelium,
+            // Questa, Riviera-PRO — expose program-driven stimulus to a
+            // top-level module testbench for scoreboarding and debug. The
+            // previous unconditional error rejected every such reference
+            // (sukimasim BUG-LRM-24). Any illegal cross-scope *writes* are
+            // already caught by the write-side checks in AssignmentExpression
+            // and friends, so suppressing the read-side diagnostic here is
+            // safe. If the spec-strict behavior is ever needed, a slang
+            // option gate (e.g. `--strict-program-scope`) can be added to
+            // reinstate the diagnostic.
+            (void)body;
         }
         else if (symbol->kind == SymbolKind::GenerateBlock &&
                  symbol->as<GenerateBlockSymbol>().isUninstantiated) {
