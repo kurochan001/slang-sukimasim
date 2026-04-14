@@ -658,10 +658,36 @@ FunctionPortBaseSyntax& Parser::parseFunctionPort(bitmask<FunctionOptions> optio
     // to disambiguate. Otherwise see if we have a port name or nothing at all.
     // For DPI-C prototypes (IsPrototype), always parse data type to support
     // argument declarations without names (e.g., "output int" in DPI-C imports).
+    //
+    // 2026-04-14 CVA6 Issue 3: IEEE 1800-2023 §13.3 allows type elision for
+    // arguments that follow an argument with an explicit data type (the trailing
+    // argument inherits the preceding argument's type). This is commonly used in
+    // class extern method prototypes like
+    //   extern function new(string name = "x", log_file = "y");
+    // When the identifier is immediately followed by '=' (a default value), it
+    // unambiguously identifies the identifier as the port NAME (you cannot give a
+    // type a default value), so we should skip the IsPrototype override in that
+    // case. This preserves DPI-C "unnamed type" semantics for shapes like
+    // "input my_type_t," / "input my_type_t)" while fixing type-elided class
+    // extern formals.
+    bool forceDataTypeForPrototype = options.has(FunctionOptions::IsPrototype);
+    if (forceDataTypeForPrototype && peek(TokenKind::Identifier) && isPlainPortName()) {
+        uint32_t scanIdx = 1;
+        while (peek(scanIdx).kind == TokenKind::OpenBracket) {
+            scanIdx++;
+            if (!scanTypePart<isNotInPortReference>(scanIdx, TokenKind::OpenBracket,
+                                                    TokenKind::CloseBracket)) {
+                break;
+            }
+        }
+        if (peek(scanIdx).kind == TokenKind::Equals)
+            forceDataTypeForPrototype = false;
+    }
+
     DataTypeSyntax* dataType = nullptr;
     if (!peek(TokenKind::Identifier))
         dataType = &parseDataType(TypeOptions::AllowImplicit);
-    else if (!isPlainPortName() || options.has(FunctionOptions::IsPrototype))
+    else if (!isPlainPortName() || forceDataTypeForPrototype)
         dataType = &parseDataType();
 
     DeclaratorSyntax* decl;
