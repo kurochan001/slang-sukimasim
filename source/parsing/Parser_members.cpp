@@ -711,9 +711,29 @@ static bool checkSubroutineName(const NameSyntax& name) {
         return node.kind == SyntaxKind::IdentifierName || node.kind == SyntaxKind::ConstructorName;
     };
 
+    // 2026-04-15 NVDLA feedback: IEEE 1800-2023 §8.24 allows out-of-body
+    // method definitions for nested classes with arbitrary scope depth, e.g.
+    //   task outer::inner::deeper::wait_clock();
+    // which parses as a left-associative ScopedName chain where the rightmost
+    // element is the method name and all prior elements are class identifiers.
+    // Previously we only accepted 2-level ScopedName (ClassName::method), so
+    // nested class OOB definitions produced ExpectedSubroutineName. Walk the
+    // ScopedName chain on the left to allow any depth.
     if (name.kind == SyntaxKind::ScopedName) {
         auto& scoped = name.as<ScopedNameSyntax>();
-        return checkKind(*scoped.left) && checkKind(*scoped.right);
+        if (!checkKind(*scoped.right))
+            return false;
+        // Left side: either an IdentifierName (2-level) or another ScopedName
+        // (3+ level). Recurse so every class identifier in the chain is a
+        // plain IdentifierName and the final right-most leaf is the method.
+        const NameSyntax* cursor = scoped.left;
+        while (cursor->kind == SyntaxKind::ScopedName) {
+            auto& inner = cursor->as<ScopedNameSyntax>();
+            if (!checkKind(*inner.right))
+                return false;
+            cursor = inner.left;
+        }
+        return checkKind(*cursor);
     }
 
     return checkKind(name);
