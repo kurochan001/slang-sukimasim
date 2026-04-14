@@ -1191,6 +1191,57 @@ std::tuple<const SyntaxNode*, SymbolIndex, bool*> Compilation::findOutOfBlockDec
         return {syntax, index, &used};
     }
 
+    // 2026-04-15 NVDLA feedback: nested class OOB (3+ level scoped name).
+    // Example: `task outer::inner::wait_clock();` at $unit.
+    //   Registration scope  = $unit  (task's syntactic parent)
+    //   Lookup outerScope   = outer's inner scope (parent of class inner)
+    // Direct lookup above won't match because the stored scope is higher up
+    // the chain. Walk up from `scope` toward the root, trying the same
+    // className/declName at each ancestor. Only accept matches whose stored
+    // ScopedName has 3+ levels (i.e., name.left is itself a ScopedName), and
+    // verify the chain aligns with the real scope hierarchy.
+    const Scope* walk = scope.asSymbol().getParentScope();
+    while (walk) {
+        auto it2 = outOfBlockDecls.find({className, declName, walk});
+        if (it2 != outOfBlockDecls.end()) {
+            auto& [syntax, name, index, used] = it2->second;
+            if (name->left->kind == SyntaxKind::ScopedName) {
+                const NameSyntax* chainCursor =
+                    name->left->as<ScopedNameSyntax>().left;
+                const Scope* scopeCursor = &scope;
+                bool match = true;
+                while (chainCursor) {
+                    std::string_view expected;
+                    const NameSyntax* nextChain = nullptr;
+                    if (chainCursor->kind == SyntaxKind::ScopedName) {
+                        auto& cs = chainCursor->as<ScopedNameSyntax>();
+                        expected = cs.right->getLastToken().valueText();
+                        nextChain = cs.left;
+                    }
+                    else {
+                        expected = chainCursor->getLastToken().valueText();
+                        nextChain = nullptr;
+                    }
+                    if (scopeCursor->asSymbol().name != expected) {
+                        match = false;
+                        break;
+                    }
+                    chainCursor = nextChain;
+                    if (chainCursor) {
+                        scopeCursor = scopeCursor->asSymbol().getParentScope();
+                        if (!scopeCursor) {
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+                if (match)
+                    return {syntax, index, &used};
+            }
+        }
+        walk = walk->asSymbol().getParentScope();
+    }
+
     return {nullptr, SymbolIndex(), nullptr};
 }
 
