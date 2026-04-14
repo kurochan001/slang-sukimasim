@@ -1268,6 +1268,15 @@ ConstantValue MemberAccessExpression::evalImpl(EvalContext& context) const {
     if (!cv)
         return nullptr;
 
+    // CVA6 feedback 2026-04-15: this evaluator path is for struct/union field
+    // access. If the member is not a FieldSymbol (e.g. a class property like
+    // `m_len` of a UVM packet referenced from a coverpoint expression), bail
+    // out cleanly instead of asserting in `as<FieldSymbol>()`. Constant
+    // evaluation of class-property reads isn't supported here; the caller
+    // will get a nullptr ConstantValue and fall back to runtime evaluation.
+    if (!FieldSymbol::isKind(member.kind))
+        return nullptr;
+
     auto& field = member.as<FieldSymbol>();
     auto& valueType = value().type->getCanonicalType();
     if (valueType.isUnpackedStruct()) {
