@@ -944,10 +944,24 @@ CoverpointSymbol& CoverpointSymbol::fromSyntax(const Scope& scope, const Coverpo
 }
 
 CoverpointSymbol& CoverpointSymbol::fromImplicit(const Scope& scope,
-                                                 const IdentifierNameSyntax& syntax) {
-    auto loc = syntax.identifier.location();
+                                                 const NameSyntax& syntax) {
+    // Derive a human-friendly name for the implicit coverpoint. For plain
+    // identifiers we use the identifier text; for hierarchical / scoped
+    // references we fall back to the leading token so the symbol still has
+    // a stable, non-empty name even when the parse tree is deeper.
+    std::string_view name;
+    SourceLocation loc = syntax.getFirstToken().location();
+
+    if (auto* idName = syntax.as_if<IdentifierNameSyntax>()) {
+        name = idName->identifier.valueText();
+        loc = idName->identifier.location();
+    }
+    else {
+        name = syntax.getFirstToken().valueText();
+    }
+
     auto& comp = scope.getCompilation();
-    auto result = comp.emplace<CoverpointSymbol>(comp, syntax.identifier.valueText(), loc);
+    auto result = comp.emplace<CoverpointSymbol>(comp, name, loc);
 
     result->isImplicit = true;
     result->declaredType.setTypeSyntax(comp.createEmptyTypeSyntax(loc));
@@ -1048,7 +1062,16 @@ CoverCrossSymbol& CoverCrossSymbol::fromSyntax(const Scope& scope, const CoverCr
 
     SmallVector<const CoverpointSymbol*> targets;
     for (auto item : syntax.items) {
-        auto symbol = scope.find(item->identifier.valueText());
+        // Only plain identifiers can name an existing coverpoint in the
+        // enclosing covergroup scope. Hierarchical / scoped references
+        // (e.g., `id_stage_i.instr_fetch_err_i`) always fall through to
+        // the implicit coverpoint path so the lookup is consistent with
+        // IEEE 1800-2023 §19.6.1.
+        const Symbol* symbol = nullptr;
+        if (auto* idItem = item->as_if<IdentifierNameSyntax>()) {
+            symbol = scope.find(idItem->identifier.valueText());
+        }
+
         if (symbol && symbol->kind == SymbolKind::Coverpoint) {
             targets.push_back(&symbol->as<CoverpointSymbol>());
         }
