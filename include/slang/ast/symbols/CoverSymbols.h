@@ -193,8 +193,13 @@ public:
     CoverpointSymbol(Compilation& compilation, std::string_view name, SourceLocation loc);
 
     static CoverpointSymbol& fromSyntax(const Scope& scope, const syntax::CoverpointSyntax& syntax);
+    // IEEE 1800-2023 §19.6.1: cross items may be hierarchical variable
+    // references (e.g., `id_stage_i.instr_fetch_err_i`), not just plain
+    // coverpoint identifiers. Accept the generic NameSyntax base so both
+    // IdentifierName and ScopedName / hierarchical member accesses can
+    // seed an implicit coverpoint.
     static CoverpointSymbol& fromImplicit(const Scope& scope,
-                                          const syntax::IdentifierNameSyntax& syntax);
+                                          const syntax::NameSyntax& syntax);
 
     const Type& getType() const { return declaredType.getType(); }
 
