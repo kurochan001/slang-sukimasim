@@ -7,6 +7,9 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/types/Type.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Bitstream.h"
 #include "slang/ast/Compilation.h"
@@ -1281,10 +1284,56 @@ bool Type::isKind(SymbolKind kind) {
 
 void Type::resolveCanonical() const {
     SLANG_ASSERT(kind == SymbolKind::TypeAlias);
+    // CVA6 feedback 2026-04-15: opt-in trace for TypeAlias canonicalization so
+    // elaboration-time crashes like
+    //   [slang::as] requested=IntegralType actual_kind=35 name="vector_rvfi"
+    // can be localized to the specific alias chain that failed to resolve. Set
+    // SUKIMASIM_TRACE_TYPE_ALIAS=1 to enable.
+    static const bool s_traceAlias = std::getenv("SUKIMASIM_TRACE_TYPE_ALIAS") != nullptr;
     canonical = this;
+    int hops = 0;
+    if (s_traceAlias) {
+        std::fprintf(stderr, "[slang::resolveCanonical] start name=\"%.*s\" kind=%d\n",
+                     static_cast<int>(name.size()), name.data(), static_cast<int>(kind));
+        std::fflush(stderr);
+    }
     do {
-        canonical = &canonical->as<TypeAliasType>().targetType.getType();
+        const Type* next = &canonical->as<TypeAliasType>().targetType.getType();
+        if (s_traceAlias) {
+            std::fprintf(
+                stderr,
+                "[slang::resolveCanonical]   hop=%d from name=\"%.*s\" kind=%d "
+                "-> to name=\"%.*s\" kind=%d\n",
+                hops, static_cast<int>(canonical->name.size()), canonical->name.data(),
+                static_cast<int>(canonical->kind), static_cast<int>(next->name.size()),
+                next->name.data(), static_cast<int>(next->kind));
+            std::fflush(stderr);
+        }
+        // Guard against pathological self-loops / cycles that would otherwise
+        // infinite-loop. Bail out with canonical pointing to the last Type we
+        // reached. Caller's as<IntegralType>() will still fail loudly (with the
+        // symbol-name diagnostic added in Symbol.h::as) but we won't hang.
+        if (next == canonical || hops > 64) {
+            if (s_traceAlias) {
+                std::fprintf(stderr,
+                             "[slang::resolveCanonical]   cycle/limit detected at hop=%d "
+                             "name=\"%.*s\"; stopping with kind=%d\n",
+                             hops, static_cast<int>(canonical->name.size()),
+                             canonical->name.data(), static_cast<int>(canonical->kind));
+                std::fflush(stderr);
+            }
+            break;
+        }
+        canonical = next;
+        ++hops;
     } while (canonical->isAlias());
+    if (s_traceAlias) {
+        std::fprintf(stderr,
+                     "[slang::resolveCanonical] done name=\"%.*s\" canonical_kind=%d hops=%d\n",
+                     static_cast<int>(name.size()), name.data(),
+                     static_cast<int>(canonical ? canonical->kind : SymbolKind::Unknown), hops);
+        std::fflush(stderr);
+    }
 }
 
 const Type& Type::lookupNamedType(Compilation& compilation, const NameSyntax& syntax,

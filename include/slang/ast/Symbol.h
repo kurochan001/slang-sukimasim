@@ -8,7 +8,11 @@
 #pragma once
 
 #include <cstdio>
+#include <cstdlib>
 #include <typeinfo>
+#if defined(__unix__) || defined(__APPLE__)
+#    include <execinfo.h>
+#endif
 
 #include "slang/ast/Lookup.h"
 #include "slang/text/SourceLocation.h"
@@ -251,6 +255,16 @@ public:
                     static_cast<int>(kind),
                     static_cast<int>(name.size()),
                     name.data());
+#if defined(__unix__) || defined(__APPLE__)
+                // Print a short backtrace so the failing call site is visible.
+                // Gated by SUKIMASIM_TRACE_ASSERT_BACKTRACE=1 to avoid noise.
+                if (std::getenv("SUKIMASIM_TRACE_ASSERT_BACKTRACE") != nullptr) {
+                    void* frames[32];
+                    int n = ::backtrace(frames, 32);
+                    std::fprintf(stderr, "[slang::as] backtrace (%d frames):\n", n);
+                    ::backtrace_symbols_fd(frames, n, 2 /* stderr */);
+                }
+#endif
                 std::fflush(stderr);
             }
             SLANG_ASSERT(T::isKind(kind));
