@@ -7,6 +7,9 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <cstdio>
+#include <typeinfo>
+
 #include "slang/ast/Lookup.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/util/Util.h"
@@ -216,6 +219,40 @@ public:
             return *scope;
         }
         else {
+            // CVA6 feedback 2026-04-15: log symbol name + kind + requested
+            // type before the assertion fires. Previously the abort produced
+            // only "T::isKind(kind) failed" with Type "Unknown", making
+            // elaboration-time crashes very hard to localize.
+            if (!T::isKind(kind)) {
+                // Strip namespace prefix from typeid().name() for readability
+                // (mangled names start with length-prefixed atoms like
+                // "N5slang3ast12IntegralTypeE"). We scan for the last run of
+                // digits-followed-by-letters to recover the final class name.
+                const char* mangled = typeid(T).name();
+                const char* readable = mangled;
+                for (const char* p = mangled; *p; ++p) {
+                    if (*p >= '0' && *p <= '9') {
+                        int len = 0;
+                        const char* q = p;
+                        while (*q >= '0' && *q <= '9') {
+                            len = len * 10 + (*q - '0');
+                            ++q;
+                        }
+                        if (len > 0 && *q) {
+                            readable = q;
+                            p = q + len - 1;
+                        }
+                    }
+                }
+                std::fprintf(
+                    stderr,
+                    "[slang::as] assertion about to fail: requested=%s actual_kind=%d name=\"%.*s\"\n",
+                    readable,
+                    static_cast<int>(kind),
+                    static_cast<int>(name.size()),
+                    name.data());
+                std::fflush(stderr);
+            }
             SLANG_ASSERT(T::isKind(kind));
             return *static_cast<T*>(this);
         }
