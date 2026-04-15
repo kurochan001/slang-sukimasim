@@ -952,8 +952,24 @@ Expression& MemberAccessExpression::fromSelector(
             break;
         case SymbolKind::ClassType: {
             auto& ct = type.as<ClassType>();
-            if (auto base = ct.getBaseClass(); base && base->isError())
-                return badExpr(compilation, &expr);
+            // Sukimasim: bundled --enable-uvm UVM stubs occasionally leave the
+            // base class chain in an error state for parametrised inheritance
+            // (e.g. `class drv extends uvm_driver #(T)`) even when the derived
+            // class body is fully usable. Bailing out here would silently drop
+            // every foreach `obj.member[i]` arrayRef bind on such classes
+            // because the foreach has nowhere to recover and the loop is then
+            // omitted entirely from the IR.
+            //
+            // We only relax the check inside `ASTFlags::ForeachLoopArray`,
+            // which keeps the original badExpr() behaviour everywhere else
+            // (so non-foreach paths keep their downstream error semantics).
+            // Uninstantiated generic specializations still bail out because no
+            // concrete lookup is meaningful for them.
+            if (auto base = ct.getBaseClass(); base && base->isError()) {
+                if (ct.isUninstantiated || !context.flags.has(ASTFlags::ForeachLoopArray))
+                    return badExpr(compilation, &expr);
+                // fall through with scope = &ct
+            }
 
             scope = &ct;
             break;
