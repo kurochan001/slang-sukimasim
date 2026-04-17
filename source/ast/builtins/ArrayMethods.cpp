@@ -772,14 +772,17 @@ public:
         return *args[0]->type->getArrayElementType();
     }
 
-    ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange range,
                        const CallExpression::SystemCallInfo&) const final {
         auto lval = args[0]->evalLValue(context);
         if (!lval)
             return nullptr;
 
         auto target = lval.resolve();
-        SLANG_ASSERT(target && target->isQueue());
+        if (!target || !target->isQueue()) {
+            notConst(context, range);
+            return args[0]->type->getArrayElementType()->getDefaultValue();
+        }
 
         auto& q = *target->queue();
         if (q.empty()) {
