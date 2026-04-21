@@ -595,6 +595,15 @@ ConstantValue ConversionExpression::convert(EvalContext& context, const Type& fr
     if (from.isNull())
         return std::move(value);
 
+    // Conversions between handle types (class upcast, virtual interface, covergroup,
+    // event, chandle) are identity at the ConstantValue level — the underlying
+    // handle is unchanged; only the static type is reinterpreted. Type checking
+    // upstream of evalImpl has already validated that the conversion is legal
+    // (e.g. derived-to-base class assignment). A downcast that requires runtime
+    // checking is routed through $cast and never reaches this path.
+    if (from.isHandleType() && to.isHandleType())
+        return std::move(value);
+
     SLANG_UNREACHABLE;
 }
 
