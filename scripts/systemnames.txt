@@ -247,6 +247,32 @@ $dumplimit DumpLimit
 $dumpflush DumpFlush
 $dumpportson DumpPortsOn
 $dumpportsoff DumpPortsOff
+
+# Cadence SHM / Synopsys FSDB waveform tasks (redirected to SWDB).
+# Registered here so the slang parser accepts them as known system tasks
+# instead of emitting UnknownSystemName; the runtime stubs live in
+# sukimasim src/eval/system_task_handlers.cpp (item #28 of the sukimasim
+# implementation-priority ranking).
+$shm_open ShmOpen
+$shm_probe ShmProbe
+$shm_close ShmClose
+$shm_save ShmSave
+$shm_dumpon ShmDumpOn
+$shm_dumpoff ShmDumpOff
+$fsdbDumpfile FsdbDumpFile
+$fsdbDumpvars FsdbDumpVars
+$fsdbDumpon FsdbDumpOn
+$fsdbDumpoff FsdbDumpOff
+$fsdbDumpflush FsdbDumpFlush
+$fsdbDumpall FsdbDumpAll
+$fsdbDumplimit FsdbDumpLimit
+$fsdbDumpMDA FsdbDumpMDA
+$fsdbDumpSVA FsdbDumpSVA
+$fsdbSuppress FsdbSuppress
+$fsdbAutoSwitchDumpfile FsdbAutoSwitchDumpFile
+$fsdbSwitchDumpfile FsdbSwitchDumpFile
+$fsdbDumpparams FsdbDumpParams
+$fsdbDumpcfg FsdbDumpCfg
 $dumpportsall DumpPortsAll
 $dumpportslimit DumpPortsLimit
 $dumpportsflush DumpPortsFlush
