@@ -91,16 +91,27 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
     auto scope = symbol.getParentScope();
     auto current = &symbol;
     if (scope && symbol.kind == SymbolKind::InstanceBody) {
-        current = symbol.as<InstanceBodySymbol>().parentInstance;
-        SLANG_ASSERT(current);
+        auto* parentInst = symbol.as<InstanceBodySymbol>().parentInstance;
+        SLANG_ASSERT(parentInst);
 
-        scope = current->getParentScope();
+        // Synthetic bodies created by InstanceBodySymbol::fromDefinition for
+        // on-the-fly module recovery may lack a parent instance in Release
+        // builds (where SLANG_ASSERT is a no-op).  Fall back to the body
+        // itself so the path ends with the module definition name rather
+        // than dereferencing a null pointer.
+        if (parentInst) {
+            current = parentInst;
+            scope = current->getParentScope();
+        }
     }
     else if (scope && symbol.kind == SymbolKind::CheckerInstanceBody) {
-        current = symbol.as<CheckerInstanceBodySymbol>().parentInstance;
-        SLANG_ASSERT(current);
+        auto* parentInst = symbol.as<CheckerInstanceBodySymbol>().parentInstance;
+        SLANG_ASSERT(parentInst);
 
-        scope = current->getParentScope();
+        if (parentInst) {
+            current = parentInst;
+            scope = current->getParentScope();
+        }
     }
 
     std::string_view separator;
