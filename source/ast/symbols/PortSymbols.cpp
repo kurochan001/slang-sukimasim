@@ -1635,6 +1635,12 @@ std::pair<InterfacePortSymbol::IfaceConn, const Expression*> InterfacePortSymbol
 
     auto& body = scope->asSymbol().as<InstanceBodySymbol>();
     SLANG_ASSERT(body.parentInstance);
+    // Release-time guard: generate-block interface instances whose bodies are
+    // still resolving can reach here with a null parentInstance (e.g. a nested
+    // interface inside a for-generate wrapper whose ports resolve recursively
+    // via bindRValue).  Fall back to an empty connection instead of dereferencing.
+    if (!body.parentInstance)
+        return {{nullptr, nullptr}, nullptr};
 
     auto conn = body.parentInstance->getPortConnection(*this);
     if (!conn)
