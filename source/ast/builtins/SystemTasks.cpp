@@ -746,6 +746,65 @@ public:
     }
 };
 
+// IEEE 1800-2023 §20.18.10 $dumpportson / $dumpportsoff / $dumpportsall /
+// $dumpportsflush / $dumpportslimit. The LRM specifies an optional filename
+// string, but commercial flows (and our sibling DumpPortsTask) also allow
+// module/instance name references (treated as scope selectors). SimpleSystemTask
+// rejects name references with NotAValue, so this task mirrors DumpPortsTask's
+// bindArgument override and accepts both forms.
+class DumpPortsControlTask : public SystemTaskBase {
+public:
+    // For $dumpportslimit the first argument is an integer file-size limit and
+    // must keep standard value binding; all trailing arguments accept names.
+    DumpPortsControlTask(KnownSystemName knownNameId, bool firstArgIsInt)
+        : SystemTaskBase(knownNameId), firstArgIsInt_(firstArgIsInt) {}
+
+    bool allowEmptyArgument(size_t) const final { return true; }
+
+    const Expression& bindArgument(size_t argIndex, const ASTContext& context,
+                                   const ExpressionSyntax& syntax, const Args& args) const final {
+        if (firstArgIsInt_ && argIndex == 0)
+            return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
+
+        if (NameSyntax::isKind(syntax.kind)) {
+            return ArbitrarySymbolExpression::fromSyntax(context.getCompilation(),
+                                                         syntax.as<NameSyntax>(), context);
+        }
+
+        return SystemTaskBase::bindArgument(argIndex, context, syntax, args);
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        size_t minArgs = firstArgIsInt_ ? 1 : 0;
+        if (!checkArgCount(context, false, args, range, minArgs, INT32_MAX))
+            return comp.getErrorType();
+
+        for (size_t i = 0; i < args.size(); i++) {
+            if (args[i]->kind == ExpressionKind::EmptyArgument)
+                continue;
+
+            if (firstArgIsInt_ && i == 0) {
+                if (!args[i]->type->isIntegral())
+                    return badArg(context, *args[i]);
+                continue;
+            }
+
+            if (args[i]->kind == ExpressionKind::ArbitrarySymbol)
+                continue;
+
+            if (!args[i]->type->canBeStringLike())
+                return badArg(context, *args[i]);
+        }
+
+        return comp.getVoidType();
+    }
+
+private:
+    bool firstArgIsInt_;
+};
+
 class CastTask : public SystemTaskBase {
 public:
     explicit CastTask(KnownSystemName knownNameId) : SystemTaskBase(knownNameId) {
@@ -1332,11 +1391,18 @@ void Builtins::registerSystemTasks() {
     TASK(KnownSystemName::DumpAll, 0, );
     TASK(KnownSystemName::DumpLimit, 1, &intType);
     TASK(KnownSystemName::DumpFlush, 0, );
-    TASK(KnownSystemName::DumpPortsOn, 0, &stringType);
-    TASK(KnownSystemName::DumpPortsOff, 0, &stringType);
-    TASK(KnownSystemName::DumpPortsAll, 0, &stringType);
-    TASK(KnownSystemName::DumpPortsLimit, 1, &intType, &stringType);
-    TASK(KnownSystemName::DumpPortsFlush, 0, &stringType);
+    // IEEE 1800-2023 §20.18.10: accept optional filename OR module/instance
+    // scope references (matches DumpPortsTask's argument binding).
+    addSystemSubroutine(
+        std::make_shared<DumpPortsControlTask>(KnownSystemName::DumpPortsOn, false));
+    addSystemSubroutine(
+        std::make_shared<DumpPortsControlTask>(KnownSystemName::DumpPortsOff, false));
+    addSystemSubroutine(
+        std::make_shared<DumpPortsControlTask>(KnownSystemName::DumpPortsAll, false));
+    addSystemSubroutine(
+        std::make_shared<DumpPortsControlTask>(KnownSystemName::DumpPortsLimit, true));
+    addSystemSubroutine(
+        std::make_shared<DumpPortsControlTask>(KnownSystemName::DumpPortsFlush, false));
 
     // Phase 6: Register InputTask with variable arguments
     addSystemSubroutine(std::make_shared<InputTask>(KnownSystemName::Input));
