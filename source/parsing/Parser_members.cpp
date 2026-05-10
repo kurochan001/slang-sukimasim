@@ -1569,7 +1569,7 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
             return &factory.emptyMember(attributes, qualifiers, consume());
         case TokenKind::InterfaceKeyword:
             if (peek(1).kind == TokenKind::ClassKeyword) {
-                if (isIfaceClass || parseOptions.languageVersion < LanguageVersion::v1800_2023)
+                if (isIfaceClass)
                     addDiag(diag::NestedIface, peek().location());
                 return &parseClassDeclaration(attributes, consume());
             }
