@@ -64,6 +64,11 @@ bool parse(std::string_view str, function_ref<void(std::string_view)> onText,
                 options.zeroPad = true;
                 ptr++;
             }
+            else if (*ptr == '+') {
+                // Accept printf-style sign forcing. Runtime formatters apply
+                // the flag; the semantic checker only validates the specifier.
+                ptr++;
+            }
             else {
                 break;
             }
