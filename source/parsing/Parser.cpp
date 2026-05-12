@@ -1439,6 +1439,118 @@ bool Parser::isLocalVariableDeclaration() {
     return peek(index).kind == TokenKind::Identifier;
 }
 
+bool Parser::isInlineAssertLocalVar() {
+    // Vendor extension (sukimasim-improvements): detect a
+    // `data_type IDENT = ...` shape used as an inline assertion local
+    // variable declaration inside parenthesised sequence/property
+    // expressions, e.g. `(bit v = din[0], din[1])`.
+    //
+    // This is not part of IEEE 1800-2023 BNF (sequence_match_item does not
+    // include data_declaration), but Xcelium and VCS accept the shortcut.
+    // We only look for this shape while we are actively parsing the body
+    // of a property/sequence that can absorb the hoisted declaration —
+    // otherwise the lookahead would compete with regular cast/data type
+    // expressions in unrelated contexts.
+    if (pendingInlineLocalVarStack.empty())
+        return false;
+
+    uint32_t index = 0;
+    auto k = peek(index).kind;
+    switch (k) {
+        // Integer / 4-state types valid as assertion local variables per
+        // IEEE 1800-2023 §16.10 (no chandle, no longint, no real).
+        case TokenKind::BitKeyword:
+        case TokenKind::LogicKeyword:
+        case TokenKind::RegKeyword:
+        case TokenKind::ByteKeyword:
+        case TokenKind::ShortIntKeyword:
+        case TokenKind::IntKeyword:
+        case TokenKind::IntegerKeyword:
+        case TokenKind::TimeKeyword:
+        case TokenKind::VarKeyword:
+            break;
+        default:
+            return false;
+    }
+    index++;
+
+    // Optional `signed`/`unsigned` modifier.
+    if (peek(index).kind == TokenKind::SignedKeyword ||
+        peek(index).kind == TokenKind::UnsignedKeyword) {
+        index++;
+    }
+
+    // Optional packed dimensions.  Bound the scan so we do not run away on
+    // malformed input.
+    int dimGuard = 0;
+    while (peek(index).kind == TokenKind::OpenBracket && dimGuard++ < 8) {
+        int depth = 1;
+        index++;
+        int bracketGuard = 0;
+        while (depth > 0 && bracketGuard++ < 64) {
+            auto t = peek(index).kind;
+            if (t == TokenKind::EndOfFile)
+                return false;
+            if (t == TokenKind::OpenBracket)
+                depth++;
+            else if (t == TokenKind::CloseBracket)
+                depth--;
+            index++;
+        }
+        if (depth != 0)
+            return false;
+    }
+
+    // The identifying signature of the inline form is `IDENT =`.
+    if (peek(index).kind != TokenKind::Identifier)
+        return false;
+    if (peek(index + 1).kind != TokenKind::Equals)
+        return false;
+    return true;
+}
+
+syntax::PropertyExprSyntax& Parser::parseInlineAssertLocalVar() {
+    // Vendor extension: parse `data_type IDENT = expr` and:
+    //   1) Hoist `data_type IDENT;` onto pendingInlineLocalVarStack so the
+    //      enclosing property/sequence declaration registers it as an
+    //      assertion local variable (IEEE 1800-2023 §16.10).
+    //   2) Return `IDENT = expr` wrapped as a SimplePropertyExpr — a valid
+    //      sequence_match_item once the variable is in scope.
+    SLANG_ASSERT(!pendingInlineLocalVarStack.empty());
+
+    auto& dataType = parseDataType(TypeOptions::None);
+    auto nameToken = expect(TokenKind::Identifier);
+    auto equalsToken = expect(TokenKind::Equals);
+    auto& initExpr = parseExpression();
+
+    // Build a declarator without an initializer for the hoisted decl; the
+    // assignment happens via the side-clause operator_assignment below.
+    std::span<syntax::VariableDimensionSyntax*> emptyDims;
+    auto& bareDeclarator = factory.declarator(nameToken, emptyDims, nullptr);
+
+    SmallVector<syntax::TokenOrSyntax, 4> declBuffer;
+    declBuffer.push_back(&bareDeclarator);
+
+    auto missingSemi = Token::createMissing(alloc, TokenKind::Semicolon,
+                                            equalsToken.location());
+
+    auto& localDecl = factory.localVariableDeclaration(
+        nullptr, Token(), dataType, declBuffer.copy(alloc), missingSemi);
+
+    pendingInlineLocalVarStack.back().push_back(&localDecl);
+
+    // Build the side-clause `IDENT = initExpr`.  We need a distinct Token
+    // for the identifier reference so the location info on the synthesised
+    // declaration and the reference do not alias.
+    syntax::ExpressionSyntax& nameExpr = factory.identifierName(nameToken);
+    auto& assignExpr = factory.binaryExpression(
+        SyntaxKind::AssignmentExpression, nameExpr, equalsToken, nullptr,
+        initExpr);
+
+    return factory.simplePropertyExpr(
+        factory.simpleSequenceExpr(assignExpr, nullptr));
+}
+
 bool Parser::isHierarchyInstantiation(bool requireName) {
     uint32_t index = 0;
     if (peek(index++).kind != TokenKind::Identifier)

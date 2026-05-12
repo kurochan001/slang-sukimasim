@@ -497,6 +497,24 @@ private:
     // The kind of definition currently being parsed, which could be a module,
     // interface, program, etc.
     syntax::SyntaxKind currentDefinitionKind = syntax::SyntaxKind::Unknown;
+
+    // Vendor extension (sukimasim-improvements): inline assertion local
+    // variable declarations of the form `(data_type IDENT = expr, ...)` are
+    // not part of IEEE 1800-2023 BNF (sequence_match_item does not include
+    // data_declaration), but Xcelium and VCS accept this shortcut.  When such
+    // a declaration is encountered while parsing a sequence/property body,
+    // we hoist a LocalVariableDeclarationSyntax onto the top of this stack so
+    // the enclosing property/sequence declaration can pick it up.  Each
+    // entry is one stack frame for the immediately enclosing
+    // property/sequence declaration.
+    SmallVector<SmallVector<syntax::LocalVariableDeclarationSyntax*>, 4>
+        pendingInlineLocalVarStack;
+
+    bool isInlineAssertLocalVar();
+    syntax::PropertyExprSyntax& parseInlineAssertLocalVar();
+    syntax::SequenceExprSyntax& buildParenthesizedSeqWithInlinedSideClauses(
+        Token openParen, syntax::SequenceExprSyntax& head,
+        std::span<syntax::PropertyExprSyntax*> inlineSideClauses);
 };
 
 template<bool (*IsEnd)(TokenKind)>

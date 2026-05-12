@@ -1503,8 +1503,7 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
                 errorIfIface(decl);
         }
         else if (decl.kind == SyntaxKind::PackageImportDeclaration ||
-                 decl.kind == SyntaxKind::NetTypeDeclaration ||
-                 decl.kind == SyntaxKind::LetDeclaration) {
+                 decl.kind == SyntaxKind::NetTypeDeclaration) {
             // Nettypes and package imports are disallowed in classes.
             addDiag(diag::NotAllowedInClass, decl.sourceRange());
         }
@@ -2687,7 +2686,15 @@ PropertyDeclarationSyntax& Parser::parsePropertyDeclaration(AttrList attributes)
     while (isLocalVariableDeclaration())
         declarations.push_back(&parseLocalVariableDeclaration());
 
+    // Vendor extension (sukimasim-improvements): push a frame so any
+    // inline `(bit v = expr, ...)` declarations discovered while parsing
+    // the spec are hoisted into this property's declaration list.
+    pendingInlineLocalVarStack.push_back({});
     auto& spec = parsePropertySpec();
+    for (auto* decl : pendingInlineLocalVarStack.back())
+        declarations.push_back(decl);
+    pendingInlineLocalVarStack.pop_back();
+
     Token optSemi = consumeIf(TokenKind::Semicolon);
     Token end = expect(TokenKind::EndPropertyKeyword);
 
@@ -2708,7 +2715,14 @@ SequenceDeclarationSyntax& Parser::parseSequenceDeclaration(AttrList attributes)
     while (isLocalVariableDeclaration())
         declarations.push_back(&parseLocalVariableDeclaration());
 
+    // Vendor extension (sukimasim-improvements): hoist inline assertion
+    // local variable declarations found while parsing the body.
+    pendingInlineLocalVarStack.push_back({});
     auto& expr = parseSequenceExpr(0, /* isInProperty */ false);
+    for (auto* decl : pendingInlineLocalVarStack.back())
+        declarations.push_back(decl);
+    pendingInlineLocalVarStack.pop_back();
+
     auto semi2 = expect(TokenKind::Semicolon);
     auto end = expect(TokenKind::EndSequenceKeyword);
 
