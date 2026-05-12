@@ -1460,10 +1460,17 @@ SequenceMatchListSyntax* Parser::parseSequenceMatchList(Token& closeParen) {
 
     Token comma;
     std::span<TokenOrSyntax> list;
-    parseList<isPossibleArgument, isEndOfParenList>(TokenKind::Comma, TokenKind::CloseParenthesis,
-                                                    TokenKind::Comma, comma, list, closeParen,
-                                                    RequireItems::True, diag::ExpectedExpression,
-                                                    [this] { return &parsePropertyExpr(0); });
+    parseList<isPossibleArgument, isEndOfParenList>(
+        TokenKind::Comma, TokenKind::CloseParenthesis, TokenKind::Comma, comma, list, closeParen,
+        RequireItems::True, diag::ExpectedExpression, [this]() -> PropertyExprSyntax* {
+            // Vendor extension: an inline assertion local variable
+            // declaration (`bit v = expr`) may appear in any
+            // sequence_match_item position.  Hoist the declaration and
+            // return the side-clause assignment as a PropertyExpr.
+            if (isInlineAssertLocalVar())
+                return &parseInlineAssertLocalVar();
+            return &parsePropertyExpr(0);
+        });
 
     return &factory.sequenceMatchList(comma, list);
 }
@@ -1555,6 +1562,22 @@ SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
         }
         case TokenKind::OpenParenthesis: {
             auto openParen = consume();
+
+            // Vendor extension (sukimasim-improvements): inline assertion
+            // local variable declarations at the head of a parenthesised
+            // sequence, e.g. `(bit v = din[0], din[1])`.  Consume all such
+            // declarations, hoist them onto pendingInlineLocalVarStack,
+            // and collect the synthesised side-clause assignments to be
+            // injected into the sequence_match_item list.
+            SmallVector<PropertyExprSyntax*, 4> inlineSideClauses;
+            while (isInlineAssertLocalVar()) {
+                auto& sc = parseInlineAssertLocalVar();
+                inlineSideClauses.push_back(&sc);
+                if (!peek(TokenKind::Comma))
+                    break;
+                consume();
+            }
+
             // IEEE 1800-2023: In property context, parenthesized expressions can
             // contain property operators (until, s_until, without, s_without, etc.)
             if (isInProperty) {
@@ -1609,6 +1632,9 @@ SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
                 return factory.parenthesizedSequenceExpr(openParen, dummyExpr, matchList, closeParen, nullptr);
             }
             auto& expr = parseSequenceExpr(0, false);
+            if (!inlineSideClauses.empty())
+                return buildParenthesizedSeqWithInlinedSideClauses(openParen, expr,
+                                                                   inlineSideClauses);
             return parseParenthesizedSeqExpr(openParen, expr);
         }
         case TokenKind::EdgeKeyword:
@@ -1621,6 +1647,61 @@ SequenceExprSyntax& Parser::parseSequencePrimary(bool isInProperty) {
             return factory.simpleSequenceExpr(expr, repetition);
         }
     }
+}
+
+SequenceExprSyntax& Parser::buildParenthesizedSeqWithInlinedSideClauses(
+    Token openParen, SequenceExprSyntax& head,
+    std::span<PropertyExprSyntax*> inlineSideClauses) {
+    // Vendor extension (sukimasim-improvements): the inline assertion local
+    // variable declarations consumed at the head of `(...)` have already
+    // been hoisted onto pendingInlineLocalVarStack; we still need to
+    // emit the side-clause operator_assignment expressions in the
+    // sequence_match_item list so the assignments occur when the
+    // sequence matches.  Build a SequenceMatchListSyntax that contains
+    // the inline side-clauses followed by any explicit match-list items
+    // the user wrote.
+    SmallVector<TokenOrSyntax, 8> buffer;
+    Token firstComma = Token::createMissing(alloc, TokenKind::Comma, openParen.location());
+
+    for (size_t i = 0; i < inlineSideClauses.size(); i++) {
+        if (i > 0) {
+            buffer.push_back(Token::createMissing(alloc, TokenKind::Comma,
+                                                  openParen.location()));
+        }
+        buffer.push_back(inlineSideClauses[i]);
+    }
+
+    Token closeParen;
+    if (peek(TokenKind::Comma)) {
+        // Explicit user-written match items follow.
+        Token comma = consume();
+        // Emit comma between previous content and the next user item.
+        buffer.push_back(comma);
+
+        // Parse the rest as a comma-separated list, allowing further inline
+        // decls to interleave.  Use the same lambda body as
+        // parseSequenceMatchList.
+        Token endComma;
+        std::span<TokenOrSyntax> tail;
+        parseList<isPossibleArgument, isEndOfParenList>(
+            TokenKind::Comma, TokenKind::CloseParenthesis, TokenKind::Comma, endComma, tail,
+            closeParen, RequireItems::True, diag::ExpectedExpression,
+            [this]() -> PropertyExprSyntax* {
+                if (isInlineAssertLocalVar())
+                    return &parseInlineAssertLocalVar();
+                return &parsePropertyExpr(0);
+            });
+        for (auto& tok : tail)
+            buffer.push_back(tok);
+    }
+    else {
+        closeParen = expect(TokenKind::CloseParenthesis);
+    }
+
+    auto& matchList = factory.sequenceMatchList(firstComma, buffer.copy(alloc));
+    auto repetition = parseSequenceRepetition();
+    return factory.parenthesizedSequenceExpr(openParen, head, &matchList, closeParen,
+                                             repetition);
 }
 
 SequenceExprSyntax& Parser::parseSequenceExpr(int precedence, bool isInProperty) {
@@ -1743,14 +1824,37 @@ PropertyExprSyntax& Parser::parsePropertyPrimary() {
         }
         case TokenKind::OpenParenthesis: {
             auto openParen = consume();
+
+            // Vendor extension (sukimasim-improvements): inline assertion
+            // local variable declarations at the head of a parenthesised
+            // property expression, e.g. `(bit v = din[0], din[1])`.  Hoist
+            // the declarations and collect their side-clause assignments
+            // so they can be folded into the sequence_match_item list.
+            SmallVector<PropertyExprSyntax*, 4> inlineSideClauses;
+            while (isInlineAssertLocalVar()) {
+                auto& sc = parseInlineAssertLocalVar();
+                inlineSideClauses.push_back(&sc);
+                if (!peek(TokenKind::Comma))
+                    break;
+                consume();
+            }
+
             auto& expr = parsePropertyExpr(0);
 
             // There is ambiguity between parenthesized property expressions and sequence
             // expressions. We resolve by always rewriting back to a sequence expression
             // if it is possible to do so.
             if (expr.kind == SyntaxKind::SimplePropertyExpr) {
-                auto result = &parseParenthesizedSeqExpr(openParen,
-                                                         *expr.as<SimplePropertyExprSyntax>().expr);
+                SequenceExprSyntax* result;
+                if (!inlineSideClauses.empty()) {
+                    result = &buildParenthesizedSeqWithInlinedSideClauses(
+                        openParen, *expr.as<SimplePropertyExprSyntax>().expr,
+                        inlineSideClauses);
+                }
+                else {
+                    result = &parseParenthesizedSeqExpr(
+                        openParen, *expr.as<SimplePropertyExprSyntax>().expr);
+                }
 
                 // It's possible there is more to the original sequence expression here
                 // which we need to manually parse now since property expression parsing will balk
