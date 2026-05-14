@@ -1381,7 +1381,15 @@ BinsSelectExpr& BinSelectWithFilterExpr::fromSyntax(const BinSelectWithFilterExp
         it->nextTemp = std::exchange(iterCtx.firstTempVar, it);
     }
 
-    auto& filter = bindCovergroupExpr(*syntax.filter, iterCtx);
+    // IEEE 1800-2017 §19.5.1.2 / 1800-2023 §19.5.1.2:
+    // The with-filter expression for a cross bins-select references the
+    // sampled coverpoint names (registered above as iterator symbols).
+    // Those symbols are per-cross-product-element values, not compile-time
+    // constants, so binding through bindCovergroupExpr (which calls
+    // context.eval on the result) raises ConstEvalNonConstVariable.
+    // Bind without the eval step; the filter is evaluated per sample at
+    // runtime by the simulator.
+    auto& filter = Expression::bind(*syntax.filter, iterCtx);
     iterCtx.requireBooleanConvertible(filter);
 
     const Expression* matches = nullptr;
