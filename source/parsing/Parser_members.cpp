@@ -1670,18 +1670,42 @@ static bool isValidOption(const ExpressionSyntax& expr) {
         return false;
 
     auto& scoped = assign.left->as<ScopedNameSyntax>();
-    if (scoped.left->kind != SyntaxKind::IdentifierName ||
-        scoped.right->kind != SyntaxKind::IdentifierName) {
+    if (scoped.right->kind != SyntaxKind::IdentifierName) {
         return false;
     }
-
-    return true;
+    // Canonical `option.<name>` / `type_option.<name>` form.
+    if (scoped.left->kind == SyntaxKind::IdentifierName) {
+        return true;
+    }
+    // IEEE 1800-2017 §19.7.1 / 1800-2023 §19.7.1: per-coverpoint /
+    // per-cross dot-access form
+    // `<coverpoint_or_cross_name>.option.<option_name> = <value>;`
+    // The expression syntax is a nested ScopedName whose left is itself
+    // a ScopedName of two IdentifierNames.  Accept the parse here; the
+    // CoverageOptionSetter AST binding handles the semantics.
+    if (scoped.left->kind == SyntaxKind::ScopedName) {
+        auto& inner = scoped.left->as<ScopedNameSyntax>();
+        return inner.left->kind == SyntaxKind::IdentifierName &&
+               inner.right->kind == SyntaxKind::IdentifierName;
+    }
+    return false;
 }
 
 CoverageOptionSyntax* Parser::parseCoverageOption(AttrList attributes) {
     auto token = peek();
     if (token.kind == TokenKind::Identifier) {
         if (token.valueText() == "option" || token.valueText() == "type_option") {
+            auto& expr = parseExpression();
+            if (!isValidOption(expr))
+                addDiag(diag::InvalidCoverageOption, expr.sourceRange());
+
+            return &factory.coverageOption(attributes, expr, expect(TokenKind::Semicolon));
+        }
+        // IEEE 1800-2017 §19.7.1: per-coverpoint / per-cross dot-form
+        // `<cp_or_cross_name>.option.<option_name> = <value>;`.
+        if (peek(1).kind == TokenKind::Dot && peek(2).kind == TokenKind::Identifier &&
+            peek(2).valueText() == "option" && peek(3).kind == TokenKind::Dot &&
+            peek(4).kind == TokenKind::Identifier) {
             auto& expr = parseExpression();
             if (!isValidOption(expr))
                 addDiag(diag::InvalidCoverageOption, expr.sourceRange());
