@@ -71,6 +71,27 @@ CoverageOptionSetter::CoverageOptionSetter(const Scope& scope, const CoverageOpt
     scope(&scope), syntax(&syntax) {
 }
 
+// Helper: detect the IEEE 1800-2017 §19.7.1 per-coverpoint / per-cross
+// dot-access form `<coverpoint_or_cross_name>.option.<option_name> = <value>;`.
+// The expression syntax for this form is a nested ScopedName whose left is
+// itself a ScopedName of two IdentifierNames.
+static bool isPerInstanceOptionDotForm(const CoverageOptionSyntax& syntax) {
+    if (syntax.expr->kind != SyntaxKind::AssignmentExpression)
+        return false;
+    auto& assign = syntax.expr->as<BinaryExpressionSyntax>();
+    if (assign.left->kind != SyntaxKind::ScopedName)
+        return false;
+    auto& scoped = assign.left->as<ScopedNameSyntax>();
+    if (scoped.right->kind != SyntaxKind::IdentifierName)
+        return false;
+    if (scoped.left->kind != SyntaxKind::ScopedName)
+        return false;
+    auto& inner = scoped.left->as<ScopedNameSyntax>();
+    return inner.left->kind == SyntaxKind::IdentifierName &&
+           inner.right->kind == SyntaxKind::IdentifierName &&
+           inner.right->as<IdentifierNameSyntax>().identifier.valueText() == "option"sv;
+}
+
 bool CoverageOptionSetter::isTypeOption() const {
     if (syntax->expr->kind == SyntaxKind::AssignmentExpression) {
         auto& assign = syntax->expr->as<BinaryExpressionSyntax>();
@@ -90,9 +111,16 @@ std::string_view CoverageOptionSetter::getName() const {
         auto& assign = syntax->expr->as<BinaryExpressionSyntax>();
         if (assign.left->kind == SyntaxKind::ScopedName) {
             auto& scoped = assign.left->as<ScopedNameSyntax>();
-            if (scoped.left->kind == SyntaxKind::IdentifierName &&
-                scoped.right->kind == SyntaxKind::IdentifierName) {
-                return scoped.right->as<IdentifierNameSyntax>().identifier.valueText();
+            if (scoped.right->kind == SyntaxKind::IdentifierName) {
+                // Canonical `option.<name>` form: left is IdentifierName.
+                if (scoped.left->kind == SyntaxKind::IdentifierName) {
+                    return scoped.right->as<IdentifierNameSyntax>().identifier.valueText();
+                }
+                // Per-instance dot-form `<id>.option.<name>`: return the
+                // option name (`<name>`).
+                if (isPerInstanceOptionDotForm(*syntax)) {
+                    return scoped.right->as<IdentifierNameSyntax>().identifier.valueText();
+                }
             }
         }
     }
@@ -107,6 +135,21 @@ const Expression& CoverageOptionSetter::getExpression() const {
             flags |= ASTFlags::StaticInitializer;
 
         ASTContext context(*scope, LookupLocation(scope, 3));
+        // IEEE 1800-2017 §19.7.1 per-instance dot-form
+        // `<id>.option.<name> = <value>;` does not bind the LHS as a normal
+        // lvalue (the cross / coverpoint name does not name a value).  Bind
+        // only the RHS expression — the simulator runtime carries the
+        // semantics of applying the option to the named cross / coverpoint
+        // from the recovered syntax.
+        if (isPerInstanceOptionDotForm(*syntax)) {
+            auto& assign = syntax->expr->as<BinaryExpressionSyntax>();
+            expr = &Expression::bind(*assign.right, context, ASTFlags::None);
+            context.setAttributes(*expr, syntax->attributes);
+            if (isTypeOpt) {
+                context.eval(*expr);
+            }
+            return *expr;
+        }
         expr = &Expression::bind(*syntax->expr, context, flags);
         context.setAttributes(*expr, syntax->attributes);
 
