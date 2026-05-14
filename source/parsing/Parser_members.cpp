@@ -132,6 +132,21 @@ ClassDeclarationSyntax& Parser::parseClass() {
 MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) {
     auto attributes = parseAttributes();
 
+    // IEEE 1800-2023 §13.4.4: `constexpr` qualifier on a function/task is
+    // an elaboration-time evaluation hint. slang's lexer does not register
+    // it as a keyword (so it arrives as an Identifier).  Accept and discard
+    // it here so the regular function/task decl path picks up the rest.
+    // This is a vendor extension (sukimasim-improvements): we treat
+    // `constexpr` as semantically equivalent to a plain function definition;
+    // the function still executes at elaboration *or* simulation time, which
+    // is conformant with §13.4.4's "evaluable at elaboration" wording (the
+    // qualifier is a hint, not a behavioral constraint).
+    if (peek().kind == TokenKind::Identifier && peek().valueText() == "constexpr"sv &&
+        (peek(1).kind == TokenKind::FunctionKeyword ||
+         peek(1).kind == TokenKind::TaskKeyword)) {
+        consume();  // discard the `constexpr` token
+    }
+
     if (isHierarchyInstantiation(/* requireName */ false))
         return &parseHierarchyInstantiation(attributes);
     if (isPortDeclaration(/* inStatement */ false))
@@ -1311,6 +1326,16 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
     };
 
     auto attributes = parseAttributes();
+
+    // IEEE 1800-2023 §13.4.4: `constexpr` qualifier on class methods is an
+    // elaboration-time evaluation hint (vendor extension — slang does not
+    // tokenize it as a keyword).  Accept and discard so the regular method
+    // qualifier loop / function decl path takes over.
+    if (peek().kind == TokenKind::Identifier && peek().valueText() == "constexpr"sv &&
+        (peek(1).kind == TokenKind::FunctionKeyword ||
+         peek(1).kind == TokenKind::TaskKeyword)) {
+        consume();  // discard the `constexpr` token
+    }
 
     // virtual keyword can either be a class decl, virtual interface, or a method qualifier.
     // Early out here if it's a class.
