@@ -1588,6 +1588,14 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
             errorIfIface(result);
             return &result;
         }
+        // IEEE 1800-2023 §16.8: sequence and property declarations are
+        // permitted as class members.  slang previously only accepted them
+        // at module / package scope (parseMember); rerouting through the
+        // same parser keeps the syntax tree shape consistent.
+        case TokenKind::SequenceKeyword:
+            return &parseSequenceDeclaration(attributes);
+        case TokenKind::PropertyKeyword:
+            return &parsePropertyDeclaration(attributes);
         case TokenKind::Semicolon:
             errorIfAttributes(attributes);
             return &factory.emptyMember(attributes, qualifiers, consume());
