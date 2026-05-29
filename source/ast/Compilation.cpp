@@ -1167,7 +1167,14 @@ void Compilation::addOutOfBlockDecl(const Scope& scope, const ScopedNameSyntax& 
                                     const SyntaxNode& syntax, SymbolIndex index) {
     SLANG_ASSERT(!isFrozen());
 
-    std::string_view className = name.left->getLastToken().valueText();
+    // For a parameterized class scope (`class_c #(params)::method`, IEEE
+    // 1800-2023 §8.25) the left name is a ClassNameSyntax whose last token is
+    // the closing `)` of the parameter assignment, not the class identifier.
+    // Key the out-of-block declaration on the bare class name so the prototype
+    // lookup (which uses the generic class name) finds it.
+    std::string_view className = name.left->kind == SyntaxKind::ClassName
+                                     ? name.left->as<ClassNameSyntax>().identifier.valueText()
+                                     : name.left->getLastToken().valueText();
     std::string_view declName = name.right->getLastToken().valueText();
     auto [it, inserted] = outOfBlockDecls.emplace(std::make_tuple(className, declName, &scope),
                                                   std::make_tuple(&syntax, &name, index, false));
