@@ -722,8 +722,19 @@ FunctionPortBaseSyntax& Parser::parseFunctionPort(bitmask<FunctionOptions> optio
 }
 
 static bool checkSubroutineName(const NameSyntax& name) {
-    auto checkKind = [](auto& node) {
+    // The right-most leaf is the method name and must be a plain identifier
+    // (or `new` for an out-of-block constructor).
+    auto checkMethod = [](auto& node) {
         return node.kind == SyntaxKind::IdentifierName || node.kind == SyntaxKind::ConstructorName;
+    };
+
+    // Class-scope elements to the left of `::` may additionally be a
+    // parameterized class name, e.g. `oobp_c #(K)::scale` (IEEE 1800-2023
+    // §8.25). slang parses `class_c #(params)` as a ClassNameSyntax, so accept
+    // that kind for the scope identifiers (but not for the method leaf).
+    auto checkScope = [](auto& node) {
+        return node.kind == SyntaxKind::IdentifierName ||
+               node.kind == SyntaxKind::ConstructorName || node.kind == SyntaxKind::ClassName;
     };
 
     // 2026-04-15 NVDLA feedback: IEEE 1800-2023 §8.24 allows out-of-body
@@ -736,22 +747,23 @@ static bool checkSubroutineName(const NameSyntax& name) {
     // ScopedName chain on the left to allow any depth.
     if (name.kind == SyntaxKind::ScopedName) {
         auto& scoped = name.as<ScopedNameSyntax>();
-        if (!checkKind(*scoped.right))
+        if (!checkMethod(*scoped.right))
             return false;
-        // Left side: either an IdentifierName (2-level) or another ScopedName
-        // (3+ level). Recurse so every class identifier in the chain is a
-        // plain IdentifierName and the final right-most leaf is the method.
+        // Left side: either a (possibly parameterized) class name (2-level) or
+        // another ScopedName (3+ level). Recurse so every class identifier in
+        // the chain is a class-scope name and the final right-most leaf is the
+        // method.
         const NameSyntax* cursor = scoped.left;
         while (cursor->kind == SyntaxKind::ScopedName) {
             auto& inner = cursor->as<ScopedNameSyntax>();
-            if (!checkKind(*inner.right))
+            if (!checkScope(*inner.right))
                 return false;
             cursor = inner.left;
         }
-        return checkKind(*cursor);
+        return checkScope(*cursor);
     }
 
-    return checkKind(name);
+    return checkMethod(name);
 }
 
 FunctionPortListSyntax* Parser::parseFunctionPortList(bitmask<FunctionOptions> options) {
