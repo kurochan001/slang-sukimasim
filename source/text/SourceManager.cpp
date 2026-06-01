@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #include "slang/text/SourceManager.h"
 
+#include <algorithm>
 #include <string>
 
 #include "slang/text/CharInfo.h"
@@ -629,6 +630,12 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
                                         SourceLocation includedFrom, const SourceLibrary* library,
                                         uint64_t sortKey, SmallVector<char>&& buffer) {
     std::string name;
+#if defined(_WIN32)
+    // MinGW's std::filesystem path normalization can fault when buffers are assigned
+    // from in-memory text. Keep assigned-buffer bookkeeping simple on Windows.
+    name = pathStr.empty() ? std::string("<unnamed_buffer>") : pathStr;
+    std::replace(name.begin(), name.end(), '\\', '/');
+#else
     if (!disableProximatePaths) {
         std::error_code ec;
         name = getU8Str(fs::proximate(path, ec));
@@ -638,10 +645,15 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
 
     if (name.empty())
         name = getU8Str(path.filename());
+#endif
 
     std::unique_lock<std::shared_mutex> lock(mutex);
 
+#if defined(_WIN32)
+    auto directory = &*directories.insert(fs::path()).first;
+#else
     auto directory = &*directories.insert(path.parent_path()).first;
+#endif
     auto fd = std::make_unique<FileData>(directory, std::move(name), std::move(buffer),
                                          std::move(path));
 
