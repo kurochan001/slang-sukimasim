@@ -1413,7 +1413,7 @@ void Builtins::registerSystemTasks() {
     TASK(KnownSystemName::Log, 0, &stringType);
     TASK(KnownSystemName::NoLog, 0, );
     TASK(KnownSystemName::Reset, 0, &intType, &intType, &intType);
-    TASK(KnownSystemName::Save, 1, &stringType);
+    TASK(KnownSystemName::Save, 0, &stringType);
     TASK(KnownSystemName::Restart, 1, &stringType);
     TASK(KnownSystemName::IncSave, 1, &stringType);
     TASK(KnownSystemName::ShowScopes, 0, &intType);

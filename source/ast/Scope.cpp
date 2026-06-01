@@ -455,6 +455,10 @@ void Scope::addMembers(const SyntaxNode& syntax) {
                     setNeedElaboration();
                     break;
                 }
+                case SyntaxKind::LetDeclaration:
+                    addMember(LetDeclSymbol::fromSyntax(
+                        *this, cpd.declaration->as<LetDeclarationSyntax>()));
+                    break;
                 case SyntaxKind::ParameterDeclarationStatement: {
                     SmallVector<Symbol*> params;
                     ParameterSymbolBase::fromLocalSyntax(

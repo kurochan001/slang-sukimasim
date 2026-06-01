@@ -92,11 +92,9 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
     auto current = &symbol;
     if (scope && symbol.kind == SymbolKind::InstanceBody) {
         auto* parentInst = symbol.as<InstanceBodySymbol>().parentInstance;
-        SLANG_ASSERT(parentInst);
 
         // Synthetic bodies created by InstanceBodySymbol::fromDefinition for
-        // on-the-fly module recovery may lack a parent instance in Release
-        // builds (where SLANG_ASSERT is a no-op).  Fall back to the body
+        // on-the-fly module recovery may lack a parent instance. Fall back to the body
         // itself so the path ends with the module definition name rather
         // than dereferencing a null pointer.
         if (parentInst) {
@@ -106,7 +104,6 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
     }
     else if (scope && symbol.kind == SymbolKind::CheckerInstanceBody) {
         auto* parentInst = symbol.as<CheckerInstanceBodySymbol>().parentInstance;
-        SLANG_ASSERT(parentInst);
 
         if (parentInst) {
             current = parentInst;
