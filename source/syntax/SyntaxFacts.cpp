@@ -358,6 +358,7 @@ bool SyntaxFacts::isPossibleExpression(TokenKind kind) {
         case TokenKind::UnitSystemName:
         case TokenKind::ThisKeyword:
         case TokenKind::SuperKeyword:
+        case TokenKind::NewKeyword:
         case TokenKind::Identifier:
         case TokenKind::SystemIdentifier:
         case TokenKind::RootSystemName:
