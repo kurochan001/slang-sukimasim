@@ -761,6 +761,22 @@ public:
                         return notAllowed();
                     }
                     break;
+                case StatementKind::ExpressionStatement: {
+                    // IEEE 1800-2017 §17.6: a checker `initial` procedure may
+                    // contain subroutine calls and (blocking or non-blocking)
+                    // assignments. slang previously rejected every expression
+                    // statement here, so `initial r = 1'b1;` failed with
+                    // InvalidStmtInChecker (sukimasim Issue #403 BUG-2).
+                    auto& expr = stmt.template as<ExpressionStatement>().expr;
+                    switch (expr.kind) {
+                        case ExpressionKind::Call:
+                        case ExpressionKind::Assignment:
+                            break;
+                        default:
+                            return notAllowed();
+                    }
+                    break;
+                }
                 case StatementKind::ImmediateAssertion:
                 case StatementKind::ConcurrentAssertion:
                 case StatementKind::ProceduralChecker:
