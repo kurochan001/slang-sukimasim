@@ -950,6 +950,10 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
     evalContext.reportAllDiags();
 
     // If the generate loop completed successfully, go through and create blocks.
+    // sukimasim note: this intentionally keeps the LintMode blanket (unlike the
+    // IfGenerate/CaseGenerate paths in Scope::elaborate, issue #403): the IR
+    // converter still rebuilds loop-array entries from UninstantiatedDef members
+    // and relies on that path for generate-array interface naming (Issue303).
     if (result->valid) {
         bool isUninstantiated = context.scope->isUninstantiated();
         for (auto& index : indices)

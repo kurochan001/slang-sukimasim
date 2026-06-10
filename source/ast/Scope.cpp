@@ -1031,10 +1031,14 @@ void Scope::elaborate() const {
                 break;
             }
             case SyntaxKind::IfGenerate: {
+                // sukimasim: use isUninstantiatedIgnoringLint() so generate selectors
+                // are still evaluated in LintMode (--enable-uvm). Otherwise every
+                // branch is marked uninstantiated and instances inside taken branches
+                // (notably checkers, issue #403) degrade to UninstantiatedDef.
                 SmallVector<GenerateBlockSymbol*> blocks;
                 GenerateBlockSymbol::fromSyntax(compilation, member.node.as<IfGenerateSyntax>(),
-                                                context, constructIndex, isUninstantiated(),
-                                                blocks);
+                                                context, constructIndex,
+                                                isUninstantiatedIgnoringLint(), blocks);
                 constructIndex++;
                 insertMembers(blocks, symbol);
                 for (auto block : blocks) {
@@ -1044,10 +1048,11 @@ void Scope::elaborate() const {
                 break;
             }
             case SyntaxKind::CaseGenerate: {
+                // sukimasim: see IfGenerate above (evaluate selectors in LintMode).
                 SmallVector<GenerateBlockSymbol*> blocks;
                 GenerateBlockSymbol::fromSyntax(compilation, member.node.as<CaseGenerateSyntax>(),
-                                                context, constructIndex, isUninstantiated(),
-                                                blocks);
+                                                context, constructIndex,
+                                                isUninstantiatedIgnoringLint(), blocks);
                 constructIndex++;
                 insertMembers(blocks, symbol);
                 for (auto block : blocks) {
