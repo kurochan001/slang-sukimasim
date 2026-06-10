@@ -152,6 +152,10 @@ bool Scope::isUninstantiated() const {
     if (getCompilation().hasFlag(CompilationFlags::LintMode))
         return true;
 
+    return isUninstantiatedIgnoringLint();
+}
+
+bool Scope::isUninstantiatedIgnoringLint() const {
     auto currScope = this;
     do {
         auto& sym = currScope->asSymbol();

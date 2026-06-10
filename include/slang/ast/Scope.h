@@ -79,6 +79,12 @@ public:
     /// in a module that is not used in the design.
     bool isUninstantiated() const;
 
+    /// Same as isUninstantiated() but ignores the LintMode blanket answer and
+    /// always walks the real scope chain. Used for decisions that must reflect
+    /// the actual design hierarchy even when compiling in lint mode (e.g. bind
+    /// directive collection for simulation).
+    bool isUninstantiatedIgnoringLint() const;
+
     /// Reports a new diagnostic under this scope.
     Diagnostic& addDiag(DiagCode code, SourceLocation location) const;
 
