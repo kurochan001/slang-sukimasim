@@ -1144,7 +1144,11 @@ std::span<const AttributeSymbol* const> Compilation::getAttributes(const void* p
 void Compilation::noteBindDirective(const BindDirectiveSyntax& syntax, const Scope& scope) {
     SLANG_ASSERT(!isFrozen());
 
-    if (!scope.isUninstantiated()) {
+    // sukimasim: isUninstantiated() is blanket-true in LintMode, which would
+    // silently drop every bind directive (IEEE 1800-2023 §23.11). sukimasim
+    // compiles UVM runs with LintMode for leniency but still fully elaborates
+    // and simulates the design, so consult the real scope chain instead.
+    if (!scope.isUninstantiatedIgnoringLint()) {
         bindDirectives.emplace_back(&syntax, &scope);
         noteCannotCache(scope);
     }
