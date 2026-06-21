@@ -9,8 +9,11 @@
 
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
+#include "slang/ast/EvalContext.h"
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/syntax/AllSyntax.h"
+#include <cstdio>
+#include <optional>
 #include <string>
 #include <unordered_set>
 
@@ -473,6 +476,55 @@ static std::pair<const Symbol*, SourceRange> getConstraintPrimary(const Expressi
     return {sym, expr.sourceRange};
 }
 
+// IEEE 1800-2023 §18.5.10: distinct elements of the same array (e.g. a[0] and
+// a[1]) are distinct random variables, so ordering one before the other is
+// legal and must not be flagged as a circular/repeated 'solve before'. The
+// repeated/circular checks key off the base Symbol, which is shared by every
+// element of an array, so they would wrongly collapse a[0] and a[1] together.
+// Build a discriminator from the constant element/member selects layered on top
+// of the base symbol: same base symbol + same constant index path => same
+// variable; differing constant indices => distinct variables. A non-constant
+// selector yields no discriminator, so such expressions fall back to
+// base-symbol identity (conservative: still caught as a potential cycle).
+static std::optional<std::string> getConstraintElementKey(const Expression& expr,
+                                                          const ASTContext& context) {
+    // Peel constant element selects / member accesses down to the base symbol,
+    // recording each step so a[0] and a[1] (and a.x vs a.y) differ.
+    std::string suffix;
+    const Expression* cur = &expr;
+    while (cur) {
+        switch (cur->kind) {
+            case ExpressionKind::ElementSelect: {
+                auto& sel = cur->as<ElementSelectExpression>();
+                EvalContext evalCtx(context);
+                ConstantValue idx = sel.selector().eval(evalCtx);
+                if (!idx)
+                    return std::nullopt;  // non-constant index: be conservative
+                suffix = "[" + idx.toString() + "]" + suffix;
+                cur = &sel.value();
+                break;
+            }
+            case ExpressionKind::MemberAccess: {
+                auto& ma = cur->as<MemberAccessExpression>();
+                suffix = "." + std::string(ma.member.name) + suffix;
+                cur = &ma.value();
+                break;
+            }
+            default:
+                cur = nullptr;
+                break;
+        }
+    }
+
+    auto [sym, range] = getConstraintPrimary(expr);
+    if (!sym)
+        return std::nullopt;
+    // Key on the symbol pointer (stable identity) plus the constant select path.
+    char ptrbuf[2 + sizeof(void*) * 2 + 1];
+    std::snprintf(ptrbuf, sizeof(ptrbuf), "%p", static_cast<const void*>(sym));
+    return std::string(ptrbuf) + suffix;
+}
+
 static std::vector<const Symbol*> collectConstraintVariables(
     std::span<const Expression* const> exprs) {
     std::vector<const Symbol*> result;
@@ -512,8 +564,14 @@ void DisableSoftConstraint::serializeTo(ASTSerializer& serializer) const {
 Constraint& SolveBeforeConstraint::fromSyntax(const SolveBeforeConstraintSyntax& syntax,
                                               const ASTContext& context) {
     bool bad = false;
+    // The repeated/circular checks must distinguish distinct elements of the
+    // same array (a[0] vs a[1] are distinct random variables; §18.5.10). Key
+    // each entry by a string discriminator (base symbol + constant select path)
+    // rather than the shared base symbol alone. A non-constant select yields no
+    // discriminator; such entries fall back to a per-symbol key so they remain
+    // conservatively grouped (still flagged as a potential cycle).
     auto bindExprs = [&](auto& list, auto& results, SmallVector<const Symbol*>& symbols,
-                        SmallVector<SourceRange>& ranges) {
+                        SmallVector<std::string>& keys, SmallVector<SourceRange>& ranges) {
         for (auto item : list) {
             auto& expr = Expression::bind(*item, context);
             results.push_back(&expr);
@@ -532,7 +590,16 @@ Constraint& SolveBeforeConstraint::fromSyntax(const SolveBeforeConstraintSyntax&
                 context.addDiag(diag::RandCInSolveBefore, sourceRange) << name;
 
             if (sym) {
+                auto key = getConstraintElementKey(expr, context);
+                if (!key) {
+                    // No constant discriminator: fall back to symbol identity.
+                    char ptrbuf[2 + sizeof(void*) * 2 + 1];
+                    std::snprintf(ptrbuf, sizeof(ptrbuf), "%p",
+                                  static_cast<const void*>(sym));
+                    key = std::string(ptrbuf);
+                }
                 symbols.push_back(sym);
+                keys.push_back(*key);
                 ranges.push_back(sourceRange);
             }
         }
@@ -543,35 +610,35 @@ Constraint& SolveBeforeConstraint::fromSyntax(const SolveBeforeConstraintSyntax&
     SmallVector<const Expression*> after;
     SmallVector<const Symbol*> solveSymbols;
     SmallVector<const Symbol*> afterSymbols;
+    SmallVector<std::string> solveKeys;
+    SmallVector<std::string> afterKeys;
     SmallVector<SourceRange> solveRanges;
     SmallVector<SourceRange> afterRanges;
-    bindExprs(syntax.beforeExpr, solve, solveSymbols, solveRanges);
-    bindExprs(syntax.afterExpr, after, afterSymbols, afterRanges);
+    bindExprs(syntax.beforeExpr, solve, solveSymbols, solveKeys, solveRanges);
+    bindExprs(syntax.afterExpr, after, afterSymbols, afterKeys, afterRanges);
 
-    std::unordered_set<const Symbol*> solveSet;
-    std::unordered_set<const Symbol*> afterSet;
-    std::unordered_set<const Symbol*> repeatedReported;
-    std::unordered_set<const Symbol*> crossReported;
+    std::unordered_set<std::string> solveSet;
+    std::unordered_set<std::string> afterSet;
+    std::unordered_set<std::string> repeatedReported;
+    std::unordered_set<std::string> crossReported;
 
-    auto reportRepeated = [&](const Symbol* sym, SourceRange range) {
-        if (repeatedReported.insert(sym).second) {
+    auto reportRepeated = [&](const std::string& key, const Symbol* sym, SourceRange range) {
+        if (repeatedReported.insert(key).second) {
             context.addDiag(diag::SolveBeforeRepeated, range) << sym->name;
             bad = true;
         }
     };
 
     for (size_t i = 0; i < solveSymbols.size(); ++i) {
-        auto sym = solveSymbols[i];
-        if (!solveSet.insert(sym).second)
-            reportRepeated(sym, solveRanges[i]);
+        if (!solveSet.insert(solveKeys[i]).second)
+            reportRepeated(solveKeys[i], solveSymbols[i], solveRanges[i]);
     }
 
     for (size_t i = 0; i < afterSymbols.size(); ++i) {
-        auto sym = afterSymbols[i];
-        if (!afterSet.insert(sym).second)
-            reportRepeated(sym, afterRanges[i]);
-        if (solveSet.count(sym) && crossReported.insert(sym).second) {
-            context.addDiag(diag::SolveBeforeCircular, afterRanges[i]) << sym->name;
+        if (!afterSet.insert(afterKeys[i]).second)
+            reportRepeated(afterKeys[i], afterSymbols[i], afterRanges[i]);
+        if (solveSet.count(afterKeys[i]) && crossReported.insert(afterKeys[i]).second) {
+            context.addDiag(diag::SolveBeforeCircular, afterRanges[i]) << afterSymbols[i]->name;
             bad = true;
         }
     }
