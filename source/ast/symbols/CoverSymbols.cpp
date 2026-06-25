@@ -684,7 +684,12 @@ void CoverageBinSymbol::resolve() const {
         ASTContext iterCtx = context;
         it->nextTemp = std::exchange(iterCtx.firstTempVar, it);
 
-        withExpr = &bindCovergroupExpr(*withSyntax.expr, iterCtx);
+        // Issue #564 (IEEE 1800-2023 §19.5): the `with` filter references the
+        // `item` iterator, which is non-const. Bind without const-evaluating
+        // (mirrors the cross-select with-filter fix in commit cc9288c1e) so
+        // `ConstEvalNonConstVariable` is not raised for `item`; the filter is
+        // evaluated at sample time by the downstream simulator.
+        withExpr = &Expression::bind(*withSyntax.expr, iterCtx);
         iterCtx.requireBooleanConvertible(*withExpr);
 
         if (type.isFloating())
