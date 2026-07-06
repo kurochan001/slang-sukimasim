@@ -566,9 +566,13 @@ bool Type::isEquivalent(const Type& rhs) const {
         if (l->as<DPIOpenArrayType>().isPacked)
             return r->isIntegral();
 
-        // Unpacked open arrays match fixed size unpacked arrays of any width.
+        // Unpacked open arrays match fixed size unpacked arrays, dynamic arrays,
+        // and queues of any width (IEEE 1800-2023 §35.5.6: any unpacked array
+        // actual whose element type matches can be passed to an open-array
+        // formal — issue #963, previously queues were rejected as BadAssignment).
         if (r->kind == SymbolKind::FixedSizeUnpackedArrayType ||
-            r->kind == SymbolKind::DynamicArrayType) {
+            r->kind == SymbolKind::DynamicArrayType ||
+            r->kind == SymbolKind::QueueType) {
             return l->getArrayElementType()->isEquivalent(*r->getArrayElementType());
         }
     }
