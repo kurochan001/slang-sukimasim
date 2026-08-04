@@ -1262,10 +1262,15 @@ void Compilation::addExternInterfaceMethod(const SubroutineSymbol& method) {
 }
 
 void Compilation::noteDefaultClocking(const Scope& scope, const Symbol& clocking,
-                                      SourceRange range) {
+                                       SourceRange range) {
     SLANG_ASSERT(!isFrozen());
-
-    if (scope.isUninstantiated())
+    // Issue #1112: --enable-uvm sets CompilationFlags::LintMode, and the
+    // blanket isUninstantiated() answer is true for every scope in lint mode.
+    // A module-scope `default clocking` would then be dropped and a legal ##N
+    // rejected with "requires a default clocking in effect".  The registration
+    // must reflect the real hierarchy, so use the LintMode-ignoring variant
+    // (the same one bind-directive collection already uses).
+    if (scope.isUninstantiatedIgnoringLint())
         return;
 
     // The LRM is not clear about this, but this Accellera issue states
