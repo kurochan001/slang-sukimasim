@@ -296,12 +296,11 @@ const CovergroupType& CovergroupType::fromSyntax(const Scope& scope,
 
         MethodBuilder sample(comp, "sample"sv, comp.getVoidType(), SubroutineKind::Function);
         
-        // Phase 145: Add covergroup arguments to sample method according to LRM
-        if (!result->arguments.empty()) {
-            for (auto arg : result->arguments) {
-                sample.copyArg(*arg);
-            }
-        }
+        // IEEE 1800-2023 §19.8: the implicit sample() method takes no arguments.
+        // The ctor arguments (result->arguments) are NOT sample() formals — only
+        // an explicit `with function sample(...)` declaration (handled below)
+        // supplies sample()'s arguments. Copying ctor formals here made
+        // c.sample() demand one argument per ctor arg (issue #1142).
         
         body->addMember(sample.symbol);
 
