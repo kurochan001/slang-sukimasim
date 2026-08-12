@@ -2824,7 +2824,16 @@ std::pair<Compilation::DefinitionLookupResult, bool> Compilation::resolveConfigR
 
 Diagnostic* Compilation::errorMissingDef(std::string_view name, const Scope& scope,
                                          SourceRange sourceRange, DiagCode code) const {
-    if (hasFlag(CompilationFlags::IgnoreUnknownModules) || scope.isUninstantiated() || name.empty())
+    // sukimasim (#1200): isUninstantiated() is blanket-true in LintMode, which
+    // suppressed this diagnostic for every scope of an --enable-uvm run — an
+    // instantiation of a module that exists nowhere in the compilation produced
+    // no diagnostic at all. sukimasim compiles UVM runs with LintMode purely for
+    // leniency but still fully elaborates and simulates the design (same
+    // reasoning as noteBindDirective above), so consult the real scope chain.
+    // Genuinely uninstantiated scopes (an unselected `if (0)` generate branch)
+    // still answer true here and stay silent, exactly as in a non-lint run.
+    if (hasFlag(CompilationFlags::IgnoreUnknownModules) ||
+        scope.isUninstantiatedIgnoringLint() || name.empty())
         return nullptr;
 
     if (auto def = getExternDefinition(name, scope)) {
