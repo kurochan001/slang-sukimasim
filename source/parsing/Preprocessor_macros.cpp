@@ -30,7 +30,8 @@ Preprocessor::MacroDef Preprocessor::findMacro(Token directive) {
     return it->second;
 }
 
-void Preprocessor::createBuiltInMacro(std::string_view name, int value, std::string_view valueStr) {
+void Preprocessor::createBuiltInMacro(std::string_view name, int value, std::string_view valueStr,
+                                      bool builtIn) {
 #define NL SourceLocation::NoLocation
 
     if (valueStr.empty()) {
@@ -50,7 +51,7 @@ void Preprocessor::createBuiltInMacro(std::string_view name, int value, std::str
     MacroDef def;
     def.syntax = alloc.emplace<DefineDirectiveSyntax>(directive, nameTok, nullptr,
                                                       body.copy(alloc));
-    def.builtIn = true;
+    def.builtIn = builtIn;
     macros[name] = def;
 
 #undef NL

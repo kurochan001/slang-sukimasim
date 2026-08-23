@@ -142,26 +142,32 @@ void Preprocessor::undefineAll() {
     macros["__FILE__"] = MacroIntrinsic::File;
     macros["__LINE__"] = MacroIntrinsic::Line;
 
-#define DEFINE(name, value) createBuiltInMacro(name, value, #value)
-    DEFINE("__slang__"sv, 1);
+#define DEFINE(name, value, builtIn) createBuiltInMacro(name, value, #value, builtIn)
+    DEFINE("__slang__"sv, 1, true);
     createBuiltInMacro("__slang_major__"sv, VersionInfo::getMajor());
     createBuiltInMacro("__slang_minor__"sv, VersionInfo::getMinor());
 
-    DEFINE("SV_COV_START"sv, 0);
-    DEFINE("SV_COV_STOP"sv, 1);
-    DEFINE("SV_COV_RESET"sv, 2);
-    DEFINE("SV_COV_CHECK"sv, 3);
-    DEFINE("SV_COV_MODULE"sv, 10);
-    DEFINE("SV_COV_HIER"sv, 11);
-    DEFINE("SV_COV_ASSERTION"sv, 20);
-    DEFINE("SV_COV_FSM_STATE"sv, 21);
-    DEFINE("SV_COV_STATEMENT"sv, 22);
-    DEFINE("SV_COV_TOGGLE"sv, 23);
-    DEFINE("SV_COV_OVERFLOW"sv, -2);
-    DEFINE("SV_COV_ERROR"sv, -1);
-    DEFINE("SV_COV_NOCOV"sv, 0);
-    DEFINE("SV_COV_OK"sv, 1);
-    DEFINE("SV_COV_PARTIAL"sv, 2);
+    // IEEE 1800-2023 §40.3.1 calls the SV_COV_* names "predefined `define
+    // macros" — ordinary predefined macros, not builtin directives. §22.5.1
+    // forbids redefining only a *compiler directive* as a macro name and
+    // permits text-macro redefinition, so these must stay definable and
+    // undefinable. builtIn=false lets handleDefineDirective /
+    // handleUndefDirective treat them like any user macro (Issue #1265).
+    DEFINE("SV_COV_START"sv, 0, false);
+    DEFINE("SV_COV_STOP"sv, 1, false);
+    DEFINE("SV_COV_RESET"sv, 2, false);
+    DEFINE("SV_COV_CHECK"sv, 3, false);
+    DEFINE("SV_COV_MODULE"sv, 10, false);
+    DEFINE("SV_COV_HIER"sv, 11, false);
+    DEFINE("SV_COV_ASSERTION"sv, 20, false);
+    DEFINE("SV_COV_FSM_STATE"sv, 21, false);
+    DEFINE("SV_COV_STATEMENT"sv, 22, false);
+    DEFINE("SV_COV_TOGGLE"sv, 23, false);
+    DEFINE("SV_COV_OVERFLOW"sv, -2, false);
+    DEFINE("SV_COV_ERROR"sv, -1, false);
+    DEFINE("SV_COV_NOCOV"sv, 0, false);
+    DEFINE("SV_COV_OK"sv, 1, false);
+    DEFINE("SV_COV_PARTIAL"sv, 2, false);
 #undef DEFINE
 
     for (std::string predef : options.predefines) {
