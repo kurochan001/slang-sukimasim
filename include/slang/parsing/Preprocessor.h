@@ -325,7 +325,8 @@ private:
     bool expandReplacementList(std::span<Token const>& tokens,
                                SmallSet<const syntax::DefineDirectiveSyntax*, 8>& alreadyExpanded);
     bool applyMacroOps(std::span<Token const> tokens, SmallVectorBase<Token>& dest);
-    void createBuiltInMacro(std::string_view name, int value, std::string_view valueStr = {});
+    void createBuiltInMacro(std::string_view name, int value, std::string_view valueStr = {},
+                            bool builtIn = true);
     void splitTokens(Token sourceToken, size_t offset, SmallVectorBase<Token>& results);
     Token getLastConsumed() const { return lastConsumed; }
 
