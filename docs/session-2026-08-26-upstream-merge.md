@@ -1,0 +1,122 @@
+# upstream/master マージ (2026-08-26)
+
+`upstream/master` (a5ab85255) を `sukimasim-improvements` (1fbb62a6e) に取り込んだ記録。
+前回同期点 `ad719280d` (2025-10-23) から **565 コミット / 10ヶ月分**。
+
+マージコミット: `1f529a85c` (2親: 1fbb62a6e + a5ab85255)
+
+## 事前準備: shallow clone の解除
+
+このリポジトリは shallow clone だったため `git merge-base` が空を返し、upstream との
+共通祖先が存在しないように見えていた。`git fetch --unshallow upstream` が必須。
+解除前は upstream ログの最古が 2026-01-10 で、2025-08〜2026-01 のコミットが不可視だった。
+
+## ビルド時の注意 (既存 build/ を使う場合)
+
+旧 `external/CMakeLists.txt` が設定していた `MI_BUILD_OBJECT:INTERNAL=OFF` が
+CMakeCache に残存する。upstream はこの指定を削除し、逆に `mimalloc-obj` を要求するため
+cmake が `Could not find mimalloc-obj target` で失敗する。
+
+```bash
+cmake -B build -U MI_BUILD_OBJECT
+```
+
+## 衝突解決 (38ファイル / 63ハンク)
+
+| 箇所 | 対応 |
+|---|---|
+| `ASTContext.h` / `Lookup.h` | fork 追加フラグのビット番号が upstream と衝突。ASTFlags 44/45、LookupFlags 15/16 へ再配置。LookupFlags の `SLANG_BITMASK` 上限が実最大より低い潜在バグも修正 |
+| `CompatMode` | upstream が `CompatSettings.h` へ移動。fork の Strict モードを移植。9診断のうち8件は upstream の既定分岐が担当済みで、`MissingTimeScale` のみ追加が必要 |
+| `Driver.cpp` | upstream の `CompatSettings` を採用し、fork の Phase 151 既定モード緩和を `configureDiagnostics` の後段で再適用 |
+| `resolveDefParamsAndBinds` | upstream が `DefParamResolver.cpp` へ移動。`SUKIMASIM_DEBUG_BIND` トレースも移動 |
+| パッケージ export | upstream が public な `exportDecls` を private な `ExportData` に置換。fork の再エクスポート解決と parameterized package 生成 (§26.2) を新構造へ移植。`GenericPackageDefSymbol` に friend 宣言追加 |
+| `MiscExpressions.cpp` | upstream が `checkLValue` を抽出。fork の `ProceduralForceAssign` 例外を移植 |
+| `Parser_members.cpp` | upstream が `parseMember`/`parseMemberImpl` に分割。fork の constexpr スキップを Impl 先頭へ。fork が移動済みの変数宣言ブロックへ upstream の `PackageImportInClass`/`LetDeclaration` 分岐を移植 |
+| `diagnostics.txt` | `CannotIndexScalar` の重複定義を回避。`IndexValueInvalid` は fork の warning 版を採用。警告グループは和集合 |
+| テスト4ファイル | upstream 版を採用 |
+
+## テキスト衝突なしに壊れていた箇所
+
+git が衝突と判定しなかった領域で、コンパイルエラー/意味破壊が9件。
+
+- `SelectExpressions.cpp` — upstream が引数名を `compilation` → `comp` に変更。fork 追加行が旧名のまま自動マージされた (885-1151行を一括修正)
+- `Compilation.h` — `getDPIExports()` が戻り値型違いで二重定義
+- `Preprocessor.h` — `splitTokens` が二重宣言 (upstream が public 化)
+- `CompatSettings.cpp` — `CompilationDiags.h` の include 欠落
+- `Parser.cpp` / `Parser_expressions.cpp` / `Parser_statements.cpp` — `std::span` → 型付き `SyntaxList`/`SeparatedSyntaxList` の API 変更に未追従
+- `Parser_statements.cpp` — upstream の `isStmt` 宣言・代入が消失
+- `MemberSymbols.cpp` — upstream が削除した `isFromExport` を参照
+- `CompilationUnitSymbols.cpp` — 削除された `exportDecls` を参照
+- `CoverSymbols.cpp` — `IntegerLiteral::fromConstant` の第1引数が `Compilation&` → `const TypeProvider&`
+- `MiscExpressions.h/.cpp` — fork 独自の `MatchesExpression` に upstream 新設の `isEquivalentImpl` が未実装
+
+## テスト結果
+
+| | ベースライン (1fbb62a6e) | マージ後 |
+|---|---|---|
+| テスト総数 | 1991 | 2493 (upstream が502件追加) |
+| 失敗 | 55 | 76 |
+
+**CLAUDE.md の「54件の意図的差異」は 76件 に更新が必要。**
+
+- 解消された既存失敗: 4件 (Complicated lvalue path / Dynamic array eval /
+  Multiple ranges split between macro and not / User-defined nettype port connection errors)
+- 新規失敗: 25件
+
+### 新規失敗25件の帰属
+
+| 分類 | 件数 |
+|---|---|
+| upstream が新規追加したテスト | 17 |
+| upstream が期待値を更新した既存テスト | 7 |
+| 個別に root cause 確定 | 1 |
+
+root cause 確定分 — `Deferred assertion error cases`:
+fork が既存で持つ `NamedValueExpression::evalImpl` の改変
+(`ASTFlags::TopLevelStatement` / `NonProcedural` のとき評価失敗せずローカルを合成) により
+`ASTContext::tryEval` が成功し、upstream 新設の `-Wbits-of-integer-constant` が
+`void'($bits(i))` 文脈で発火する。`$display($bits(i))` では発火しない。マージ起因ではない。
+
+残る24件は「upstream 側テストの出自」による分類であり、1件ずつの個別確認は未実施。
+
+### 新規失敗の全リスト
+
+```
+Additional explicit port expression checks
+Additional implicit port type mismatch checking
+Annex D option system tasks and functions
+Ansi port initializers
+Array reduction method errors
+Cover cross with dotted member access
+Coverage function in constant context
+Covergroup coverage expr forward reference errors
+Deferred assertion error cases
+Enum method eval with non-const args
+Enum method hierarchical reference errors
+Implicit net creation with missing identifier in port connection -- GH #1888
+More port connection tests
+Multi assign through ref ports 2
+No latch inferred for always_latch
+No range select ordering error for single bit value
+Non-ansi port errors
+Range order mismatch error suppressed in untaken conditionals
+Range select out of bounds during constant eval
+String method eval with non-const args
+System function args count as outputs
+Typed input port with non-net data type -- GH #1853
+Unrollable for loop drivers -- strict checking
+ValuePath toString - element select dynamic index
+foreach loop with function call as array name
+```
+
+## 維持したフォーク挙動
+
+LintMode の寛容化、Phase 151 の重要度緩和、Phase 2.1 の文字列/カバレッジ実行時評価、
+cover cross の階層参照 (§19.6.1)、インタフェース配列 foreach (§12.7.3)、
+インライン assertion 局所変数、`constexpr` 修飾子、expect 文、柔軟な net 型、
+IEEE 1800-2023 Strict 互換モード。
+
+## 未検証領域
+
+pyslang (upstream が pybind11 → nanobind 移行) は `SLANG_INCLUDE_PYLIB` が off のため
+ビルド・検証していない。
