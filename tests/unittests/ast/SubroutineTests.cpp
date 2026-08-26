@@ -11,6 +11,7 @@
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/Type.h"
+#include "slang/syntax/AllSyntax.h"
 
 TEST_CASE("Functions -- mixed param types") {
     auto tree = SyntaxTree::fromText(R"(
@@ -232,6 +233,23 @@ endmodule
     CHECK(diags[9].code == diag::UnusedResult);
 }
 
+TEST_CASE("DPI integer/time return type invalid") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    import "DPI-C" function integer f1();
+    import "DPI-C" function time f2();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::InvalidDPIReturnType);
+    CHECK(diags[1].code == diag::InvalidDPIReturnType);
+}
+
 TEST_CASE("DPI Exports") {
     auto tree = SyntaxTree::fromText(R"(
 function bar; endfunction
@@ -283,6 +301,62 @@ endmodule
     CHECK(diags[9].code == diag::DPIExportImportedFunc);
     CHECK(diags[10].code == diag::InvalidDPICIdentifier);
     CHECK(diags[11].code == diag::InvalidDPICIdentifier);
+}
+
+TEST_CASE("Compilation collects DPI exports") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    function void f1; endfunction
+    function void f2; endfunction
+    export "DPI-C" function f1;
+    export "DPI-C" my_f2 = function f2;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto exports = compilation.getDPIExports();
+    REQUIRE(exports.size() == 2);
+    CHECK(exports[0].subroutine->name == "f1");
+    CHECK(exports[0].cIdentifier == "f1");
+    CHECK(exports[0].syntax != nullptr);
+    CHECK(exports[0].syntax->name.valueText() == "f1");
+    CHECK(exports[1].subroutine->name == "f2");
+    CHECK(exports[1].cIdentifier == "my_f2");
+    CHECK(exports[1].syntax != nullptr);
+    CHECK(exports[1].syntax->c_identifier.valueText() == "my_f2");
+}
+
+TEST_CASE("Compilation collects DPI exports from each instance") {
+    auto tree = SyntaxTree::fromText(R"(
+module Sub #(parameter int ID = 0);
+    int id;
+    export "DPI-C" function read_id;
+    function int read_id(); return id; endfunction
+    initial id = ID;
+endmodule
+
+module Top;
+    Sub #(.ID(10)) m0();
+    Sub #(.ID(20)) m1();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    // The single export directive elaborates into two distinct instances. Both
+    // are valid targets, selected at call time via svSetScope, so both must be
+    // reported even though they share a C identifier.
+    auto exports = compilation.getDPIExports();
+    REQUIRE(exports.size() == 2);
+    CHECK(exports[0].subroutine->getHierarchicalPath() == "Top.m0.read_id");
+    CHECK(exports[0].cIdentifier == "read_id");
+    CHECK(exports[1].subroutine->getHierarchicalPath() == "Top.m1.read_id");
+    CHECK(exports[1].cIdentifier == "read_id");
 }
 
 TEST_CASE("DPI signature checking") {
@@ -521,12 +595,10 @@ endfunction
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 5);
-    CHECK(diags[0].code == diag::NotAType);
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::RecursiveDefinition);
     CHECK(diags[1].code == diag::RecursiveDefinition);
-    CHECK(diags[2].code == diag::RecursiveDefinition);
-    CHECK(diags[3].code == diag::NotAType);
-    CHECK(diags[4].code == diag::UndeclaredIdentifier);
+    CHECK(diags[2].code == diag::UndeclaredIdentifier);
 }
 
 TEST_CASE("Extern interface method errors") {
@@ -654,4 +726,83 @@ endfunction
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::UndeclaredIdentifier);
     CHECK(diags[1].code == diag::InvalidRefArg);
+}
+
+TEST_CASE("Used-before-declared with function return types regress -- GH #1662") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+
+localparam K = 4;
+bit[31:0] inp = 128;
+bit [K-1:0] out;
+
+function automatic bit [K-1:0] f;
+    input bit [31:0] K;
+
+    $display("f: K=%d", K);
+    f = 12;
+endfunction
+
+initial
+begin
+    out = f(inp);
+    $display("inp=%d, out=%d", inp, out);
+end
+
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowUseBeforeDeclare;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Function unknown arg direction regress") {
+    auto tree = SyntaxTree::fromText(R"(
+function,(*;*)output
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    // Just check no crash.
+    compilation.getAllDiagnostics();
+}
+
+TEST_CASE("Method return type does not match prototype") {
+    auto tree = SyntaxTree::fromText(R"(
+class C;
+    extern function int f();
+endclass
+
+function void C::f();
+endfunction
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::MethodReturnMismatch);
+}
+
+TEST_CASE("Expected subroutine port with net header") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    function void f;
+        input wire x;
+    endfunction
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ExpectedFunctionPort);
 }

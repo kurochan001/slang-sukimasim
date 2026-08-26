@@ -9,9 +9,10 @@
 
 #include "slang/analysis/AnalysisManager.h"
 #include "slang/analysis/AnalyzedProcedure.h"
+#include "slang/analysis/ValueDriver.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/EvalContext.h"
-#include "slang/ast/LSPUtilities.h"
+#include "slang/ast/ValuePath.h"
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/diagnostics/AnalysisDiags.h"
 
@@ -32,10 +33,13 @@ void DriverTracker::add(AnalysisContext& context, DriverAlloc& driverAlloc,
         return;
 
     ArgumentDirection direction;
-    if (port.kind == SymbolKind::Port)
+    if (port.kind == SymbolKind::Port) {
         direction = port.as<PortSymbol>().direction;
-    else
+        checkNetCollapsing(context, connection);
+    }
+    else {
         direction = port.as<MultiPortSymbol>().direction;
+    }
 
     // Input and ref ports are not drivers.
     if (direction == ArgumentDirection::In || direction == ArgumentDirection::Ref)
@@ -55,21 +59,33 @@ void DriverTracker::add(AnalysisContext& context, DriverAlloc& driverAlloc,
                         const PortSymbol& symbol) {
     // This method adds a driver *from* the port to the *internal*
     // symbol (or expression) that it connects to.
+    auto flags = DriverFlags::None;
+    auto kind = DriverKind::Continuous;
     auto dir = symbol.direction;
-    if (dir != ArgumentDirection::In && dir != ArgumentDirection::InOut)
+    if (dir == ArgumentDirection::Ref)
         return;
 
-    auto flags = dir == ArgumentDirection::In ? DriverFlags::InputPort : DriverFlags::None;
+    if (dir == ArgumentDirection::In) {
+        flags = DriverFlags::InputPort;
+    }
+    else if (dir == ArgumentDirection::Out) {
+        if (!symbol.getInitializer())
+            return;
+
+        flags = DriverFlags::Initializer;
+        kind = DriverKind::Procedural;
+    }
+
     auto scope = symbol.getParentScope();
     SLANG_ASSERT(scope);
 
     if (auto expr = symbol.getInternalExpr()) {
-        addDrivers(context, driverAlloc, *expr, DriverKind::Continuous, flags, scope->asSymbol());
+        addDrivers(context, driverAlloc, *expr, kind, flags, scope->asSymbol());
     }
     else if (auto is = symbol.internalSymbol) {
         auto nve = context.alloc.emplace<NamedValueExpression>(
             is->as<ValueSymbol>(), SourceRange{is->location, is->location + is->name.length()});
-        addDrivers(context, driverAlloc, *nve, DriverKind::Continuous, flags, scope->asSymbol());
+        addDrivers(context, driverAlloc, *nve, kind, flags, scope->asSymbol());
     }
 }
 
@@ -95,16 +111,13 @@ void DriverTracker::add(AnalysisContext& context, DriverAlloc& driverAlloc, cons
 }
 
 void DriverTracker::add(AnalysisContext& context, DriverAlloc& driverAlloc,
-                        std::span<const SymbolDriverListPair> symbolDriverList) {
+                        std::span<const ValueDriver* const> drivers) {
     SmallVector<HierPortDriver> hierPortDrivers;
-    for (auto& [valueSym, drivers] : symbolDriverList) {
+    for (auto driver : drivers) {
         auto updateFunc = [&](auto& elem) {
-            for (auto& [driver, bounds] : drivers) {
-                addDriver(context, driverAlloc, *elem.first, elem.second, *driver, bounds,
-                          hierPortDrivers);
-            }
+            addDriver(context, driverAlloc, elem.second, *driver, hierPortDrivers);
         };
-        symbolDrivers.try_emplace_and_visit(valueSym, updateFunc, updateFunc);
+        symbolDrivers.try_emplace_and_visit(&driver->getSymbol(), updateFunc, updateFunc);
     }
 
     for (auto& hpd : hierPortDrivers)
@@ -132,122 +145,81 @@ void DriverTracker::noteNonCanonicalInstance(AnalysisContext& context, DriverAll
 
 void DriverTracker::propagateIndirectDrivers(AnalysisContext& context, DriverAlloc& driverAlloc) {
     while (true) {
-        concurrent_map<const ValueSymbol*, DriverList> localCopy;
+        concurrent_map<const ValueSymbol*, std::vector<const ValueDriver*>> localCopy;
         std::swap(indirectDrivers, localCopy);
         if (localCopy.empty())
             break;
 
         localCopy.cvisit_all([&](auto& item) {
-            const ValueSymbol& symbol = *item.first;
-            if (symbol.kind == SymbolKind::ModportPort) {
-                if (auto expr = symbol.as<ModportPortSymbol>().getConnectionExpr()) {
-                    for (auto& [originalDriver, _] : item.second)
-                        propagateIndirectDriver(context, driverAlloc, *expr, *originalDriver);
-                }
-            }
-            else {
-                // This is a ref port; we need to find all of its backreferences
-                // and apply the drivers to their connection expressions.
-                auto scope = symbol.getParentScope();
-                SLANG_ASSERT(scope);
+            SmallVector<HierPortDriver> hierPortDrivers;
+            for (auto original : item.second) {
+                EvalContext evalCtx(*original->containingSymbol);
+                original->path.expandIndirectRefs(
+                    context.alloc, evalCtx, [&](const ValuePath& path) {
+                        if (!path.lsp)
+                            return;
 
-                auto inst = scope->asSymbol().as<InstanceBodySymbol>().parentInstance;
-                SLANG_ASSERT(inst);
-
-                for (auto ref = symbol.getFirstPortBackref(); ref;
-                     ref = ref->getNextBackreference()) {
-
-                    if (ref->port->direction != ArgumentDirection::Ref)
-                        continue;
-
-                    if (auto conn = inst->getPortConnection(*ref->port)) {
-                        if (auto expr = conn->getExpression()) {
-                            for (auto& [originalDriver, _] : item.second)
-                                propagateIndirectDriver(context, driverAlloc, *expr,
-                                                        *originalDriver);
+                        // If the LSP maps to the same symbol as the original driver,
+                        // skip it to avoid infinite recursion. This can happen only if
+                        // this is a ref port and `expandIndirectLSPs` determined that
+                        // the driver doesn't actually apply to the port due to a
+                        // non-overlapping internal connection expression.
+                        auto sym = path.rootSymbol();
+                        if (sym == item.first) {
+                            SLANG_ASSERT(sym->isConnectedToRefPort());
+                            return;
                         }
-                    }
-                }
+
+                        auto ogRange = original->getSourceRange();
+                        auto newDriver = ValueDriver::create(
+                            context.alloc, original->kind, path, *original->containingSymbol,
+                            original->flags | DriverFlags::ViaIndirectPort, &ogRange);
+
+                        auto updateFunc = [&](auto& elem) {
+                            addDriver(context, driverAlloc, elem.second, *newDriver,
+                                      hierPortDrivers);
+                        };
+                        symbolDrivers.try_emplace_and_visit(sym, updateFunc, updateFunc);
+                    });
             }
+
+            for (auto& hpd : hierPortDrivers)
+                noteHierPortDriver(context, driverAlloc, hpd);
         });
     }
 }
 
-void DriverTracker::propagateIndirectDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
-                                            const Expression& connectionExpr,
-                                            const ValueDriver& originalDriver) {
-    // TODO: this is clunky, but we need to be able to glue the outer select
-    // expression to the inner connection expression. Probably the expression AST
-    // should have a way to do this generically.
-    //
-    // For now this works -- the const_casts are sus but we never mutate anything
-    // during analysis so it works out.
-    const Expression* initialLSP = nullptr;
-    switch (originalDriver.prefixExpression->kind) {
-        case ExpressionKind::ElementSelect: {
-            auto& es = originalDriver.prefixExpression->as<ElementSelectExpression>();
-            initialLSP = context.alloc.emplace<ElementSelectExpression>(
-                *es.type, const_cast<Expression&>(connectionExpr), es.selector(), es.sourceRange);
-            break;
-        }
-        case ExpressionKind::RangeSelect: {
-            auto& rs = originalDriver.prefixExpression->as<RangeSelectExpression>();
-            initialLSP = context.alloc.emplace<RangeSelectExpression>(
-                rs.getSelectionKind(), *rs.type, const_cast<Expression&>(connectionExpr), rs.left(),
-                rs.right(), rs.sourceRange);
-            break;
-        }
-        case ExpressionKind::MemberAccess: {
-            auto& ma = originalDriver.prefixExpression->as<MemberAccessExpression>();
-            initialLSP = context.alloc.emplace<MemberAccessExpression>(
-                *ma.type, const_cast<Expression&>(connectionExpr), ma.member, ma.sourceRange);
-            break;
-        }
-        default:
-            break;
-    }
-
-    addDrivers(context, driverAlloc, connectionExpr, originalDriver.kind, originalDriver.flags,
-               *originalDriver.containingSymbol, initialLSP);
-}
-
 void DriverTracker::addDrivers(AnalysisContext& context, DriverAlloc& driverAlloc,
                                const Expression& expr, DriverKind driverKind,
-                               bitmask<DriverFlags> driverFlags, const Symbol& containingSymbol,
-                               const Expression* initialLSP) {
+                               bitmask<DriverFlags> driverFlags, const Symbol& containingSymbol) {
     EvalContext evalCtx(containingSymbol);
     SmallVector<HierPortDriver> hierPortDrivers;
-    LSPUtilities::visitLSPs(
+
+    ValuePath::visitPaths(
         expr, evalCtx,
-        [&](const ValueSymbol& symbol, const Expression& lsp, bool isLValue) {
-            // If this is not an lvalue, we don't care about it.
-            if (!isLValue)
+        [&](const ValuePath& path) {
+            if (!path.lsp)
                 return;
 
-            auto bounds = LSPUtilities::getBounds(lsp, evalCtx, symbol.getType());
-            if (!bounds)
-                return;
-
-            auto driver = context.alloc.emplace<ValueDriver>(driverKind, lsp, containingSymbol,
-                                                             driverFlags);
+            auto driver = ValueDriver::create(context.alloc, driverKind, path, containingSymbol,
+                                              driverFlags);
 
             auto updateFunc = [&](auto& elem) {
-                addDriver(context, driverAlloc, *elem.first, elem.second, *driver, *bounds,
-                          hierPortDrivers);
+                addDriver(context, driverAlloc, elem.second, *driver, hierPortDrivers);
             };
-            symbolDrivers.try_emplace_and_visit(&symbol, updateFunc, updateFunc);
+            symbolDrivers.try_emplace_and_visit(path.rootSymbol(), updateFunc, updateFunc);
         },
-        initialLSP);
+        /* skipSelectors */ true);
 
     for (auto& hpd : hierPortDrivers)
         noteHierPortDriver(context, driverAlloc, hpd);
 }
 
-DriverList DriverTracker::getDrivers(const ValueSymbol& symbol) const {
-    DriverList drivers;
+std::vector<const ValueDriver*> DriverTracker::getDrivers(const ValueSymbol& symbol) const {
+    std::vector<const ValueDriver*> drivers;
     symbolDrivers.cvisit(&symbol, [&drivers](auto& item) {
         for (auto it = item.second.begin(); it != item.second.end(); ++it)
-            drivers.emplace_back(*it, it.bounds());
+            drivers.push_back(*it);
     });
     return drivers;
 }
@@ -260,31 +232,21 @@ std::optional<InstanceDriverState> DriverTracker::getInstanceState(
     return state;
 }
 
-static std::string getLSPName(const ValueSymbol& symbol, const ValueDriver& driver) {
-    FormatBuffer buf;
-    EvalContext evalContext(symbol);
-    LSPUtilities::stringifyLSP(*driver.prefixExpression, evalContext, buf);
-    return buf.str();
-}
-
 static bool handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
-                          const ValueDriver& curr, const ValueDriver& driver, bool isNet,
+                          const ValueDriver* first, const ValueDriver* second, bool isNet,
                           bool isUWire, bool isSingleDriverUDNT, const NetType* netType) {
-    auto currRange = curr.getSourceRange();
-    auto driverRange = driver.getSourceRange();
-
     // The default handling case for mixed vs multiple assignments is below.
     // First check for more specialized cases here:
     // 1. If this is a non-uwire net for an input or output port
     // 2. If this is a variable for an input port
-    const bool isUnidirectionNetPort = isNet && (curr.isUnidirectionalPort() ||
-                                                 driver.isUnidirectionalPort());
+    const bool isUnidirectionNetPort = isNet && (first->isUnidirectionalPort() ||
+                                                 second->isUnidirectionalPort());
 
     if ((isUnidirectionNetPort && !isUWire && !isSingleDriverUDNT) ||
-        (!isNet && (curr.isInputPort() || driver.isInputPort()))) {
+        (!isNet && (first->isInputPort() || second->isInputPort()))) {
         auto code = diag::InputPortAssign;
         if (isNet) {
-            if (curr.flags.has(DriverFlags::InputPort))
+            if (first->flags.has(DriverFlags::InputPort))
                 code = diag::InputPortCoercion;
             else
                 code = diag::OutputPortCoercion;
@@ -294,141 +256,148 @@ static bool handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
         // range for the port vs the assignment. We only want to do this
         // for input ports though, as output ports show up at the instantiation
         // site and we'd rather that be considered the "port declaration".
-        auto portRange = currRange;
-        auto assignRange = driverRange;
-        if (driver.isInputPort() || curr.flags.has(DriverFlags::OutputPort))
-            std::swap(portRange, assignRange);
+        if (second->isInputPort() || first->flags.has(DriverFlags::OutputPort))
+            std::swap(first, second);
 
-        auto& diag = context.addDiag(symbol, code, assignRange);
+        auto& diag = context.addDiag(symbol, code, second->getSourceRange());
         diag << symbol.name;
 
         auto note = code == diag::OutputPortCoercion ? diag::NoteDrivenHere
                                                      : diag::NoteDeclarationHere;
-        diag.addNote(note, portRange);
+        diag.addNote(note, first->getSourceRange());
 
         // For variable ports this is an error, for nets it's a warning.
         return isNet;
     }
 
-    if (curr.isClockVar() || driver.isClockVar()) {
+    if (first->isClockVar() || second->isClockVar()) {
         // Both drivers being clockvars is allowed.
-        if (curr.isClockVar() && driver.isClockVar())
+        if (first->isClockVar() && second->isClockVar())
             return true;
 
         // Procedural drivers are allowed to clockvars.
-        if (curr.kind == DriverKind::Procedural || driver.kind == DriverKind::Procedural)
+        if (first->kind == DriverKind::Procedural || second->kind == DriverKind::Procedural)
             return true;
 
         // Otherwise we have an error.
-        if (driver.isClockVar())
-            std::swap(driverRange, currRange);
+        if (second->isClockVar())
+            std::swap(first, second);
 
-        auto& diag = context.addDiag(symbol, diag::ClockVarTargetAssign, driverRange);
+        auto& diag = context.addDiag(symbol, diag::ClockVarTargetAssign, second->getSourceRange());
         diag << symbol.name;
-        diag.addNote(diag::NoteReferencedHere, currRange);
+        diag.addNote(diag::NoteReferencedHere, first->getSourceRange());
         return false;
     }
 
-    auto addAssignedHereNote = [&](Diagnostic& d) {
-        // If the two locations are the same, the symbol is driven by
-        // the same source location but two different parts of the hierarchy.
-        // In those cases we want a different note about what's going on.
-        if (currRange.start() != driverRange.start()) {
-            d.addNote(diag::NoteAssignedHere, currRange);
-        }
-        else {
-            auto& note = d.addNote(diag::NoteFromHere2, SourceLocation::NoLocation);
-            note << driver.containingSymbol->getHierarchicalPath();
-            note << curr.containingSymbol->getHierarchicalPath();
-        }
-    };
-
-    if (curr.kind == DriverKind::Procedural && driver.kind == DriverKind::Procedural) {
-        // Multiple procedural drivers where one of them is an
-        // always_comb / always_ff block.
-        ProceduralBlockKind procKind;
-        const ValueDriver* sourceForName = &driver;
-        if (driver.isInSingleDriverProcedure()) {
-            procKind = static_cast<ProceduralBlockKind>(driver.source);
-        }
-        else {
-            procKind = static_cast<ProceduralBlockKind>(curr.source);
-            std::swap(driverRange, currRange);
-            sourceForName = &curr;
-        }
-
-        auto& diag = context.addDiag(symbol, diag::MultipleAlwaysAssigns, driverRange);
-        diag << getLSPName(symbol, *sourceForName) << SemanticFacts::getProcedureKindStr(procKind);
-        addAssignedHereNote(diag);
-
-        if (driver.procCallExpression || curr.procCallExpression) {
-            SourceRange extraRange = driver.procCallExpression
-                                         ? driver.prefixExpression->sourceRange
-                                         : curr.prefixExpression->sourceRange;
-
-            diag.addNote(diag::NoteOriginalAssign, extraRange);
-        }
-
-        return false;
-    }
+    const bool bothProcedural = first->kind == DriverKind::Procedural &&
+                                second->kind == DriverKind::Procedural;
 
     DiagCode code;
-    if (isUWire)
+    if (bothProcedural)
+        code = diag::MultipleAlwaysAssigns;
+    else if (isUWire)
         code = diag::MultipleUWireDrivers;
     else if (isSingleDriverUDNT)
         code = diag::MultipleUDNTDrivers;
-    else if (driver.kind == DriverKind::Continuous && curr.kind == DriverKind::Continuous)
+    else if (second->kind == DriverKind::Continuous && first->kind == DriverKind::Continuous)
         code = diag::MultipleContAssigns;
     else
         code = diag::MixedVarAssigns;
 
-    auto& diag = context.addDiag(symbol, code, driverRange);
-    diag << getLSPName(symbol, driver);
-    if (isSingleDriverUDNT) {
+    // If we're reporting a message about single driver procedures, make sure
+    // the "primary" location is inside a single driver procedure.
+    if (bothProcedural && !second->isInSingleDriverProcedure())
+        std::swap(first, second);
+
+    auto secondRange = second->getSourceRange();
+    auto& diag = context.addDiag(symbol, code, secondRange);
+
+    EvalContext evalCtx(symbol);
+    diag << second->path.toString(evalCtx);
+
+    if (bothProcedural) {
+        auto pbk = static_cast<ProceduralBlockKind>(second->source);
+        diag << SemanticFacts::getProcedureKindStr(pbk);
+    }
+    else if (isSingleDriverUDNT) {
         SLANG_ASSERT(netType);
         diag << netType->name;
     }
 
-    addAssignedHereNote(diag);
+    SourceLocation overrideLoc;
+    auto addOriginalNote = [&](const ValueDriver& driver) {
+        auto startLoc = driver.path.lsp->sourceRange.start();
+        if (driver.flags.has(DriverFlags::HasOverrideRange) && startLoc != overrideLoc) {
+            auto code = driver.flags.has(DriverFlags::ViaIndirectPort) ? diag::NotePortConnHere
+                                                                       : diag::NoteOriginalAssign;
+            diag.addNote(code, driver.path.lsp->sourceRange);
+            overrideLoc = startLoc;
+        }
+    };
+    addOriginalNote(*second);
+
+    // If the two locations are the same, the symbol is driven by
+    // the same source location but two different parts of the hierarchy.
+    // In those cases we want a different note about what's going on.
+    auto firstRange = first->getSourceRange();
+    if (firstRange.start() != secondRange.start()) {
+        diag.addNote(diag::NoteAssignedHere, firstRange);
+    }
+    else {
+        auto& note = diag.addNote(diag::NoteFromHere2, SourceLocation::NoLocation);
+        note << second->containingSymbol->getHierarchicalPath();
+        note << first->containingSymbol->getHierarchicalPath();
+    }
+
+    addOriginalNote(*first);
+
     return false;
 }
 
 void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
-                              const ValueSymbol& symbol, SymbolDriverMap& driverMap,
-                              const ValueDriver& driver, DriverBitRange bounds,
+                              SymbolDriverMap& driverMap, const ValueDriver& driver,
                               SmallVector<HierPortDriver>& hierPortDrivers) {
+    auto& symbol = driver.getSymbol();
+    auto bounds = driver.getBounds();
     auto scope = symbol.getParentScope();
     SLANG_ASSERT(scope);
 
     // If this driver is made via an interface port connection we want to
     // note that fact as it represents a side effect for the instance that
     // is not captured in the port connections.
-    if (!driver.isFromSideEffect) {
-        LSPUtilities::visitComponents(
-            *driver.prefixExpression, /* includeRoot */ true, [&](const Expression& expr) {
-                if (expr.kind == ExpressionKind::HierarchicalValue) {
-                    auto& ref = expr.as<HierarchicalValueExpression>().ref;
-                    if (ref.isViaIfacePort())
-                        hierPortDrivers.push_back({&driver, &symbol, &ref});
-                }
-            });
+    if (!driver.flags.has(DriverFlags::FromSideEffect)) {
+        for (auto& elem : driver.path) {
+            if (elem.kind == ExpressionKind::HierarchicalValue) {
+                auto& ref = elem.as<HierarchicalValueExpression>().ref;
+                if (ref.isViaIfacePort())
+                    hierPortDrivers.push_back({&driver, &ref});
+            }
+        }
     }
 
     // Keep track of "indirect" drivers separately so we can revisit them at the end of analysis.
-    if (symbol.kind == SymbolKind::ModportPort || symbol.isConnectedToRefPort()) {
-        auto updater = [&](auto& item) { item.second.emplace_back(&driver, bounds); };
-        indirectDrivers.try_emplace_and_visit(&symbol, updater, updater);
+    auto indirectUpdater = [&](auto& item) { item.second.push_back(&driver); };
+    if (symbol.kind == SymbolKind::ModportPort) {
+        indirectDrivers.try_emplace_and_visit(&symbol, indirectUpdater, indirectUpdater);
 
-        if (symbol.kind != SymbolKind::ModportPort && !driver.isFromSideEffect) {
-            // Ref port drivers are side effects that need to be applied to
-            // non-canonical instances.
-            hierPortDrivers.push_back({&driver, &symbol, nullptr});
-        }
-
-        // We don't do overlap detection for modport / ref ports (the drivers apply to the
-        // underlying connection) but we will still track them for downstream users to query later.
+        // We don't do overlap detection for modports but we will still track them for downstream
+        // users to query later.
         driverMap.insert(bounds, &driver, driverAlloc);
         return;
+    }
+
+    if (symbol.isConnectedToRefPort()) {
+        indirectDrivers.try_emplace_and_visit(&symbol, indirectUpdater, indirectUpdater);
+
+        if (!driver.flags.has(DriverFlags::FromSideEffect)) {
+            // Ref port drivers are side effects that need to be applied to
+            // non-canonical instances.
+            hierPortDrivers.push_back({&driver, nullptr});
+        }
+
+        // For ref ports we will continue on and do normal overlap checking,
+        // since the ref port might not actually apply if it has an internal
+        // connection expression that points somewhere else.
     }
 
     if (driverMap.empty()) {
@@ -438,12 +407,12 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
             auto& valExpr = *context.alloc.emplace<NamedValueExpression>(
                 symbol, SourceRange{symbol.location, symbol.location + symbol.name.length()});
 
-            DriverBitRange initBounds{0, symbol.getType().getSelectableWidth() - 1};
-            auto initDriver = context.alloc.emplace<ValueDriver>(driverKind, valExpr,
-                                                                 scope->asSymbol(),
-                                                                 DriverFlags::Initializer);
+            EvalContext evalCtx(symbol);
+            auto initDriver = ValueDriver::create(context.alloc, driverKind,
+                                                  ValuePath(valExpr, evalCtx), scope->asSymbol(),
+                                                  DriverFlags::Initializer);
 
-            driverMap.insert(initBounds, initDriver, driverAlloc);
+            driverMap.insert(initDriver->getBounds(), initDriver, driverAlloc);
         };
 
         switch (symbol.kind) {
@@ -467,10 +436,6 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
         }
     }
 
-    // We need to check for overlap in the following cases:
-    // - static variables (automatic variables can't ever be driven continuously)
-    // - uwire nets
-    // - user-defined nets with no resolution function
     const bool isNet = symbol.kind == SymbolKind::Net;
     bool isUWire = false;
     bool isSingleDriverUDNT = false;
@@ -483,6 +448,10 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
                              netType->getResolutionFunction() == nullptr;
     }
 
+    // We need to check for overlap in the following cases:
+    // - static variables (automatic variables can't ever be driven continuously)
+    // - uwire nets
+    // - user-defined nets (UDNTs) with no resolution function
     const bool checkOverlap = (VariableSymbol::isKind(symbol.kind) &&
                                symbol.as<VariableSymbol>().lifetime == VariableLifetime::Static) ||
                               isUWire || isSingleDriverUDNT;
@@ -497,7 +466,6 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
                (vd.source == DriverSource::Initial && allowDupInitialDrivers);
     };
 
-    // TODO: try to clean these conditions up a bit more
     auto end = driverMap.end();
     for (auto it = driverMap.find(bounds); it != end; ++it) {
         // Check whether this pair of drivers overlapping constitutes a problem.
@@ -506,14 +474,7 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
         // - Don't report for "Other" drivers (procedural force / release, etc)
         // - Otherwise, if is this a static var or uwire net:
         //      - Report if a mix of continuous and procedural assignments
-        //      - Don't report if both drivers are sliced ports from an array
-        //        of instances. We already sliced these up correctly when the
-        //        connections were made and the overlap logic here won't work correctly.
         //      - Report if multiple continuous assignments
-        //      - If both procedural, report if there aren multiple
-        //        always_comb / always_ff procedures.
-        //          - If the allowDupInitialDrivers option is set, allow an initial
-        //            block to overlap even if the other block is an always_comb/ff.
         bool isProblem = false;
         auto curr = *it;
 
@@ -532,7 +493,7 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
         }
 
         if (isProblem) {
-            if (!handleOverlap(context, symbol, *curr, driver, isNet, isUWire, isSingleDriverUDNT,
+            if (!handleOverlap(context, symbol, curr, &driver, isNet, isUWire, isSingleDriverUDNT,
                                netType)) {
                 break;
             }
@@ -590,7 +551,7 @@ void DriverTracker::noteHierPortDriver(AnalysisContext& context, DriverAlloc& dr
         // Must be a ref port target. Note that we don't have to go recursively up
         // the hierarchy here because we register these as "indirect drivers" which
         // will be applied recursively at the end of analysis.
-        auto scope = hierPortDriver.target->getParentScope();
+        auto scope = hierPortDriver.driver->getSymbol().getParentScope();
         SLANG_ASSERT(scope);
 
         auto& symbol = scope->asSymbol();
@@ -716,29 +677,23 @@ static const Symbol* retargetIfacePort(const HierarchicalReference& ref,
 void DriverTracker::applyInstanceSideEffect(AnalysisContext& context, DriverAlloc& driverAlloc,
                                             const HierPortDriver& hierPortDriver,
                                             const InstanceSymbol& instance) {
-    auto newDriverAndBounds = [&](const ValueSymbol& newTarget)
-        -> std::pair<ValueDriver*, std::optional<DriverBitRange>> {
-        auto driver = context.alloc.emplace<ValueDriver>(*hierPortDriver.driver);
-        driver->containingSymbol = &instance;
-        driver->isFromSideEffect = true;
-
+    auto newDriver = [&](const ValueSymbol& newTarget) {
         EvalContext evalCtx(instance);
-        auto bounds = LSPUtilities::getBounds(*driver->prefixExpression, evalCtx,
-                                              newTarget.getType());
-        return {driver, bounds};
+        auto driver = ValueDriver::create(context.alloc, evalCtx, *hierPortDriver.driver,
+                                          newTarget);
+        driver->containingSymbol = &instance;
+        driver->flags |= DriverFlags::FromSideEffect;
+        return driver;
     };
 
     if (hierPortDriver.ref) {
         auto& ref = *hierPortDriver.ref;
         if (auto target = retargetIfacePort(ref, instance)) {
             auto& valueSym = target->as<ValueSymbol>();
-            auto [driver, bounds] = newDriverAndBounds(valueSym);
-            if (!bounds)
-                return;
-
+            auto driver = newDriver(valueSym);
             auto updateFunc = [&](auto& elem) {
                 SmallVector<HierPortDriver> unused;
-                addDriver(context, driverAlloc, *elem.first, elem.second, *driver, *bounds, unused);
+                addDriver(context, driverAlloc, elem.second, *driver, unused);
             };
             symbolDrivers.try_emplace_and_visit(&valueSym, updateFunc, updateFunc);
         }
@@ -746,16 +701,217 @@ void DriverTracker::applyInstanceSideEffect(AnalysisContext& context, DriverAllo
     else {
         // Not an interface port, so must be a ref port. Find ourselves in the new
         // instance body and assign an indirect driver, which we'll propagate later.
-        // TODO: add test for explicit port expression that connects hierarchically
-        if (auto newTarget = instance.body.find(hierPortDriver.target->name)) {
+        auto& oldTarget = hierPortDriver.driver->getSymbol();
+        if (auto newTarget = instance.body.find(oldTarget.name)) {
             auto& valueSym = newTarget->as<ValueSymbol>();
-            auto [driver, bounds] = newDriverAndBounds(valueSym);
-            if (!bounds)
-                return;
-
-            auto updater = [&](auto& item) { item.second.emplace_back(driver, *bounds); };
+            auto driver = newDriver(valueSym);
+            auto updater = [&](auto& item) { item.second.push_back(driver); };
             indirectDrivers.try_emplace_and_visit(&valueSym, updater, updater);
         }
+    }
+}
+
+static const Symbol* findAnyVars(const Expression& expr) {
+    if (auto sym = expr.getSymbolReference(); sym && sym->kind != SymbolKind::Net)
+        return sym;
+
+    if (expr.kind == ExpressionKind::Concatenation) {
+        for (auto op : expr.as<ConcatenationExpression>().operands()) {
+            if (auto sym = findAnyVars(*op))
+                return sym;
+        }
+    }
+
+    return nullptr;
+}
+
+void DriverTracker::checkNetCollapsing(AnalysisContext& context, const PortConnection& conn) {
+    auto expr = conn.getExpression();
+    SLANG_ASSERT(expr && !expr->bad() && conn.port.kind == SymbolKind::Port);
+
+    // If there are nets on either side of the connection we may need
+    // to do dissimilar net type collapsing. All such checks happen
+    // on bit ranges, as different bits may have different net types.
+    SmallVector<PortSymbol::NetTypeRange, 4> internal;
+    auto& port = conn.port.as<PortSymbol>();
+    port.getNetTypes(internal);
+
+    SmallVector<PortSymbol::NetTypeRange, 4> external;
+    PortSymbol::getNetRanges(*expr, external);
+
+    // There might not be any nets, in which case we should just leave.
+    if (internal.empty() && external.empty())
+        return;
+
+    // Do additional checking on the expression for interconnect port connections.
+    if (internal.size() == 1 && internal[0].netType->netKind == NetType::Interconnect) {
+        if (auto sym = findAnyVars(*expr)) {
+            context.addDiag(port, diag::InterconnectPortVar, expr->sourceRange) << sym->name;
+            return;
+        }
+    }
+
+    auto requireMatching = [&](const NetType& udnt) {
+        // Types are more restricted; they must match instead of just being
+        // assignment compatible. Also direction must be input or output.
+        // We need to do this dance to get at the type of the connection prior
+        // to it being converted to match the type of the port.
+        auto exprType = expr->type.get();
+        if (expr->kind == ExpressionKind::Conversion) {
+            auto& conv = expr->as<ConversionExpression>();
+            if (conv.isImplicit())
+                exprType = conv.operand().type;
+        }
+        else if (expr->kind == ExpressionKind::Assignment) {
+            auto& assign = expr->as<AssignmentExpression>();
+            if (assign.isLValueArg())
+                exprType = assign.left().type;
+        }
+
+        auto& type = port.getType();
+        if (!type.isMatching(*exprType)) {
+            // If this is from an interconnect connection, don't require matching types.
+            auto isInterconnect = [](const Type& t) {
+                auto curr = &t;
+                while (curr->isArray())
+                    curr = curr->getArrayElementType();
+
+                return curr->isUntypedType();
+            };
+
+            if (isInterconnect(type) || isInterconnect(*exprType))
+                return;
+
+            auto& diag = context.addDiag(port, diag::MismatchedUserDefPortConn, expr->sourceRange);
+            diag << udnt.name;
+            diag << type;
+            diag << *exprType;
+        }
+        else if (port.direction != ArgumentDirection::In &&
+                 port.direction != ArgumentDirection::Out) {
+            auto& diag = context.addDiag(port, diag::MismatchedUserDefPortDir, expr->sourceRange);
+            diag << udnt.name;
+        }
+    };
+
+    // If only one side has net types, check for user-defined nettypes,
+    // which impose additional restrictions on the connection.
+    if (internal.empty() || external.empty()) {
+        const NetType* udnt = nullptr;
+        auto checker = [&](auto& list) {
+            for (auto& ntr : list) {
+                if (!ntr.netType->isBuiltIn()) {
+                    udnt = ntr.netType;
+                    break;
+                }
+            }
+        };
+
+        checker(internal);
+        checker(external);
+        if (udnt)
+            requireMatching(*udnt);
+
+        return;
+    }
+
+    // Simple case is one net connected on each side.
+    if (internal.size() == 1 && external.size() == 1) {
+        auto& inNt = *internal[0].netType;
+        auto& exNt = *external[0].netType;
+        if (&inNt == &exNt)
+            return;
+
+        if (!inNt.isBuiltIn() || !exNt.isBuiltIn()) {
+            // If both sides are user-defined nettypes they need to match.
+            if (!inNt.isBuiltIn() && !exNt.isBuiltIn()) {
+                auto& diag = context.addDiag(port, diag::UserDefPortTwoSided, expr->sourceRange);
+                diag << inNt.name << exNt.name;
+            }
+            else if (!inNt.isBuiltIn()) {
+                requireMatching(inNt);
+            }
+            else {
+                requireMatching(exNt);
+            }
+        }
+        else {
+            // Otherwise both sides are built-in nettypes.
+            bool shouldWarn;
+            NetType::getSimulatedNetType(inNt, exNt, shouldWarn);
+            if (shouldWarn) {
+                auto diagCode = conn.isImplicit ? diag::ImplicitConnNetInconsistent
+                                                : diag::NetInconsistent;
+                auto& diag = context.addDiag(port, diagCode, expr->sourceRange);
+                diag << exNt.name;
+                diag << inNt.name;
+                diag.addNote(diag::NoteDeclarationHere, port.location);
+            }
+        }
+
+        return;
+    }
+
+    // Otherwise we need to compare ranges of net types for differences.
+    auto in = internal.begin();
+    auto ex = external.begin();
+    bitwidth_t currBit = 0;
+    bitwidth_t exprWidth = expr->type->getBitWidth();
+    bool shownDeclaredHere = false;
+
+    while (true) {
+        bool shouldWarn;
+        auto& inNt = *in->netType;
+        auto& exNt = *ex->netType;
+
+        if (!inNt.isBuiltIn() || !exNt.isBuiltIn()) {
+            if (&inNt != &exNt) {
+                context.addDiag(port, diag::UserDefPortMixedConcat, expr->sourceRange)
+                    << inNt.name << exNt.name;
+                return;
+            }
+            shouldWarn = false;
+        }
+        else {
+            NetType::getSimulatedNetType(inNt, exNt, shouldWarn);
+        }
+
+        bitwidth_t width;
+        if (in->width < ex->width) {
+            width = in->width;
+            ex->width -= width;
+            in++;
+        }
+        else {
+            width = ex->width;
+            ex++;
+
+            if (in->width == width)
+                in++;
+            else
+                in->width -= width;
+        }
+
+        if (shouldWarn) {
+            SLANG_ASSERT(exprWidth >= currBit + width);
+            bitwidth_t left = exprWidth - currBit - 1;
+            bitwidth_t right = left - (width - 1);
+
+            auto& diag = context.addDiag(port, diag::NetRangeInconsistent, expr->sourceRange);
+            diag << exNt.name;
+            diag << left << right;
+            diag << inNt.name;
+
+            if (!shownDeclaredHere) {
+                diag.addNote(diag::NoteDeclarationHere, port.location);
+                shownDeclaredHere = true;
+            }
+        }
+
+        if (in == internal.end() || ex == external.end())
+            break;
+
+        currBit += width;
     }
 }
 

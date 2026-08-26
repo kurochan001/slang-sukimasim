@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "slang/ast/ASTDiagMap.h"
+#include "slang/ast/InstanceCacheKey.h"
 #include "slang/ast/OpaqueInstancePath.h"
 #include "slang/ast/Scope.h"
 #include "slang/numeric/Time.h"
@@ -113,10 +114,45 @@ enum class SLANG_EXPORT CompilationFlags {
     /// be errors issued for the unknown instances.
     DisallowRefsToUnknownInstances = 1 << 12,
 
-    /// Allow unnamed generate blocks (e.g. genblk) to be referenced
-    AllowUnnamedGenerate = 1 << 13
+    /// Allow unnamed generate blocks (e.g. genblk) to be referenced.
+    AllowUnnamedGenerate = 1 << 13,
+
+    /// Allow interface instances that are bind/defparam targets to be assigned
+    /// to virtual interfaces.
+    AllowVirtualIfaceWithOverride = 1 << 14,
+
+    /// Allow assignment pattern expressions to be used in unpacked array concatenations.
+    /// Normally these are not assignment-like contexts but some tools allow it anyway.
+    AllowArrayConcatAssignPattern = 1 << 15,
+
+    /// Allow multiple definitions of the same module, interface, program, or primitive at
+    /// the root scope within the same library, keeping the first and silently discarding
+    /// subsequent ones, but only when the conflicting definition comes from a library file.
+    AllowLibModuleRedefinition = 1 << 16,
+
+    /// Don't instantiate unreferenced modules to perform semantic checking on them.
+    IgnoreUninstantiatedModules = 1 << 17,
+
+    /// Allow the legacy `cross_auto_bin_max` coverage option to be set on covergroups
+    /// and crosses. This option was part of SystemVerilog 3.1a but is not in IEEE 1800;
+    /// some tools still accept it for compatibility with older code.
+    AllowCrossAutoBinMax = 1 << 18,
+
+    /// Infer an ANSI `input` port that has an explicit data type as a variable
+    /// instead of a net. By default slang follows the LRM and treats such ports as nets,
+    /// which for example allows them to be connected to `inout` ports. Some tools treat them
+    /// as variables instead; enabling this flag selects that behavior.
+    InferInputPortsAsVars = 1 << 19,
+
+    /// Allow top-level modules to be selected even when their parameters have no defaults.
+    AllowInvalidTop = 1 << 20,
+
+    /// Elaborate code that would normally be skipped because it is uninstantiated
+    /// (untaken generate branches and uninstantiated module instances) so that
+    /// additional lints, like port and parameter name checks, can run on it.
+    CheckUninstantiated = 1 << 21,
 };
-SLANG_BITMASK(CompilationFlags, AllowUnnamedGenerate)
+SLANG_BITMASK(CompilationFlags, CheckUninstantiated)
 
 /// Contains various options that can control compilation behavior.
 struct SLANG_EXPORT CompilationOptions {
@@ -146,12 +182,25 @@ struct SLANG_EXPORT CompilationOptions {
     /// before abbreviating them.
     uint32_t maxConstexprBacktrace = 10;
 
+    /// The maximum number of bits that a single constant value can occupy
+    /// during constant evaluation. This limit exists to prevent out-of-memory
+    /// crashes from trivially constructing huge arrays in constant functions.
+    uint64_t maxConstantSize = 8 * 1024 * 1024;
+
     /// The maximum number of iterations to try to resolve defparams before
     /// giving up due to potentially cyclic dependencies in parameter values.
     uint32_t maxDefParamSteps = 128;
 
+    /// The maximum number of blocks that will be allowed before giving up
+    /// on defparam resolution. This is used to keep fuzz testing from
+    /// blowing up on goofy cases.
+    uint32_t maxDefParamBlocks = UINT32_MAX;
+
     /// The maximum number of instances allowed in a single instance array.
     uint32_t maxInstanceArray = 65535;
+
+    /// The maximum number of members allowed in a single enum declaration.
+    uint32_t maxEnumValues = 65535;
 
     /// The maximum depth of recursive generic class specializations.
     uint32_t maxRecursiveClassSpecialization = 8;
@@ -222,18 +271,26 @@ struct SLANG_EXPORT BindDirectiveInfo {
     bool isNewConfigRoot = false;
 };
 
-/// A node in a tree representing an instance in the design
-/// hierarchy where parameters should be overriden and/or
-/// bind directives should be applied. These are assembled
-/// from defparam values, bind directives, and command-line
-/// specified overrides.
+/// A node in a tree representing an instance in the design hierarchy where parameters
+/// should be overriden and/or bind directives should be applied. These are assembled
+/// from defparam values, bind directives, and command-line specified overrides.
 struct SLANG_EXPORT HierarchyOverrideNode {
+    /// Represents a single parameter override value.
+    struct ParamOverride {
+        /// The pre-evaluated constant value. Empty when @a expr is set instead.
+        ConstantValue cv;
+
+        /// An expression syntax to evaluate with type context (for CLI overrides).
+        /// Null when @a cv is set instead.
+        const syntax::ExpressionSyntax* expr = nullptr;
+
+        /// The source defparam syntax node doing the overriding, if any (can be null).
+        const syntax::SyntaxNode* defparam = nullptr;
+    };
+
     /// A map of parameters in the current scope to override.
-    /// The key is the syntax node representing the parameter and the value is a pair,
-    /// the first element of which is the value to set the parameter to and the second
-    /// is the source defparam doing the overriding, if any (can be null).
-    flat_hash_map<const syntax::SyntaxNode*, std::pair<ConstantValue, const syntax::SyntaxNode*>>
-        paramOverrides;
+    /// The key is the syntax node representing the parameter.
+    flat_hash_map<const syntax::SyntaxNode*, ParamOverride> paramOverrides;
 
     /// A map of child scopes that also contain overrides.
     flat_hash_map<OpaqueInstancePath::Entry, HierarchyOverrideNode> childNodes;
@@ -307,9 +364,9 @@ public:
     /// resolved and all symbols have been created. This is distinct from being finalized,
     /// which only means that the design has been parsed and syntax trees have been added.
     ///
-    /// This is only set once getAllDiagnostics() is called, after which point the compilation
+    /// This is only set once getSemanticDiagnostics() is called, after which point the compilation
     /// is functionally immutable.
-    bool isElaborated() const { return cachedAllDiagnostics.has_value(); }
+    bool isElaborated() const { return cachedSemanticDiagnostics.has_value(); }
 
     /// Gets the diagnostics produced during lexing, preprocessing, and syntax parsing.
     const Diagnostics& getParseDiagnostics();
@@ -330,6 +387,11 @@ public:
     /// or if we've hit the configured error limit and stopped elaboration early
     /// because of it.
     bool hasFatalErrors() const { return sawFatalError; }
+
+    /// Returns the total number of bytes allocated for AST nodes and related structures.
+    /// This includes the main bump allocator as well as specialized allocators for types
+    /// that require non-trivial destruction.
+    size_t getTotalBytesAllocated() const;
 
     /// @}
     /// @name Utility and convenience methods
@@ -399,9 +461,11 @@ public:
     DefinitionLookupResult tryGetDefinition(std::string_view name, const Scope& scope) const;
 
     /// Gets the definition with the given name, or nullptr if there is no such definition.
-    /// If no definition is found an appropriate diagnostic will be issued.
-    DefinitionLookupResult getDefinition(std::string_view name, const Scope& scope,
-                                         SourceRange sourceRange, DiagCode code) const;
+    /// If no definition is found an appropriate diagnostic will be issued, unless the
+    /// instantiation has a maybe_unknown attribute.
+    DefinitionLookupResult getDefinition(
+        std::string_view name, const Scope& scope, SourceRange sourceRange, DiagCode code,
+        std::span<syntax::AttributeInstanceSyntax* const> attributes = {}) const;
 
     /// Gets the definition indicated by the given config rule, or nullptr if it does not exist.
     /// If no definition is found an appropriate diagnostic will be issued.
@@ -538,6 +602,21 @@ public:
     /// but are otherwise unused by SystemVerilog code.
     void noteDPIExportDirective(const syntax::DPIExportSyntax& syntax, const Scope& scope);
 
+    /// A DPI export entry.
+    struct DPIExport {
+        /// The exported subroutine symbol.
+        const SubroutineSymbol* subroutine = nullptr;
+
+        /// The C identifier used for the export.
+        std::string cIdentifier;
+
+        /// The original export declaration syntax node.
+        const syntax::DPIExportSyntax* syntax = nullptr;
+    };
+
+    /// Returns the DPI exports collected during elaboration.
+    std::span<const DPIExport> getDPIExports() const { return dpiExports; }
+
     /// Tracks the existence of an out-of-block declaration (method or constraint) in the
     /// given scope. This can later be retrieved by calling findOutOfBlockDecl().
     void addOutOfBlockDecl(const Scope& scope, const syntax::ScopedNameSyntax& name,
@@ -579,6 +658,11 @@ public:
     /// Finds an applicable default disable expression for the given scope, or returns nullptr
     /// if no such declaration is in effect.
     const Expression* getDefaultDisable(const Scope& scope) const;
+
+    /// Gets the map of scopes containing default disable directives.
+    const flat_hash_map<const Scope*, const Expression*>& getDefaultDisableMap() const {
+        return defaultDisableMap;
+    }
 
     /// Notes the existence of an extern module/interface/program/primitive declaration.
     void noteExternDefinition(const Scope& scope, const syntax::SyntaxNode& syntax);
@@ -622,8 +706,9 @@ public:
     /// Notes the existence of an assignment to a hierarchical reference.
     void noteHierarchicalAssignment(const HierarchicalReference& ref);
 
-    /// Notes the existence of a virtual interface type declaration for the given instance.
-    void noteVirtualIfaceInstance(const InstanceSymbol& instance);
+    /// Registers and returns the given virtual interface instance with the compilation,
+    /// or if it matches an already existing instance returns that one instead.
+    const InstanceSymbol& getOrAddVirtualIface(const InstanceSymbol& instance);
 
     /// Adds a set of diagnostics to the compilation's list of semantic diagnostics.
     void addDiagnostics(const Diagnostics& diagnostics);
@@ -769,11 +854,6 @@ public:
 
     /// @}
 
-    /// Gets the list of DPI export directives encountered during elaboration.
-    const std::vector<std::pair<const syntax::DPIExportSyntax*, const Scope*>>& getDPIExports() const {
-        return dpiExports;
-    }
-
 private:
     friend class Lookup;
     friend class Scope;
@@ -808,8 +888,9 @@ private:
 
     void elaborate();
     void insertDefinition(Symbol& symbol, const Scope& scope);
-    void parseParamOverrides(bool skipDefParams,
-                             flat_hash_map<std::string_view, const ConstantValue*>& results);
+    void parseParamOverrides(
+        bool skipDefParams,
+        flat_hash_map<std::string_view, HierarchyOverrideNode::ParamOverride>& results);
     void checkDPIMethods(std::span<const SubroutineSymbol* const> dpiImports);
     void checkExternIfaceMethods(std::span<const MethodPrototypeSymbol* const> protos);
     void checkModportExports(
@@ -839,22 +920,18 @@ private:
     TypedBumpAllocator<PointerMap> pointerMapAllocator;
     TypedBumpAllocator<ConstantValue> constantAllocator;
 
-    // A table to look up scalar types based on combinations of the three flags: signed, fourstate,
-    // reg. Two of the entries are not valid and will be nullptr (!fourstate & reg).
-    Type* scalarTypeTable[8]{nullptr};
-
     // Instances of all the built-in types.
-    Type* bitType;
-    Type* logicType;
-    Type* intType;
-    Type* byteType;
-    Type* integerType;
-    Type* realType;
-    Type* shortRealType;
-    Type* stringType;
-    Type* voidType;
-    Type* errorType;
-    NetType* wireNetType;
+    const Type* bitType;
+    const Type* logicType;
+    const Type* intType;
+    const Type* byteType;
+    const Type* integerType;
+    const Type* realType;
+    const Type* shortRealType;
+    const Type* stringType;
+    const Type* voidType;
+    const Type* errorType;
+    const NetType* wireNetType;
 
     // A map of syntax nodes that have been referenced in the AST.
     // The value indicates whether the node has been used as an lvalue vs non-lvalue,
@@ -909,7 +986,7 @@ private:
     };
 
     // Map from syntax nodes to parse-time metadata about them.
-    flat_hash_map<const syntax::SyntaxNode*, SyntaxMetadata> syntaxMetadata;
+    flat_hash_map<const syntax::ModuleDeclarationSyntax*, SyntaxMetadata> syntaxMetadata;
 
     // A list of all created definitions, as storage for their memory.
     std::vector<std::unique_ptr<DefinitionSymbol>> definitionMemory;
@@ -920,21 +997,6 @@ private:
 
     // A list of libraries that control the order in which we search for cell bindings.
     std::vector<const SourceLibrary*> defaultLiblist;
-
-    // A list of instances that have been created by virtual interface type declarations.
-    std::vector<const InstanceSymbol*> virtualInterfaceInstances;
-
-    // A list of assignments via hierarchical reference.
-    std::vector<const HierarchicalReference*> hierarchicalAssignments;
-
-    // A map from class name + decl name + scope to out-of-block declarations. These get
-    // registered when we find the initial declaration and later get used when we see
-    // the class prototype. The value also includes a boolean indicating whether anything
-    // has used this declaration -- an error is issued if it's never used.
-    mutable flat_hash_map<
-        std::tuple<std::string_view, std::string_view, const Scope*>,
-        std::tuple<const syntax::SyntaxNode*, const syntax::ScopedNameSyntax*, SymbolIndex, bool>>
-        outOfBlockDecls;
 
     std::unique_ptr<RootSymbol> root;
     SourceManager* sourceManager = nullptr;
@@ -960,6 +1022,22 @@ private:
     // that have been supressed we need space to return *something* to the caller.
     Diagnostic tempDiag;
 
+    // A map of instances that have been created by virtual interface type declarations.
+    flat_hash_map<InstanceCacheKey, const InstanceSymbol*> virtualIfaceCache;
+    std::vector<const InstanceSymbol*> virtualIfaceInstances;
+
+    // A list of assignments via hierarchical reference.
+    std::vector<const HierarchicalReference*> hierarchicalAssignments;
+
+    // A map from class name + decl name + scope to out-of-block declarations. These get
+    // registered when we find the initial declaration and later get used when we see
+    // the class prototype. The value also includes a boolean indicating whether anything
+    // has used this declaration -- an error is issued if it's never used.
+    mutable flat_hash_map<
+        std::tuple<std::string_view, std::string_view, const Scope*>,
+        std::tuple<const syntax::SyntaxNode*, const syntax::ScopedNameSyntax*, SymbolIndex, bool>>
+        outOfBlockDecls;
+
     std::optional<Diagnostics> cachedParseDiagnostics;
     std::optional<Diagnostics> cachedSemanticDiagnostics;
     std::optional<Diagnostics> cachedAllDiagnostics;
@@ -981,7 +1059,8 @@ private:
 
     // A map from syntax node to the definition it represents. Used much less frequently
     // than other ways of looking up definitions which is why it's lower down here.
-    flat_hash_map<const syntax::ModuleDeclarationSyntax*, std::vector<DefinitionSymbol*>>
+    flat_hash_map<const syntax::ModuleDeclarationSyntax*,
+                  flat_hash_map<const Scope*, DefinitionSymbol*>>
         definitionFromSyntax;
 
     // A set of all instantiated names in the design; used for determining whether a given
@@ -993,8 +1072,11 @@ private:
     // modified after elaboration begins.
     HierarchyOverrideNode hierarchyOverrides;
 
-    // A list of DPI export directives we've encountered during elaboration.
-    std::vector<std::pair<const syntax::DPIExportSyntax*, const Scope*>> dpiExports;
+    // A list of raw DPI export directives collected during elaboration.
+    std::vector<std::pair<const syntax::DPIExportSyntax*, const Scope*>> dpiExportDirectives;
+
+    // Resolved DPI exports collected during elaboration.
+    std::vector<DPIExport> dpiExports;
 
     // A list of bind directives we've encountered during elaboration.
     std::vector<std::pair<const syntax::BindDirectiveSyntax*, const Scope*>> bindDirectives;
@@ -1029,6 +1111,9 @@ private:
     // The key is a combination of definition name + the scope in which it was declared.
     flat_hash_map<std::tuple<std::string_view, const Scope*>, const syntax::SyntaxNode*>
         externDefMap;
+
+    // A list of syntax trees that were parsed for CLI parameter override expressions.
+    std::vector<std::shared_ptr<syntax::SyntaxTree>> paramOverrideTrees;
 
     struct NetAlias {
         const Symbol* sym;

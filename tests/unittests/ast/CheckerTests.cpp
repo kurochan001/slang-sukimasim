@@ -138,6 +138,7 @@ module m;
     real r;
 
     import p::*;
+    wire e, foo;
     c c2 [3](1, 2, e, 3.14);
     c c3 [1:2][3:2] (.*, .c(foo), .r);
     c c4(.*, .c(foo));
@@ -186,7 +187,7 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter({diag::ImplicitNet});
     REQUIRE(diags.size() == 19);
     CHECK(diags[0].code == diag::ExpectedIdentifier);
     CHECK(diags[1].code == diag::CheckerArgCannotBeEmpty);
@@ -221,6 +222,7 @@ checker check;
 endchecker
 
 module m;
+    wire clk;
     c c1(posedge clk, $, 3 + 4);
     initial d d1(posedge clk, $, 3 + 4);
 
@@ -478,7 +480,7 @@ source:4:14: note: expanded here
 source:11:62: note: expanded here
         assert property (a ##1 b ##[+] c ##[*] d ##[1:5] e & r);
                                                              ^
-source:25:21: error: invalid operands to binary expression ('queue of int' and 'int')
+source:25:21: error: invalid operands to binary expression ('int$[$]' and 'int')
         int j = foo + r;
                 ~~~ ^ ~
 source:20:11: note: while expanding checker 'f'
@@ -1090,4 +1092,59 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::CheckerCovergroupProc);
+}
+
+TEST_CASE("Checker timing control must use event control") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    logic clk;
+    checker c;
+        always_ff @(posedge clk) #1 $display("x");
+    endchecker
+    c i1();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::CheckerTimingControl);
+    CHECK(diags[1].code == diag::BlockingInAlwaysFF);
+}
+
+TEST_CASE("Invalid statement in checker procedure") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    checker c;
+        initial forever #1 $display("x");
+    endchecker
+    c i1();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::InvalidStmtInChecker);
+}
+
+TEST_CASE("Checker instance array exceeds maximum size") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    checker c;
+    endchecker
+    c i1[0:100000000]();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::MaxInstanceArrayExceeded);
 }

@@ -39,7 +39,7 @@ static std::string_view getNonValueName(const Symbol& symbol) {
         auto sym = &symbol;
         while (sym->kind == SymbolKind::GenerateBlock) {
             auto& block = sym->as<GenerateBlockSymbol>();
-            if (!block.arrayIndex)
+            if (!block.getArrayIndex())
                 return sym->name;
 
             auto scope = block.getParentScope();
@@ -54,8 +54,7 @@ static std::string_view getNonValueName(const Symbol& symbol) {
 
 Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Symbol& symbol,
                                             const HierarchicalReference* hierRef,
-                                            SourceRange sourceRange, bool constraintAllowed,
-                                            bool isDottedAccess) {
+                                            SourceRange sourceRange, bool constraintAllowed) {
     // Automatic variables have additional restrictions.
     bool isUnbounded = false;
     auto& comp = context.getCompilation();
@@ -105,9 +104,9 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
         else if (flags.has(ASTFlags::ForkJoinAnyNone) && !var.flags.has(VariableFlags::RefStatic) &&
                  symbol.kind == SymbolKind::FormalArgument &&
                  symbol.as<FormalArgumentSymbol>().direction == ArgumentDirection::Ref) {
-            // Can't refer to ref args in fork-join_any/none
+            // Can't refer to ref args in fork-join_any/none per LRM.
+            // Some tools allow this, so the diagnostic can be downgraded.
             context.addDiag(diag::RefArgForkJoin, sourceRange) << symbol.name;
-            return badExpr(comp, nullptr);
         }
     }
     else if (symbol.kind == SymbolKind::ConstraintBlock) {
@@ -154,7 +153,8 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
     if (!symbol.isValue()) {
         if ((symbol.kind == SymbolKind::ClockingBlock && flags.has(ASTFlags::AllowClockingBlock)) ||
             (symbol.kind == SymbolKind::ConstraintBlock && constraintAllowed) ||
-            (symbol.kind == SymbolKind::Coverpoint && flags.has(ASTFlags::AllowCoverpoint))) {
+            ((symbol.kind == SymbolKind::Coverpoint || symbol.kind == SymbolKind::CoverCross) &&
+             flags.has(ASTFlags::AllowCoverpoint))) {
             // Special case for event expressions and constraint block built-in methods.
             return *comp.emplace<ArbitrarySymbolExpression>(*context.scope, symbol,
                                                             comp.getVoidType(), hierRef,
@@ -163,10 +163,20 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
 
         // IEEE 1800-2023 §12.7.3: Interface arrays can be used in foreach loops
         if (symbol.kind == SymbolKind::InstanceArray && flags.has(ASTFlags::ForeachLoopArray)) {
-            auto& instArray = symbol.as<InstanceArraySymbol>();
             // Create an expression that represents the interface array for iteration
             return *comp.emplace<ArbitrarySymbolExpression>(*context.scope, symbol,
                                                             comp.getVoidType(), hierRef,
+                                                            sourceRange);
+        }
+
+        // An UninstantiatedDef is a placeholder for an instance (module, interface, etc.)
+        // that could not be elaborated, e.g. because we are in an uninstantiated module
+        // context where parameter values are not known. The type is unknown in this case,
+        // so return an error-typed expression without emitting an error, consistent with
+        // how tryBindInterfaceRef handles the same situation.
+        if (symbol.kind == SymbolKind::UninstantiatedDef) {
+            return *comp.emplace<ArbitrarySymbolExpression>(*context.scope, symbol,
+                                                            comp.getErrorType(), hierRef,
                                                             sourceRange);
         }
 
@@ -189,19 +199,7 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
         return badExpr(comp, nullptr);
     }
 
-    if (auto syntax = symbol.getSyntax(); syntax && !flags.has(ASTFlags::NoReference)) {
-        bool isLValue = flags.has(ASTFlags::LValue);
-        if (isDottedAccess) {
-            auto& type = value.getType();
-            if (type.isClass() || type.isCovergroup())
-                isLValue = false;
-        }
-
-        comp.noteReference(*syntax, isLValue);
-
-        if (isLValue && flags.has(ASTFlags::LAndRValue))
-            comp.noteReference(*syntax, /* isLValue */ false);
-    }
+    context.noteReference(value, /* isDottedAccess */ false);
 
     Expression* result;
     if (hierRef && hierRef->target) {
@@ -219,61 +217,8 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
 
 bool ValueExpressionBase::requireLValueImpl(const ASTContext& context, SourceLocation location,
                                             bitmask<AssignFlags> flags) const {
-    if (!location)
-        location = sourceRange.start();
-
-    if (symbol.kind == SymbolKind::Parameter || symbol.kind == SymbolKind::EnumValue ||
-        symbol.kind == SymbolKind::Specparam) {
-        auto& diag = context.addDiag(diag::CantModifyConst, location) << symbol.name;
-        diag.addNote(diag::NoteDeclarationHere, symbol.location);
-        diag << sourceRange;
+    if (!checkLValue(context, symbol, flags, location, sourceRange))
         return false;
-    }
-
-    if (context.flags.has(ASTFlags::NonProcedural)) {
-        // chandles can only be assigned in procedural contexts.
-        if (symbol.getType().isCHandle()) {
-            context.addDiag(diag::AssignToCHandle, sourceRange);
-            return false;
-        }
-
-        if (symbol.kind == SymbolKind::Net &&
-            symbol.as<NetSymbol>().netType.netKind == NetType::UWire &&
-            flags.has(AssignFlags::InOutPort)) {
-            context.addDiag(diag::InOutUWireConn, sourceRange) << symbol.name;
-            return false;
-        }
-    }
-    else if (!context.flags.has(ASTFlags::ProceduralForceAssign)) {
-        // Nets can't be assigned in procedural contexts, except for force/assign
-        // statements which can target nets (IEEE 1800-2023 §10.6).
-        if (symbol.kind == SymbolKind::Net) {
-            context.addDiag(diag::AssignToNet, sourceRange);
-            return false;
-        }
-    }
-
-    if (VariableSymbol::isKind(symbol.kind)) {
-        if (!checkVariableAssignment(context, symbol.as<VariableSymbol>(), flags, location,
-                                     sourceRange)) {
-            return false;
-        }
-    }
-    else if (symbol.kind == SymbolKind::ModportPort) {
-        auto& modportPort = symbol.as<ModportPortSymbol>();
-        if (modportPort.direction == ArgumentDirection::In) {
-            auto& diag = context.addDiag(diag::InputPortAssign, sourceRange);
-            diag << symbol.name;
-            diag.addNote(diag::NoteDeclarationHere, symbol.location);
-            return false;
-        }
-
-        if (auto expr = modportPort.getConnectionExpr()) {
-            // The assignment is actually to the underlying connection expression,
-            // so redirect it there.
-            return expr->requireLValue(context, location, flags);
-        }
-    }
 
     if (kind == ExpressionKind::HierarchicalValue && !context.scope->isUninstantiated()) {
         auto& ref = as<HierarchicalValueExpression>().ref;
@@ -284,58 +229,101 @@ bool ValueExpressionBase::requireLValueImpl(const ASTContext& context, SourceLoc
     return true;
 }
 
-bool ValueExpressionBase::checkVariableAssignment(const ASTContext& context,
-                                                  const VariableSymbol& var,
-                                                  bitmask<AssignFlags> flags,
-                                                  SourceLocation assignLoc, SourceRange varRange) {
+bool ValueExpressionBase::checkLValue(const ASTContext& context, const ValueSymbol& symbol,
+                                      bitmask<AssignFlags> flags, SourceLocation assignLoc,
+                                      SourceRange varRange) {
     auto reportErr = [&](DiagCode code) {
         if (!assignLoc)
             assignLoc = varRange.start();
 
         auto& diag = context.addDiag(code, assignLoc);
-        diag.addNote(diag::NoteDeclarationHere, var.location);
-        diag << var.name << varRange;
+        diag.addNote(diag::NoteDeclarationHere, symbol.location);
+        diag << symbol.name << varRange;
         return false;
     };
 
-    if (var.flags.has(VariableFlags::Const)) {
-        // If we are in a class constructor and this variable does not have an initializer,
-        // it's ok to assign to it.
-        const Symbol* parent = &context.scope->asSymbol();
-        while (parent->kind == SymbolKind::StatementBlock) {
-            auto parentScope = parent->getParentScope();
-            SLANG_ASSERT(parentScope);
-            parent = &parentScope->asSymbol();
+    if (symbol.kind == SymbolKind::Parameter || symbol.kind == SymbolKind::EnumValue ||
+        symbol.kind == SymbolKind::Specparam) {
+        return reportErr(diag::CantModifyConst);
+    }
+
+    if (context.flags.has(ASTFlags::NonProcedural)) {
+        // chandles can only be assigned in procedural contexts.
+        if (symbol.getType().isCHandle()) {
+            context.addDiag(diag::AssignToCHandle, varRange);
+            return false;
         }
 
-        if (var.getInitializer() || parent->kind != SymbolKind::Subroutine ||
-            (parent->as<SubroutineSymbol>().flags & MethodFlags::Constructor) == 0) {
-            return reportErr(diag::AssignmentToConstVar);
+        if (symbol.kind == SymbolKind::Net &&
+            symbol.as<NetSymbol>().netType.netKind == NetType::UWire &&
+            flags.has(AssignFlags::InOutPort)) {
+            context.addDiag(diag::InOutUWireConn, varRange) << symbol.name;
+            return false;
+        }
+    }
+    else if (!context.flags.has(ASTFlags::ProceduralForceAssign)) {
+        // Nets can't be assigned in procedural contexts, except for force/assign
+        // statements which can target nets (IEEE 1800-2023 §10.6).
+        if (symbol.kind == SymbolKind::Net) {
+            context.addDiag(diag::AssignToNet, varRange);
+            return false;
         }
     }
 
-    if (var.flags.has(VariableFlags::CheckerFreeVariable) && !flags.has(AssignFlags::NonBlocking))
-        return reportErr(diag::BlockingAssignToFreeVar);
+    if (VariableSymbol::isKind(symbol.kind)) {
+        auto& var = symbol.as<VariableSymbol>();
+        if (var.flags.has(VariableFlags::Const)) {
+            // If we are in a class constructor and this variable does not have an initializer,
+            // it's ok to assign to it.
+            auto parent = &context.scope->asSymbol();
+            while (parent->kind == SymbolKind::StatementBlock) {
+                auto parentScope = parent->getParentScope();
+                SLANG_ASSERT(parentScope);
+                parent = &parentScope->asSymbol();
+            }
 
-    if (flags.has(AssignFlags::NonBlocking) && var.lifetime == VariableLifetime::Automatic &&
-        var.kind != SymbolKind::ClassProperty) {
-        return reportErr(diag::NonblockingAssignmentToAuto);
+            if (var.getInitializer() || parent->kind != SymbolKind::Subroutine ||
+                (parent->as<SubroutineSymbol>().flags & MethodFlags::Constructor) == 0) {
+                return reportErr(diag::AssignmentToConstVar);
+            }
+        }
+
+        if (var.flags.has(VariableFlags::CheckerFreeVariable) &&
+            !flags.has(AssignFlags::NonBlocking)) {
+            return reportErr(diag::BlockingAssignToFreeVar);
+        }
+
+        if (flags.has(AssignFlags::NonBlocking) && var.lifetime == VariableLifetime::Automatic &&
+            var.kind != SymbolKind::ClassProperty && !var.flags.has(VariableFlags::RefStatic)) {
+            return reportErr(diag::NonblockingAssignmentToAuto);
+        }
+
+        if (var.kind == SymbolKind::ClockVar) {
+            if (flags.has(AssignFlags::InConcat))
+                reportErr(diag::ClockVarAssignConcat);
+
+            auto& cv = var.as<ClockVarSymbol>();
+            if (cv.direction == ArgumentDirection::In)
+                return reportErr(diag::WriteToInputClockVar);
+
+            if (!flags.has(AssignFlags::NonBlocking))
+                return reportErr(diag::ClockVarSyncDrive);
+        }
+
+        if (flags.has(AssignFlags::InOutPort))
+            return reportErr(diag::InOutVarPortConn);
     }
+    else if (symbol.kind == SymbolKind::ModportPort) {
+        auto& modportPort = symbol.as<ModportPortSymbol>();
+        if (modportPort.direction == ArgumentDirection::In)
+            return reportErr(diag::InputPortAssign);
 
-    if (var.kind == SymbolKind::ClockVar) {
-        if (flags.has(AssignFlags::InConcat))
-            reportErr(diag::ClockVarAssignConcat);
-
-        auto& cv = var.as<ClockVarSymbol>();
-        if (cv.direction == ArgumentDirection::In)
-            return reportErr(diag::WriteToInputClockVar);
-
-        if (!flags.has(AssignFlags::NonBlocking))
-            return reportErr(diag::ClockVarSyncDrive);
+        if (auto expr = modportPort.getConnectionExpr()) {
+            // The assignment is actually to the underlying connection expression,
+            // so redirect it there.
+            return expr->requireLValue(context, assignLoc, flags);
+        }
     }
-
-    if (flags.has(AssignFlags::InOutPort))
-        return reportErr(diag::InOutVarPortConn);
 
     return true;
 }
@@ -354,18 +342,22 @@ std::optional<bitwidth_t> ValueExpressionBase::getEffectiveWidthImpl() const {
 }
 
 bool ValueExpressionBase::checkConstantBase(EvalContext& context) const {
-    // Class types are disallowed in constant expressions. Note that I don't see anything
-    // in the spec that would explicitly disallow them, but literally every tool issues
-    // an error so for now we will follow suit.
-    if (type->isClass()) {
-        context.addDiag(diag::ConstEvalClassType, sourceRange);
-        return false;
-    }
-
-    // Same for covergroups.
-    if (type->isCovergroup()) {
-        context.addDiag(diag::ConstEvalCovergroupType, sourceRange);
-        return false;
+    // Class types (and covergroups and virtual interfaces) are disallowed in
+    // constant expressions. Note that I don't see anything in the spec that
+    // would explicitly disallow them, but literally every tool issues an error
+    // so for now we will follow suit.
+    switch (type->getCanonicalType().kind) {
+        case SymbolKind::ClassType:
+            context.addDiag(diag::ConstEvalClassType, sourceRange);
+            return false;
+        case SymbolKind::CovergroupType:
+            context.addDiag(diag::ConstEvalCovergroupType, sourceRange);
+            return false;
+        case SymbolKind::VirtualInterfaceType:
+            context.addDiag(diag::ConstEvalVifType, sourceRange);
+            return false;
+        default:
+            break;
     }
 
     if (symbol.kind == SymbolKind::Specparam && !context.flags.has(EvalFlags::SpecparamsAllowed)) {
@@ -445,6 +437,10 @@ LValue NamedValueExpression::evalLValueImpl(EvalContext& context) const {
     return LValue(*cv);
 }
 
+bool NamedValueExpression::isEquivalentImpl(const NamedValueExpression& rhs) const {
+    return &symbol == &rhs.symbol;
+}
+
 bool NamedValueExpression::checkConstant(EvalContext& context) const {
     if (context.flags.has(EvalFlags::IsScript))
         return true;
@@ -499,14 +495,19 @@ bool NamedValueExpression::checkConstant(EvalContext& context) const {
     return true;
 }
 
-HierarchicalValueExpression::HierarchicalValueExpression(const Scope& scope,
-                                                         const ValueSymbol& symbol,
+HierarchicalValueExpression::HierarchicalValueExpression(const ValueSymbol& symbol,
                                                          const HierarchicalReference& ref,
                                                          SourceRange sourceRange) :
     ValueExpressionBase(ExpressionKind::HierarchicalValue, symbol, sourceRange), ref(ref) {
     SLANG_ASSERT(ref.target == &symbol);
     this->ref.expr = this;
+}
 
+HierarchicalValueExpression::HierarchicalValueExpression(const Scope& scope,
+                                                         const ValueSymbol& symbol,
+                                                         const HierarchicalReference& ref,
+                                                         SourceRange sourceRange) :
+    HierarchicalValueExpression(symbol, ref, sourceRange) {
     if (this->ref.isUpward())
         scope.getCompilation().noteUpwardReference(scope, this->ref);
 }
@@ -541,6 +542,12 @@ ConstantValue HierarchicalValueExpression::evalImpl(EvalContext& context) const 
             context.addDiag(diag::ConstEvalHierarchicalName, sourceRange) << symbol.name;
             return nullptr;
     }
+}
+
+bool HierarchicalValueExpression::isEquivalentImpl(const HierarchicalValueExpression& rhs) const {
+    // We say two hierarchical value expressions are equivalent if they refer to the same symbol,
+    // even if their hierarchical paths differ.
+    return &symbol == &rhs.symbol;
 }
 
 Expression& DataTypeExpression::fromSyntax(Compilation& compilation, const DataTypeSyntax& syntax,
@@ -599,9 +606,12 @@ Expression& ArbitrarySymbolExpression::fromSyntax(Compilation& comp, const NameS
                                                     &hierRef, syntax.sourceRange());
 }
 
+bool ArbitrarySymbolExpression::isEquivalentImpl(const ArbitrarySymbolExpression& rhs) const {
+    return symbol == rhs.symbol;
+}
+
 void ArbitrarySymbolExpression::serializeTo(ASTSerializer& serializer) const {
-    if (symbol)
-        serializer.writeLink("symbol", *symbol);
+    serializer.writeLink("symbol", *symbol);
 }
 
 ConstantValue LValueReferenceExpression::evalImpl(EvalContext& context) const {
@@ -619,7 +629,7 @@ Expression& ClockingEventExpression::fromSyntax(const ClockingPropertyExprSyntax
     // clock to use. We don't want usage inside of an always_comb to report an error
     // about passing time, so clear out the context's procedure to avoid that.
     ASTContext context(argContext);
-    context.clearInstanceAndProc();
+    context.clearSymbolCtx();
     context.flags |= ASTFlags::NonProcedural;
 
     auto& comp = context.getCompilation();
@@ -629,6 +639,10 @@ Expression& ClockingEventExpression::fromSyntax(const ClockingPropertyExprSyntax
         context.addDiag(diag::UnexpectedClockingExpr, syntax.expr->sourceRange());
 
     return *comp.emplace<ClockingEventExpression>(comp.getVoidType(), timing, syntax.sourceRange());
+}
+
+bool ClockingEventExpression::isEquivalentImpl(const ClockingEventExpression& rhs) const {
+    return timingControl.isEquivalentTo(rhs.timingControl);
 }
 
 void ClockingEventExpression::serializeTo(ASTSerializer& serializer) const {
@@ -1173,7 +1187,7 @@ Expression& AssertionInstanceExpression::makeDefault(const Symbol& symbol) {
     return *result;
 }
 
-struct CheckerArgVisitor : public ASTVisitor<CheckerArgVisitor, true, true> {
+struct CheckerArgVisitor : public ASTVisitor<CheckerArgVisitor, VisitFlags::AllGood> {
     const ASTContext& context;
     SourceRange argRange;
 
@@ -1208,6 +1222,9 @@ struct CheckerArgVisitor : public ASTVisitor<CheckerArgVisitor, true, true> {
         visitDefault(expr);
     }
 };
+
+static const PropertyExprSyntax* EvaluatingPlaceholder =
+    reinterpret_cast<const PropertyExprSyntax*>(UINTPTR_MAX);
 
 Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRange range,
                                                   const ASTContext& instanceCtx) {
@@ -1288,12 +1305,27 @@ Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRa
         return badExpr(comp, nullptr);
     }
 
-    auto [propExpr, argCtx] = it->second;
+    auto& argTuple = const_cast<std::tuple<const syntax::PropertyExprSyntax*, ASTContext>&>(
+        it->second);
+
+    auto propExpr = std::get<0>(argTuple);
+    auto argCtx = std::get<1>(argTuple);
     if (!propExpr) {
         // The expression can be null when making default instances of
         // sequences and properties. Just return an invalid expression.
         return badExpr(comp, nullptr);
     }
+
+    // We need to detect recursive usage of this argument in its own binding.
+    // The modification via const_cast here is a bit gross but we restore the
+    // value at the end of the function so it should be safe.
+    if (propExpr == EvaluatingPlaceholder) {
+        instanceCtx.addDiag(diag::RecursiveDefinition, range) << formal.name;
+        return badExpr(comp, nullptr);
+    }
+
+    std::get<0>(argTuple) = EvaluatingPlaceholder;
+    auto guard = ScopeGuard([&] { std::get<0>(argTuple) = propExpr; });
 
     auto [seqExpr, regExpr] = decomposePropExpr(*propExpr);
 
@@ -1373,6 +1405,22 @@ Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRa
     }
 }
 
+bool AssertionInstanceExpression::isEquivalentImpl(const AssertionInstanceExpression& rhs) const {
+    return &symbol == &rhs.symbol && isRecursiveProperty == rhs.isRecursiveProperty &&
+           std::ranges::equal(arguments, rhs.arguments, [](auto& a, auto& b) {
+               return std::visit(
+                   [](auto&& la, auto&& ra) {
+                       if constexpr (std::is_same_v<decltype(la), decltype(ra)>) {
+                           return la->isEquivalentTo(*ra);
+                       }
+                       else {
+                           return false;
+                       }
+                   },
+                   std::get<1>(a), std::get<1>(b));
+           });
+}
+
 void AssertionInstanceExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.writeLink("symbol", symbol);
     serializer.write("body", body);
@@ -1449,6 +1497,10 @@ Expression::EffectiveSign MinTypMaxExpression::getEffectiveSignImpl(bool isForCo
     return selected().getEffectiveSign(isForConversion);
 }
 
+bool MinTypMaxExpression::isEquivalentImpl(const MinTypMaxExpression& rhs) const {
+    return selected().isEquivalentTo(rhs.selected());
+}
+
 void MinTypMaxExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.write("selected", selected());
 }
@@ -1473,6 +1525,10 @@ Expression& CopyClassExpression::fromSyntax(Compilation& compilation,
 ConstantValue CopyClassExpression::evalImpl(EvalContext& context) const {
     context.addDiag(diag::ConstEvalClassType, sourceRange);
     return nullptr;
+}
+
+bool CopyClassExpression::isEquivalentImpl(const CopyClassExpression& rhs) const {
+    return sourceExpr().isEquivalentTo(rhs.sourceExpr());
 }
 
 void CopyClassExpression::serializeTo(ASTSerializer& serializer) const {
@@ -1558,6 +1614,14 @@ Expression& DistExpression::fromSyntax(Compilation& comp, const ExpressionOrDist
     return *result;
 }
 
+bool DistExpression::isEquivalentImpl(const DistExpression& rhs) const {
+    return left().isEquivalentTo(rhs.left()) &&
+           std::ranges::equal(items_, rhs.items_,
+                              [](auto& a, auto& b) { return a.isEquivalentTo(b); }) &&
+           bool(defaultWeight_) == bool(rhs.defaultWeight_) &&
+           (!defaultWeight_ || defaultWeight_->isEquivalentTo(*rhs.defaultWeight_));
+}
+
 void DistExpression::serializeTo(ASTSerializer& serializer) const {
     auto writeWeight = [&](const DistWeight& weight) {
         serializer.write("kind", weight.kind == DistWeight::PerRange ? "PerRange"sv : "PerValue"sv);
@@ -1588,8 +1652,10 @@ Expression& TaggedUnionExpression::fromSyntax(Compilation& compilation,
                                               const ASTContext& context,
                                               const Type* assignmentTarget) {
     if (!assignmentTarget || !assignmentTarget->isTaggedUnion()) {
-        if (!assignmentTarget || !assignmentTarget->isError())
+        if ((!assignmentTarget || !assignmentTarget->isError()) &&
+            !context.flags.has(ASTFlags::UnknownPortConn)) {
             context.addDiag(diag::TaggedUnionTarget, syntax.sourceRange());
+        }
         return badExpr(compilation, nullptr);
     }
 
@@ -1660,6 +1726,11 @@ ConstantValue TaggedUnionExpression::evalImpl(EvalContext& context) const {
 
         return result;
     }
+}
+
+bool TaggedUnionExpression::isEquivalentImpl(const TaggedUnionExpression& rhs) const {
+    return &member == &rhs.member && bool(valueExpr) == bool(rhs.valueExpr) &&
+           (!valueExpr || valueExpr->isEquivalentTo(*rhs.valueExpr));
 }
 
 void TaggedUnionExpression::serializeTo(ASTSerializer& serializer) const {
@@ -1765,6 +1836,13 @@ ConstantValue MatchesExpression::evalImpl(EvalContext& context) const {
     // Use Pattern::eval for full pattern matching support
     // This handles TaggedPattern, StructurePattern, VariablePattern, etc.
     return pattern.eval(context, cv, CaseStatementCondition::Normal);
+}
+
+bool MatchesExpression::isEquivalentImpl(const MatchesExpression& rhs) const {
+    // Patterns have no structural equivalence test of their own, so compare them
+    // by identity. That is conservative (structurally equal but distinct patterns
+    // report as non-equivalent), which is the safe direction for the callers.
+    return &pattern == &rhs.pattern && expr.isEquivalentTo(rhs.expr);
 }
 
 void MatchesExpression::serializeTo(ASTSerializer& serializer) const {

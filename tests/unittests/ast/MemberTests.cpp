@@ -111,7 +111,11 @@ endmodule
 
     Compilation compilation;
     compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
+
+    // The implicit net 'a' is created once even though it is assigned twice.
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ImplicitNet);
 }
 
 TEST_CASE("Invalid continuous assign") {
@@ -144,7 +148,7 @@ module m;
     assign l = d[2];
 
     logic q[$];
-    logic [1:0] qp;
+    logic qp[$];
     assign qp = q[1:0];
 
     virtual I vif;
@@ -581,7 +585,13 @@ endmodule
 
     Compilation compilation;
     compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
+
+    // One implicit net is created for each distinct undeclared identifier:
+    // asdf, foobar, foo, bar, tmp.
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 5);
+    for (auto& diag : diags)
+        CHECK(diag.code == diag::ImplicitNet);
 }
 
 TEST_CASE("Implicit nets -- default_nettype none") {
@@ -704,7 +714,7 @@ endmodule
     auto& diagnostics = compilation.getAllDiagnostics();
     auto result = "\n" + report(diagnostics);
     auto expected = R"(
-source:4:5: note: $info encountered: \"\module. .\foo. \"
+source:4:5: note: $info encountered: "\module. .\foo. "
     $info("\"%m\"");
     ^
 )";
@@ -1194,6 +1204,92 @@ source:4:27: note: comparison reduces to (1 < 0)
 )");
 }
 
+TEST_CASE("$static_assert with type comparison doesn't crash") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    $static_assert(type(logic) == type(bit));
+    $static_assert(type(logic) == type(logic));
+    logic x;
+    $static_assert(type(x) == type(logic));
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diagnostics = compilation.getAllDiagnostics();
+    std::string result = "\n" + report(diagnostics);
+    CHECK(diagnostics.size() == 1);
+    CHECK(result == R"(
+source:3:5: error: static assertion failed
+    $static_assert(type(logic) == type(bit));
+    ^
+source:3:32: note: comparison reduces to ('logic' == 'bit')
+    $static_assert(type(logic) == type(bit));
+                   ~~~~~~~~~~~~^~~~~~~~~~~~
+)");
+}
+
+TEST_CASE("$static_assert type comparison shows declaration locations") {
+    // Structurally-identical-but-distinct types print confusingly similar
+    // when only their immediate name is shown. Walk each alias chain fully
+    // and emit per-step 'declared here' notes so the user can disambiguate.
+    // This exercises a chain of two parameter overrides (T_inner -> T_outer
+    // -> bar_t) so the full hierarchy of "connected to" notes is visible.
+    auto tree = SyntaxTree::fromText(R"(
+package pkg;
+    typedef struct packed { logic [7:0] x; } foo_t;
+    typedef struct packed { logic [7:0] x; } bar_t;
+endpackage
+
+interface I_inner #(parameter type T_inner = logic);
+    import pkg::*;
+    $static_assert(type(T_inner) == type(foo_t));
+endinterface
+
+interface I_outer #(parameter type T_outer = logic);
+    I_inner #(.T_inner(T_outer)) inner_inst();
+endinterface
+
+module top;
+    import pkg::*;
+    I_outer #(.T_outer(bar_t)) outer_inst();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diagnostics = compilation.getAllDiagnostics();
+    std::string result = "\n" + report(diagnostics);
+    CHECK(result == R"(
+source:9:5: error: static assertion failed
+    $static_assert(type(T_inner) == type(foo_t));
+    ^
+source:9:34: note: comparison reduces to ('T_inner' == 'foo_t')
+    $static_assert(type(T_inner) == type(foo_t));
+                   ~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+source:7:36: note: lhs 'T_inner' declared here
+interface I_inner #(parameter type T_inner = logic);
+                                   ^
+source:13:24: note: connected to 'T_outer' here
+    I_inner #(.T_inner(T_outer)) inner_inst();
+                       ^~~~~~~
+source:12:36: note: 'T_outer' declared here
+interface I_outer #(parameter type T_outer = logic);
+                                   ^
+source:18:24: note: connected to 'bar_t' here
+    I_outer #(.T_outer(bar_t)) outer_inst();
+                       ^~~~~
+source:4:46: note: 'bar_t' declared here
+    typedef struct packed { logic [7:0] x; } bar_t;
+                                             ^
+source:3:46: note: rhs 'foo_t' declared here
+    typedef struct packed { logic [7:0] x; } foo_t;
+                                             ^
+)");
+}
+
 TEST_CASE("Interconnect nets") {
     auto tree = SyntaxTree::fromText(R"(
 package p;
@@ -1231,6 +1327,48 @@ endmodule
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::InterconnectReference);
     CHECK(diags[1].code == diag::InterconnectReference);
+}
+
+TEST_CASE("Net alias on interconnect nets") {
+    // IEEE 1800-2023 6.6.8: a net_alias statement is legal with interconnect
+    // net_lvalues as long as all nets in the alias are also interconnect nets.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    interconnect a, b, c, f;
+    interconnect [3:0] d, e;
+    alias a = b;
+    alias c = f;
+    alias d = e;
+endmodule
+
+module n;
+    interconnect a, b, c;
+    alias a = b = c;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Net alias mixing interconnect and regular nets") {
+    // Mixing an interconnect net with a non-interconnect net in an alias is
+    // illegal; the nets do not share a common nettype.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    interconnect a;
+    wire [0:0] b;
+    alias a = b;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::NetAliasCommonNetType);
 }
 
 TEST_CASE("always_comb / always_ff restrictions") {
@@ -1652,6 +1790,7 @@ TEST_CASE("System timing checks") {
     auto tree = SyntaxTree::fromText(R"(
 module m(input a, clk, data, output b);
     reg notify;
+    wire dclk, ddata;
     wire bar;
     wire [1:0] w;
 
@@ -1747,7 +1886,12 @@ endmodule
 
     Compilation compilation;
     compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
+
+    // Each distinct undeclared terminal becomes an implicit net: a, b, c, d, e.
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 5);
+    for (auto& diag : diags)
+        CHECK(diag.code == diag::ImplicitNet);
 }
 
 TEST_CASE("Specify path dup warnings") {
@@ -1823,6 +1967,7 @@ endmodule
 TEST_CASE("Charge and drive strength API access") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
+    wire foo, a;
     assign (supply1, weak0) foo = 1;
     pullup (strong1) p1 (a);
     trireg (small) b;
@@ -1952,7 +2097,8 @@ endmodule
 
     Compilation compilation;
     compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
+    auto diags = compilation.getAllDiagnostics().filter({diag::ImplicitNet});
+    CHECK(diags.empty());
 }
 
 TEST_CASE("Net alias errors") {
@@ -2035,23 +2181,23 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 22);
+    auto diags = compilation.getAllDiagnostics().filter({diag::ImplicitNet});
+    REQUIRE(diags.size() == 24);
     CHECK(diags[0].code == diag::MultipleNetAlias);
-    CHECK(diags[1].code == diag::NetAliasSelf);
+    CHECK(diags[1].code == diag::MultipleNetAlias);
     CHECK(diags[2].code == diag::NetAliasSelf);
     CHECK(diags[3].code == diag::MultipleNetAlias);
-    CHECK(diags[4].code == diag::MultipleNetAlias);
+    CHECK(diags[4].code == diag::NetAliasSelf);
     CHECK(diags[5].code == diag::NetAliasSelf);
     CHECK(diags[6].code == diag::NetAliasSelf);
     CHECK(diags[7].code == diag::NetAliasSelf);
-    CHECK(diags[8].code == diag::MultipleNetAlias);
+    CHECK(diags[8].code == diag::NetAliasSelf);
     CHECK(diags[9].code == diag::MultipleNetAlias);
-    CHECK(diags[10].code == diag::NetAliasSelf);
+    CHECK(diags[10].code == diag::MultipleNetAlias);
     CHECK(diags[11].code == diag::MultipleNetAlias);
-    CHECK(diags[12].code == diag::MultipleNetAlias);
+    CHECK(diags[12].code == diag::NetAliasSelf);
     CHECK(diags[13].code == diag::MultipleNetAlias);
-    CHECK(diags[14].code == diag::MultipleNetAlias);
+    CHECK(diags[14].code == diag::NetAliasSelf);
     CHECK(diags[15].code == diag::MultipleNetAlias);
     CHECK(diags[16].code == diag::MultipleNetAlias);
     CHECK(diags[17].code == diag::MultipleNetAlias);
@@ -2059,6 +2205,8 @@ endmodule
     CHECK(diags[19].code == diag::MultipleNetAlias);
     CHECK(diags[20].code == diag::MultipleNetAlias);
     CHECK(diags[21].code == diag::MultipleNetAlias);
+    CHECK(diags[22].code == diag::MultipleNetAlias);
+    CHECK(diags[23].code == diag::MultipleNetAlias);
 }
 
 TEST_CASE("Action block parsing regress GH #911") {
@@ -2253,12 +2401,11 @@ endpackage
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 5);
+    REQUIRE(diags.size() == 4);
     CHECK(diags[0].code == diag::PackageImportSelf);
     CHECK(diags[1].code == diag::PackageImportSelf);
     CHECK(diags[2].code == diag::PackageExportSelf);
-    CHECK(diags[3].code == diag::Redefinition);
-    CHECK(diags[4].code == diag::PackageExportSelf);
+    CHECK(diags[3].code == diag::PackageExportSelf);
 }
 
 TEST_CASE("DPI task import has correct return type") {

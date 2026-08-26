@@ -7,13 +7,13 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/SFormat.h"
 
+#include "../text/FormatBuffer.h"
 #include <cmath>
 #include <ieee1800/vpi_user.h>
 
 #include "slang/ast/ASTVisitor.h"
 #include "slang/diagnostics/SysFuncsDiags.h"
 #include "slang/text/CharInfo.h"
-#include "slang/text/FormatBuffer.h"
 #include "slang/util/String.h"
 
 static const double log2_10 = std::log2(10.0);
@@ -282,6 +282,13 @@ static void formatRaw2(std::string& result, const ConstantValue& value) {
         return;
     }
 
+    if (value.isUnion()) {
+        // An unpacked union stores its active member; emit that member's raw
+        // representation, mirroring the unpacked struct/array recursion above.
+        formatRaw2(result, value.unionVal()->value);
+        return;
+    }
+
     SVInt sv = value.integer();
     sv.flattenUnknowns();
 
@@ -302,6 +309,13 @@ static void formatRaw4(std::string& result, const ConstantValue& value) {
     if (value.isUnpacked()) {
         for (auto& elem : value.elements())
             formatRaw4(result, elem);
+        return;
+    }
+
+    if (value.isUnion()) {
+        // An unpacked union stores its active member; emit that member's raw
+        // representation, mirroring the unpacked struct/array recursion above.
+        formatRaw4(result, value.unionVal()->value);
         return;
     }
 

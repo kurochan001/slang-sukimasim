@@ -15,45 +15,11 @@
 
 namespace slang::ast {
 
-static bool isEligibleForCaching(const InstanceSymbol& symbol) {
-    return !symbol.resolvedConfig && !symbol.body.hierarchyOverrideNode &&
-           !symbol.body.flags.has(InstanceFlags::PreventsCaching);
-}
-
-class InstanceCacheKey {
-public:
-    InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
-                     SmallSet<const InstanceSymbol*, 2>& visitedInstances);
-
-    bool operator==(const InstanceCacheKey& other) const;
-    bool operator!=(const InstanceCacheKey& other) const { return !(*this == other); }
-
-    size_t hash() const { return savedHash; }
-
-private:
-    not_null<const InstanceSymbol*> symbol;
-    std::vector<std::pair<InstanceCacheKey, const ModportSymbol*>> ifaceKeys;
-    size_t savedHash;
-};
-
-} // namespace slang::ast
-
-namespace slang {
-
-template<>
-struct hash<ast::InstanceCacheKey> {
-    size_t operator()(const ast::InstanceCacheKey& key) const noexcept { return key.hash(); }
-};
-
-} // namespace slang
-
-namespace slang::ast {
-
 using namespace syntax;
 
 // This visitor is used to touch every node in the AST to ensure that all lazily
 // evaluated members have been realized and we have recorded every diagnostic.
-struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
+struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
     DiagnosticVisitor(Compilation& compilation, const size_t& numErrors, uint32_t errorLimit) :
         compilation(compilation), numErrors(numErrors), errorLimit(errorLimit) {}
 
@@ -107,7 +73,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
     void handle(const PackageSymbol& symbol) {
         if (!handleDefault(symbol))
             return;
-        symbol.checkExplicitExports();
+        symbol.resolveExports();
     }
 
     void handle(const InterfacePortSymbol& symbol) {
@@ -188,9 +154,6 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
     void handle(const MethodPrototypeSymbol& symbol) {
         if (!handleDefault(symbol))
             return;
-
-        if (auto sub = symbol.getSubroutine())
-            handle(*sub);
 
         if (symbol.flags.has(MethodFlags::InterfaceExtern)) {
             externIfaceProtos.push_back(&symbol);
@@ -354,10 +317,8 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
 
         TimeTraceScope timeScope("AST Instance", [&] { return symbol.getHierarchicalPath(); });
 
-        for (auto conn : symbol.getPortConnections()) {
+        for (auto conn : symbol.getPortConnections())
             conn->getExpression();
-            conn->checkSimulatedNetTypes();
-        }
 
         if (!visitInstances)
             return;
@@ -384,8 +345,9 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
         }
         else if (activeInstanceBodies.contains(symbol.getCanonicalBody())) {
             // Detect infinite recursion that we missed earlier because of caching.
+            auto name = symbol.name.empty() ? "<unnamed instance>"sv : symbol.name;
             symbol.getParentScope()->addDiag(diag::InfinitelyRecursiveHierarchy, symbol.location)
-                << symbol.name;
+                << name;
             hierarchyProblem = true;
         }
     }
@@ -500,9 +462,9 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
         }
 
         // Check the validity of virtual interface assignments.
-        while (!compilation.virtualInterfaceInstances.empty()) {
-            auto vii = std::move(compilation.virtualInterfaceInstances);
-            compilation.virtualInterfaceInstances.clear();
+        while (!compilation.virtualIfaceInstances.empty()) {
+            auto vii = std::move(compilation.virtualIfaceInstances);
+            compilation.virtualIfaceInstances.clear();
 
             for (auto inst : vii) {
                 inst->visit(*this);
@@ -541,7 +503,9 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
         }
 
         // Visit all attributes and force their values to resolve.
-        for (auto& [_, attrList] : compilation.attributeMap) {
+        // Map is copied in case binding the expression causes map mutation
+        auto attributeMap = compilation.attributeMap;
+        for (auto& [_, attrList] : attributeMap) {
             for (auto attr : attrList)
                 attr->getValue();
         }
@@ -572,7 +536,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
 
         // Instances that are targeted by defparams, bind directives, or configuration rules,
         // or that are themselves created by a bind directive, cannot participate in caching.
-        if (!isEligibleForCaching(symbol))
+        if (!InstanceCacheKey::isEligibleForCaching(symbol))
             return false;
 
         // "Identical" needs to take into account parameter values and interface ports,
@@ -657,202 +621,5 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor, false, false> {
     SmallVector<std::pair<const InterfacePortSymbol*, const ModportSymbol*>> modportsWithExports;
     TimingPathMap timingPathMap;
 };
-
-// This visitor is for finding all defparam directives in the hierarchy.
-// We're given a target generate "level" to reach, where the level is a measure
-// of how deep the design is in terms of nested generate blocks. Once we reach
-// the target level we don't go any deeper, except for the following case:
-//
-// If we find a potentially infinitely recursive module (because it instantiates
-// itself directly or indirectly) we will continue traversing deeper to see if we
-// hit the limit for max depth, which lets us bail out of defparam evaluation completely.
-// Since defparams are disallowed from modifying parameters above them across generate
-// blocks, an infinitely recursive module instantiation can't be stopped by a deeper
-// defparam evaluation.
-//
-// This visitor also implicitly serves to discover bind directives. They are registered
-// with the compilation by Scope::addMembers and then get processed after we finish
-// visiting the tree.
-struct DefParamVisitor : public ASTVisitor<DefParamVisitor, false, false> {
-    DefParamVisitor(size_t maxInstanceDepth, size_t generateLevel) :
-        maxInstanceDepth(maxInstanceDepth), generateLevel(generateLevel) {}
-
-    void handle(const RootSymbol& symbol) { visitDefault(symbol); }
-    void handle(const CompilationUnitSymbol& symbol) { visitDefault(symbol); }
-
-    void handle(const DefParamSymbol& symbol) {
-        if (generateDepth <= generateLevel)
-            found.push_back(&symbol);
-    }
-
-    void handle(const InstanceSymbol& symbol) {
-        if (symbol.name.empty() || symbol.body.flags.has(InstanceFlags::Uninstantiated) ||
-            hierarchyProblem) {
-            return;
-        }
-
-        // If we hit max depth we have a problem -- setting the hierarchyProblem
-        // member will cause other functions to early out so that we complete
-        // this visitation as quickly as possible.
-        if (instanceDepth > maxInstanceDepth) {
-            hierarchyProblem = &symbol;
-            return;
-        }
-
-        bool inserted = false;
-        const bool wasInRecursive = inRecursiveInstance;
-        if (!inRecursiveInstance) {
-            // If the instance's definition is already in the active set,
-            // we potentially have an infinitely recursive instantiation and
-            // need to go all the way to the maximum depth to find out.
-            inserted = activeInstances.emplace(&symbol.getDefinition()).second;
-            if (!inserted)
-                inRecursiveInstance = true;
-        }
-
-        // If we're past our target depth because we're searching for a potentially
-        // infinitely recursive instantiation, don't count the block.
-        if (generateDepth <= generateLevel)
-            numBlocksSeen++;
-
-        instanceDepth++;
-        visitDefault(symbol.body);
-        instanceDepth--;
-
-        inRecursiveInstance = wasInRecursive;
-        if (inserted)
-            activeInstances.erase(&symbol.getDefinition());
-    }
-
-    void handle(const GenerateBlockSymbol& symbol) {
-        if (symbol.isUninstantiated || hierarchyProblem)
-            return;
-
-        if (generateDepth >= generateLevel && !inRecursiveInstance)
-            return;
-
-        // We don't count the case where we are *at* the target level
-        // because we're about to descend into the generate block,
-        // so it counts as deeper level.
-        if (generateDepth < generateLevel)
-            numBlocksSeen++;
-
-        generateDepth++;
-        visitDefault(symbol);
-        generateDepth--;
-    }
-
-    void handle(const GenerateBlockArraySymbol& symbol) {
-        for (auto& member : symbol.members()) {
-            if (hierarchyProblem)
-                return;
-            member.visit(*this);
-        }
-    }
-
-    template<typename T>
-    void handle(const T&) {}
-
-    SmallVector<const DefParamSymbol*> found;
-    flat_hash_set<const DefinitionSymbol*> activeInstances;
-    size_t instanceDepth = 0;
-    size_t maxInstanceDepth = 0;
-    size_t generateLevel = 0;
-    size_t numBlocksSeen = 0;
-    size_t generateDepth = 0;
-    bool inRecursiveInstance = false;
-    const InstanceSymbol* hierarchyProblem = nullptr;
-};
-
-InstanceCacheKey::InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
-                                   SmallSet<const InstanceSymbol*, 2>& visitedInstances) :
-    symbol(&symbol) {
-    size_t h = 0;
-    hash_combine(h, &symbol.getDefinition());
-
-    for (auto param : symbol.body.getParameters()) {
-        if (param->symbol.kind == SymbolKind::Parameter)
-            hash_combine(h, param->symbol.as<ParameterSymbol>().getValue().hash());
-        else
-            hash_combine(h, param->symbol.as<TypeParameterSymbol>().targetType.getType().hash());
-    }
-
-    for (auto conn : symbol.getPortConnections()) {
-        if (conn->port.kind == SymbolKind::InterfacePort) {
-            auto [iface, modport] = conn->getIfaceConn();
-            while (iface && iface->kind == SymbolKind::InstanceArray) {
-                auto& arr = iface->as<InstanceArraySymbol>();
-                if (arr.empty())
-                    iface = nullptr;
-                else
-                    iface = arr.elements[0];
-            }
-
-            if (iface) {
-                auto& ifaceInst = iface->as<InstanceSymbol>();
-                if (!isEligibleForCaching(ifaceInst) ||
-                    !visitedInstances.insert(&ifaceInst).second) {
-                    valid = false;
-                    return;
-                }
-
-                InstanceCacheKey ifaceKey(ifaceInst, valid, visitedInstances);
-                if (!valid)
-                    return;
-
-                ifaceKeys.emplace_back(std::move(ifaceKey), modport);
-                hash_combine(h, ifaceKeys.back().first.savedHash);
-
-                if (modport)
-                    hash_combine(h, modport->name);
-            }
-        }
-    }
-
-    savedHash = h;
-}
-
-bool InstanceCacheKey::operator==(const InstanceCacheKey& other) const {
-    if (savedHash != other.savedHash ||
-        &symbol->getDefinition() != &other.symbol->getDefinition() ||
-        ifaceKeys.size() != other.ifaceKeys.size()) {
-        return false;
-    }
-
-    auto lparams = symbol->body.getParameters();
-    auto rparams = other.symbol->body.getParameters();
-    SLANG_ASSERT(lparams.size() == rparams.size());
-
-    for (size_t i = 0; i < lparams.size(); i++) {
-        auto lp = lparams[i];
-        auto rp = rparams[i];
-        SLANG_ASSERT(lp->symbol.kind == rp->symbol.kind);
-
-        if (lp->symbol.kind == SymbolKind::Parameter) {
-            if (lp->symbol.as<ParameterSymbol>().getValue() !=
-                rp->symbol.as<ParameterSymbol>().getValue()) {
-                return false;
-            }
-        }
-        else {
-            auto& lt = lp->symbol.as<TypeParameterSymbol>().targetType.getType();
-            auto& rt = rp->symbol.as<TypeParameterSymbol>().targetType.getType();
-            if (!lt.isMatching(rt) && !lt.isIdenticalStructUnion(rt))
-                return false;
-        }
-    }
-
-    for (size_t i = 0; i < ifaceKeys.size(); i++) {
-        auto& l = ifaceKeys[i];
-        auto& r = other.ifaceKeys[i];
-        if (l.first != r.first)
-            return false;
-
-        if (bool(l.second) != bool(r.second) || (l.second && l.second->name != r.second->name))
-            return false;
-    }
-
-    return true;
-}
 
 } // namespace slang::ast

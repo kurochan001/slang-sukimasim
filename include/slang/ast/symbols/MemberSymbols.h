@@ -59,7 +59,6 @@ class SLANG_EXPORT ExplicitImportSymbol final : public Symbol {
 public:
     std::string_view packageName;
     std::string_view importName;
-    bool isFromExport = false;
 
     ExplicitImportSymbol(std::string_view packageName, std::string_view importName,
                          SourceLocation location) :
@@ -69,9 +68,6 @@ public:
     const PackageSymbol* package() const;
     const Symbol* importedSymbol() const;
 
-    void noteCorrespondingImport() const { correspondingImport = true; }
-    bool sawCorrespondingImport() const { return correspondingImport; }
-
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::ExplicitImport; }
@@ -80,7 +76,6 @@ private:
     mutable const PackageSymbol* package_ = nullptr;
     mutable const Symbol* import = nullptr;
     mutable bool initialized = false;
-    mutable bool correspondingImport = false;
 };
 
 /// Represents a wildcard import declaration. This symbol is special in
@@ -90,7 +85,6 @@ private:
 class SLANG_EXPORT WildcardImportSymbol final : public Symbol {
 public:
     std::string_view packageName;
-    bool isFromExport = false;
 
     WildcardImportSymbol(std::string_view packageName, SourceLocation location) :
         Symbol(SymbolKind::WildcardImport, "", location), packageName(packageName) {}
@@ -384,6 +378,9 @@ public:
 /// Represents a clocking block.
 class SLANG_EXPORT ClockingBlockSymbol final : public Symbol, public Scope {
 public:
+    bool isDefault = false;
+    bool isGlobal = false;
+
     ClockingBlockSymbol(Compilation& compilation, std::string_view name, SourceLocation loc);
 
     const TimingControl& getEvent() const;

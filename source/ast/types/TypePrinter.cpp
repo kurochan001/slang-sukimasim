@@ -7,8 +7,9 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/types/TypePrinter.h"
 
+#include "../../text/FormatBuffer.h"
+
 #include "slang/ast/ASTVisitor.h"
-#include "slang/text/FormatBuffer.h"
 
 namespace slang::ast {
 
@@ -35,9 +36,13 @@ TypePrinter::TypePrinter() : buffer(std::make_unique<FormatBuffer>()) {
 
 TypePrinter::~TypePrinter() = default;
 
+void TypePrinter::maybeAddQuote() {
+    if (options.quoteChar)
+        buffer->append(*options.quoteChar);
+}
+
 void TypePrinter::append(const Type& type) {
-    if (options.addSingleQuotes)
-        buffer->append("'");
+    maybeAddQuote();
 
     if (options.printAKA && type.kind == SymbolKind::TypeAlias) {
         if (!options.elideScopeNames)
@@ -48,11 +53,30 @@ void TypePrinter::append(const Type& type) {
         type.visit(*this, ""sv);
     }
 
-    if (options.addSingleQuotes)
-        buffer->append("'");
+    maybeAddQuote();
 
     if (options.printAKA && type.kind == SymbolKind::TypeAlias)
         printAKA(type);
+
+    if (options.printIntegralRange) {
+        auto& canon = type.getCanonicalType();
+        switch (canon.kind) {
+            case SymbolKind::EnumType:
+            case SymbolKind::PackedStructType:
+            case SymbolKind::PackedUnionType: {
+                const auto& intType = canon.as<IntegralType>();
+                auto range = intType.getBitVectorRange();
+                auto arrKind = intType.isFourState ? "logic" : "bit";
+                buffer->append(" (");
+                maybeAddQuote();
+                buffer->format("{}[{}:{}]", arrKind, range.left, range.right);
+                maybeAddQuote();
+                buffer->append(")");
+            } break;
+            default:
+                break;
+        }
+    }
 }
 
 void TypePrinter::clear() {
@@ -85,10 +109,30 @@ void TypePrinter::visit(const EnumType& type, std::string_view overrideName) {
 
         if (!type.name.empty())
             buffer->append(type.name);
-        else if (overrideName.empty())
-            buffer->append("<unnamed enum>");
-        else
+        else if (!overrideName.empty())
             buffer->append(overrideName);
+        else {
+            buffer->append("enum{");
+
+            const size_t startSize = buffer->size();
+            bool first = true;
+            for (const auto& member : type.values()) {
+                const size_t entryStart = buffer->size();
+                if (!first)
+                    buffer->append(", ");
+
+                buffer->append(member.name);
+                if (buffer->size() - startSize > options.friendlyMemberCharLimit) {
+                    buffer->resize(entryStart);
+                    if (!first)
+                        buffer->append(", ");
+                    buffer->append("...");
+                    break;
+                }
+                first = false;
+            }
+            buffer->append("}");
+        }
     }
     else {
         if (options.enumsAsLinks) {
@@ -151,8 +195,12 @@ void TypePrinter::visit(const PackedStructType& type, std::string_view overrideN
     if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
         printScope(type.getParentScope());
 
-        if (overrideName.empty())
-            buffer->append("<unnamed packed struct>");
+        if (overrideName.empty()) {
+            buffer->append("struct packed");
+            if (type.isSigned)
+                buffer->append(" signed");
+            appendFriendlyMembers(type);
+        }
         else
             buffer->append(overrideName);
     }
@@ -178,8 +226,12 @@ void TypePrinter::visit(const PackedUnionType& type, std::string_view overrideNa
     if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
         printScope(type.getParentScope());
 
-        if (overrideName.empty())
-            buffer->append("<unnamed packed union>");
+        if (overrideName.empty()) {
+            buffer->append("union packed");
+            if (type.isSigned)
+                buffer->append(" signed");
+            appendFriendlyMembers(type);
+        }
         else
             buffer->append(overrideName);
     }
@@ -205,79 +257,33 @@ void TypePrinter::visit(const PackedUnionType& type, std::string_view overrideNa
 }
 
 void TypePrinter::visit(const FixedSizeUnpackedArrayType& type, std::string_view) {
-    if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
-        buffer->append("unpacked array ");
-        if (!type.range.isLittleEndian() && type.range.lower() == 0)
-            buffer->format("[{}]", type.range.width());
-        else
-            buffer->format("[{}:{}]", type.range.left, type.range.right);
-
-        buffer->append(" of ");
-        type.elementType.visit(*this, ""sv);
-    }
-    else {
-        printUnpackedArray(type);
-    }
+    printUnpackedArray(type);
 }
 
 void TypePrinter::visit(const DynamicArrayType& type, std::string_view) {
-    if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
-        buffer->append("dynamic array of ");
-        type.elementType.visit(*this, ""sv);
-    }
-    else {
-        printUnpackedArray(type);
-    }
+    printUnpackedArray(type);
 }
 
 void TypePrinter::visit(const DPIOpenArrayType& type, std::string_view) {
-    if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
-        if (type.isPacked) {
-            type.elementType.visit(*this, ""sv);
-            buffer->append("[]");
-        }
-        else {
-            buffer->append("unpacked array [] of ");
-            type.elementType.visit(*this, ""sv);
-        }
-    }
-    else {
-        printUnpackedArray(type);
-    }
+    printUnpackedArray(type);
 }
 
 void TypePrinter::visit(const AssociativeArrayType& type, std::string_view) {
-    if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
-        buffer->append("associative array [");
-        if (type.indexType)
-            type.indexType->visit(*this, ""sv);
-        else
-            buffer->append("*");
-
-        buffer->append("] of ");
-        type.elementType.visit(*this, ""sv);
-    }
-    else {
-        printUnpackedArray(type);
-    }
+    printUnpackedArray(type);
 }
 
 void TypePrinter::visit(const QueueType& type, std::string_view) {
-    if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
-        buffer->append("queue of ");
-        type.elementType.visit(*this, ""sv);
-    }
-    else {
-        printUnpackedArray(type);
-    }
+    printUnpackedArray(type);
 }
 
 void TypePrinter::visit(const UnpackedStructType& type, std::string_view overrideName) {
     if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
         printScope(type.getParentScope());
 
-        if (overrideName.empty())
-            buffer->append("<unnamed unpacked struct>");
+        if (overrideName.empty()) {
+            buffer->append("struct");
+            appendFriendlyMembers(type);
+        }
         else
             buffer->append(overrideName);
     }
@@ -300,8 +306,10 @@ void TypePrinter::visit(const UnpackedUnionType& type, std::string_view override
     if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
         printScope(type.getParentScope());
 
-        if (overrideName.empty())
-            buffer->append("<unnamed unpacked union>");
+        if (overrideName.empty()) {
+            buffer->append("union");
+            appendFriendlyMembers(type);
+        }
         else
             buffer->append(overrideName);
     }
@@ -364,10 +372,16 @@ void TypePrinter::visit(const PropertyType& type, std::string_view) {
 }
 
 void TypePrinter::visit(const ClassType& type, std::string_view) {
+    if (options.classesAsLinks)
+        buffer->format("{} ", uintptr_t(&type));
     buffer->append(type.name);
+    if (type.genericClass)
+        appendParameters(type.genericParameters, false);
 }
 
 void TypePrinter::visit(const CovergroupType& type, std::string_view) {
+    if (options.classesAsLinks)
+        buffer->format("{} ", uintptr_t(&type));
     if (type.name.empty())
         buffer->append("<unnamed covergroup>");
     else
@@ -385,18 +399,11 @@ void TypePrinter::visit(const VirtualInterfaceType& type, std::string_view) {
 
     auto params = type.iface.body.getParameters();
     if (!params.empty()) {
-        buffer->append("#(");
-        for (auto param : params) {
-            buffer->format("{}=", param->symbol.name);
-            if (param->symbol.kind == SymbolKind::TypeParameter)
-                append(param->symbol.as<TypeParameterSymbol>().targetType.getType());
-            else
-                buffer->append(param->symbol.as<ParameterSymbol>().getValue().toString());
-            buffer->append(",");
-        }
+        SmallVector<const Symbol*> paramSymbols(params.size(), UninitializedTag{});
+        for (auto param : params)
+            paramSymbols.push_back(&param->symbol);
 
-        buffer->pop_back();
-        buffer->append(")");
+        appendParameters(paramSymbols, true);
     }
 
     if (type.modport)
@@ -432,6 +439,31 @@ void TypePrinter::visit(const ErrorType&, std::string_view) {
     buffer->append("<error>");
 }
 
+void TypePrinter::appendFriendlyMembers(const Scope& scope) {
+    buffer->append("{");
+    const size_t startSize = buffer->size();
+    bool first = true;
+
+    for (auto& member : scope.members()) {
+        const size_t entryStart = buffer->size();
+        if (!first)
+            buffer->append(", ");
+
+        member.as<VariableSymbol>().getType().visit(*this, ""sv);
+        buffer->format(" {}", member.name);
+
+        if (buffer->size() - startSize > options.friendlyMemberCharLimit) {
+            buffer->resize(entryStart);
+            if (!first)
+                buffer->append(", ");
+            buffer->append("...");
+            break;
+        }
+        first = false;
+    }
+    buffer->append("}");
+}
+
 void TypePrinter::appendMembers(const Scope& scope) {
     buffer->append("{");
     for (auto& member : scope.members()) {
@@ -440,6 +472,32 @@ void TypePrinter::appendMembers(const Scope& scope) {
         buffer->format(" {};", var.name);
     }
     buffer->append("}");
+}
+
+void TypePrinter::appendParameters(std::span<const Symbol* const> parameters, bool includeNames) {
+    buffer->append("#(");
+    if (parameters.empty()) {
+        buffer->append(")");
+        return;
+    }
+
+    auto guard = ScopeGuard([savedFlag = std::exchange(options.quoteChar, std::nullopt), this] {
+        options.quoteChar = savedFlag;
+    });
+
+    for (auto param : parameters) {
+        if (includeNames)
+            buffer->format("{}=", param->name);
+
+        if (param->kind == SymbolKind::TypeParameter)
+            append(param->as<TypeParameterSymbol>().targetType.getType());
+        else
+            buffer->append(param->as<ParameterSymbol>().getValue().toString());
+        buffer->append(",");
+    }
+
+    buffer->pop_back();
+    buffer->append(")");
 }
 
 void TypePrinter::printUnpackedArray(const Type& type) {
@@ -457,7 +515,13 @@ void TypePrinter::printUnpackedArrayDim(const Type& type) {
     switch (type.kind) {
         case SymbolKind::FixedSizeUnpackedArrayType: {
             auto& at = type.as<FixedSizeUnpackedArrayType>();
-            buffer->format("[{}:{}]", at.range.left, at.range.right);
+            if (!at.range.isDescending() && at.range.left == 0 &&
+                options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
+                buffer->format("[{}]", at.range.right + 1);
+            }
+            else {
+                buffer->format("[{}:{}]", at.range.left, at.range.right);
+            }
             break;
         }
         case SymbolKind::DynamicArrayType:
@@ -513,14 +577,16 @@ void TypePrinter::printAKA(const Type& type) {
     }
 
     if (target != &type && target->name != type.name) {
-        buffer->append(" (aka '");
+        buffer->append(" (aka ");
+        maybeAddQuote();
         target->visit(*this, ""sv);
-        buffer->append("')");
+        maybeAddQuote();
+        buffer->append(")");
     }
 }
 
 TypeArgFormatter::TypeArgFormatter() {
-    printer.options.addSingleQuotes = true;
+    printer.options.quoteChar = '\'';
     printer.options.elideScopeNames = true;
     printer.options.printAKA = true;
     printer.options.anonymousTypeStyle = TypePrintingOptions::FriendlyName;

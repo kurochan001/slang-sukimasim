@@ -46,6 +46,7 @@ class Symbol;
     x(Compilation) \
     x(Analysis) \
     x(Meta) \
+    x(Driver) \
     x(Tidy) \
     x(Netlist)
 SLANG_ENUM_SIZED(DiagSubsystem, uint16_t, DS)
@@ -207,8 +208,8 @@ public:
 
 class SLANG_EXPORT DiagGroup {
 public:
-    explicit DiagGroup(const std::string& name, const std::vector<DiagCode>& diags) :
-        name(name), diags(diags) {}
+    explicit DiagGroup(std::string name, const std::vector<DiagCode>& diags) :
+        name(std::move(name)), diags(diags) {}
 
     std::string_view getName() const { return name; }
     std::span<const DiagCode> getDiags() const { return diags; }

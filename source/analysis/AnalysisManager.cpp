@@ -8,9 +8,13 @@
 #include "slang/analysis/AnalysisManager.h"
 
 #include "AnalysisScopeVisitor.h"
+#include "ConstraintAnalysis.h"
 
+#include "slang/analysis/ClockInference.h"
+#include "slang/analysis/DataFlowAnalysis.h"
 #include "slang/ast/ASTDiagMap.h"
 #include "slang/ast/Compilation.h"
+#include "slang/text/SourceManager.h"
 
 namespace slang::analysis {
 
@@ -31,10 +35,6 @@ static const Scope& getAsScope(const Symbol& symbol) {
     }
 }
 
-const AnalyzedScope* PendingAnalysis::tryGet() const {
-    return analysisManager->getAnalyzedScope(getAsScope(*symbol));
-}
-
 Diagnostic& AnalysisContext::addDiag(const Symbol& symbol, DiagCode code, SourceLocation location) {
     return diagnostics.add(symbol, code, location);
 }
@@ -43,57 +43,51 @@ Diagnostic& AnalysisContext::addDiag(const Symbol& symbol, DiagCode code, Source
     return diagnostics.add(symbol, code, sourceRange);
 }
 
-AnalysisManager::AnalysisManager(AnalysisOptions options) :
-#if defined(SLANG_USE_THREADS)
-    options(options), threadPool(options.numThreads) {
-#else
-    options(options) {
-#endif
-
-#if defined(SLANG_USE_THREADS)
-    workerStates.reserve(threadPool.get_thread_count() + 1);
-    for (size_t i = 0; i < threadPool.get_thread_count() + 1; i++)
-        workerStates.emplace_back(*this);
-#else
-    workerStates.emplace_back(*this);
-#endif
+Diagnostic& AnalysisContext::addDiag(const Symbol& symbol, DiagCode code) {
+    if (manager->sourceManager->isMacroLoc(symbol.location)) {
+        return diagnostics.add(symbol, code, symbol.location);
+    }
+    else {
+        return diagnostics.add(
+            symbol, code, SourceRange{symbol.location, symbol.location + symbol.name.length()});
+    }
 }
 
-AnalyzedDesign AnalysisManager::analyze(const Compilation& compilation) {
+AnalysisManager::AnalysisManager(AnalysisOptions options, std::shared_ptr<ThreadPool> threadPool) :
+    options(options), threadPool(std::move(threadPool)) {
+
+    if (this->threadPool) {
+        const size_t count = this->threadPool->get_thread_count() + 1;
+        workerStates.reserve(count);
+        for (size_t i = 0; i < count; i++)
+            workerStates.emplace_back(*this);
+    }
+    else {
+        workerStates.emplace_back(*this);
+    }
+}
+
+void AnalysisManager::analyze(const Compilation& compilation) {
     if (!compilation.isElaborated())
         SLANG_THROW(std::runtime_error("Compilation must be elaborated before analysis"));
 
     SLANG_ASSERT(compilation.isFrozen());
     if (compilation.hasFatalErrors())
-        return {};
+        return;
+
+    if (sourceManager && sourceManager != compilation.getSourceManager()) {
+        SLANG_THROW(
+            std::runtime_error("AnalysisManager cannot be reused with different source managers"));
+    }
+    sourceManager = compilation.getSourceManager();
 
     // Analyze all compilation units first.
     auto& root = compilation.getRootNoFinalize();
     for (auto unit : root.compilationUnits)
         analyzeScopeAsync(*unit);
-    wait();
-
-    // Go back through and collect all of the units that were analyzed.
-    AnalyzedDesign result(compilation);
-    for (auto unit : root.compilationUnits) {
-        auto scope = getAnalyzedScope(*unit);
-        SLANG_ASSERT(scope);
-        result.compilationUnits.push_back(scope);
-    }
-
-    // Collect all packages into our result object.
-    for (auto package : compilation.getPackages()) {
-        // Skip the built-in "std" package.
-        if (package->name == "std")
-            continue;
-
-        auto scope = getAnalyzedScope(*package);
-        SLANG_ASSERT(scope);
-        result.packages.push_back(scope);
-    }
 
     for (auto instance : root.topInstances)
-        result.topInstances.emplace_back(analyzeSymbol(*instance));
+        analyzeSymbolAsync(*instance);
     wait();
 
     // Finalize all drivers that are applied through indirect drivers.
@@ -104,26 +98,10 @@ AnalyzedDesign AnalysisManager::analyze(const Compilation& compilation) {
     if (hasFlag(AnalysisFlags::CheckUnused)) {
         for (auto def : compilation.getUnreferencedDefinitions()) {
             if (!def->name.empty() && def->name != "_"sv && !hasUnusedAttrib(compilation, *def)) {
-                state.context.addDiag(*def, diag::UnusedDefinition, def->location)
-                    << def->getKindString();
+                state.context.addDiag(*def, diag::UnusedDefinition) << def->getKindString();
             }
         }
     }
-
-    return result;
-}
-
-const AnalyzedScope& AnalysisManager::analyzeScopeBlocking(
-    const Scope& scope, const AnalyzedProcedure* parentProcedure) {
-
-    auto& state = getState();
-    auto& result = *state.scopeAlloc.emplace(scope);
-
-    AnalysisScopeVisitor visitor(state, result, parentProcedure);
-    for (auto& member : scope.members())
-        member.visit(visitor);
-
-    return result;
 }
 
 const AnalyzedScope* AnalysisManager::getAnalyzedScope(const Scope& scope) const {
@@ -143,39 +121,50 @@ const AnalyzedProcedure* AnalysisManager::getAnalyzedSubroutine(
     return result;
 }
 
-const AnalyzedProcedure* AnalysisManager::addAnalyzedSubroutine(
-    const SubroutineSymbol& symbol, std::unique_ptr<AnalyzedProcedure> procedure) {
+std::vector<const AnalyzedAssertion*> AnalysisManager::getAnalyzedAssertions(
+    const Symbol& symbol) const {
 
-    const AnalyzedProcedure* result = nullptr;
-    auto updater = [&result](auto& item) { result = item.second.get(); };
+    std::vector<const AnalyzedAssertion*> results;
+    analyzedAssertions.cvisit(&symbol, [&results](auto& item) {
+        for (auto& elem : item.second)
+            results.push_back(elem.get());
+    });
+    return results;
+}
 
-    if (analyzedSubroutines.try_emplace_and_cvisit(&symbol, std::move(procedure), updater,
-                                                   updater)) {
-        // If we successfully inserted a new procedure, we need to
-        // add it to the driver tracker. If not, someone else already
-        // did it for us.
-        SLANG_ASSERT(result);
+void AnalysisManager::analyzeAssertion(const AnalyzedProcedure& procedure,
+                                       const ConcurrentAssertionStatement& stmt) {
+    handleAssertion(std::make_unique<AnalyzedAssertion>(getState().context, procedure, stmt));
+}
 
-        auto& state = getState();
-        driverTracker.add(state.context, state.driverAlloc, *result);
+void AnalysisManager::analyzeAssertion(const AnalyzedProcedure& procedure,
+                                       const AssertionInstanceExpression& expr) {
+    handleAssertion(std::make_unique<AnalyzedAssertion>(getState().context, procedure, expr));
+}
+
+void AnalysisManager::analyzeAssertion(const TimingControl* contextualClock,
+                                       const Symbol& parentSymbol,
+                                       const AssertionInstanceExpression& expr) {
+    handleAssertion(std::make_unique<AnalyzedAssertion>(getState().context, contextualClock,
+                                                        parentSymbol, expr));
+}
+
+void AnalysisManager::analyzeCheckerInstance(const CheckerInstanceSymbol& inst,
+                                             const AnalyzedProcedure& parentProcedure) {
+    analyzeScopeBlocking(inst.body, &parentProcedure);
+    analyzeNonProceduralExprs(inst);
+
+    auto& state = getState();
+    for (auto& conn : inst.getPortConnections()) {
+        if (conn.formal.kind == SymbolKind::FormalArgument && conn.actual.index() == 0)
+            driverTracker.add(state.context, state.driverAlloc, *std::get<0>(conn.actual), inst);
     }
-
-    return result;
 }
 
-void AnalysisManager::noteDriver(const Expression& expr, const Symbol& containingSymbol) {
-    auto& state = getState();
-    driverTracker.add(state.context, state.driverAlloc, expr, containingSymbol);
-}
-
-void AnalysisManager::noteDrivers(std::span<const SymbolDriverListPair> drivers) {
-    auto& state = getState();
-    driverTracker.add(state.context, state.driverAlloc, drivers);
-}
-
-void AnalysisManager::getFunctionDrivers(const CallExpression& expr, const Symbol& containingSymbol,
-                                         SmallSet<const SubroutineSymbol*, 2>& visited,
-                                         std::vector<SymbolDriverListPair>& drivers) {
+void AnalysisManager::getFunctionValUses(const CallExpression& expr, const Symbol& containingSymbol,
+                                         function_ref<bool(const SubroutineSymbol&)> visitPredicate,
+                                         SmallVectorBase<const ValueDriver*>& drivers,
+                                         SmallVectorBase<ReadRange>* reads) {
     if (expr.isSystemCall() || expr.thisClass() ||
         expr.getSubroutineKind() != SubroutineKind::Function) {
         return;
@@ -199,54 +188,55 @@ void AnalysisManager::getFunctionDrivers(const CallExpression& expr, const Symbo
 
     // If we've already visited this function then we don't need to
     // analyze it again.
-    if (!visited.insert(&subroutine).second)
+    if (!visitPredicate(subroutine))
         return;
 
     // Get analysis for the function.
     auto& context = getState().context;
-    auto analysis = getAnalyzedSubroutine(subroutine);
-    if (!analysis) {
-        auto proc = std::make_unique<AnalyzedProcedure>(context, subroutine);
-        analysis = addAnalyzedSubroutine(subroutine, std::move(proc));
-    }
+    auto& analysis = analyzeSubroutine(context, subroutine);
 
     // For each driver in the function, create a new driver that points to the
     // original driver but has the current procedure as the containing symbol.
-    auto funcDrivers = analysis->getDrivers();
+    auto funcDrivers = analysis.getDrivers();
     drivers.reserve(drivers.size() + funcDrivers.size());
 
-    for (auto& [valueSym, driverList] : funcDrivers) {
+    auto isLocal = [&](const Symbol& symbol) {
+        auto scope = symbol.getParentScope();
+        while (scope && scope->asSymbol().kind == SymbolKind::StatementBlock)
+            scope = scope->asSymbol().getParentScope();
+
+        return scope == &subroutine;
+    };
+
+    for (auto driver : funcDrivers) {
         // The user can disable this inlining of drivers for function locals via a flag.
-        if (hasFlag(AnalysisFlags::AllowMultiDrivenLocals)) {
-            auto scope = valueSym->getParentScope();
-            while (scope && scope->asSymbol().kind == SymbolKind::StatementBlock)
-                scope = scope->asSymbol().getParentScope();
+        if (hasFlag(AnalysisFlags::AllowMultiDrivenLocals) && isLocal(driver->getSymbol()))
+            continue;
 
-            if (scope == &subroutine)
-                continue;
-        }
+        auto newDriver = ValueDriver::create(context.alloc, driver->kind, driver->path,
+                                             containingSymbol, DriverFlags::None,
+                                             &expr.sourceRange);
 
-        DriverList perSymbol;
-        for (auto& [driver, bounds] : driverList) {
-            auto newDriver = context.alloc.emplace<ValueDriver>(
-                driver->kind, *driver->prefixExpression, containingSymbol, DriverFlags::None);
-            newDriver->procCallExpression = &expr;
-
-            perSymbol.emplace_back(newDriver, bounds);
-        }
-
-        drivers.emplace_back(valueSym, std::move(perSymbol));
+        drivers.push_back(newDriver);
     }
 
-    // If this function has any calls, we need to recursively add drivers
-    // from those calls as well.
-    for (auto call : analysis->getCallExpressions())
-        getFunctionDrivers(*call, containingSymbol, visited, drivers);
+    // Optionally collect reads from the function body.
+    // Note: this excludes locally declared variables.
+    if (reads) {
+        for (auto& read : analysis.getReadSet()) {
+            if (!isLocal(*read.symbol))
+                reads->push_back(read);
+        }
+    }
+
+    // Recurse into functions called by this function.
+    for (auto call : analysis.getCallExpressions())
+        getFunctionValUses(*call, containingSymbol, visitPredicate, drivers, reads);
 }
 
 void AnalysisManager::getTaskTimingControls(const CallExpression& expr,
                                             SmallSet<const SubroutineSymbol*, 2>& visited,
-                                            std::vector<const ast::Statement*>& controls) {
+                                            SmallVectorBase<const Statement*>& controls) {
     if (expr.getSubroutineKind() != SubroutineKind::Task || expr.isSystemCall()) {
         return;
     }
@@ -263,33 +253,40 @@ void AnalysisManager::getTaskTimingControls(const CallExpression& expr,
     if (!visited.insert(&subroutine).second)
         return;
 
-    // Get analysis for the task.
-    auto analysis = getAnalyzedSubroutine(subroutine);
-    if (!analysis) {
-        auto proc = std::make_unique<AnalyzedProcedure>(getState().context, subroutine);
-        analysis = addAnalyzedSubroutine(subroutine, std::move(proc));
-    }
-
     // Add timing controls from the task to our list.
-    auto taskTimingControls = analysis->getTimingControls();
+    auto& analysis = analyzeSubroutine(getState().context, subroutine);
+    auto taskTimingControls = analysis.getTimingControls();
     controls.insert(controls.end(), taskTimingControls.begin(), taskTimingControls.end());
 
     // If this task has any calls, we need to recursively add timing controls
     // from those calls as well.
-    for (auto call : analysis->getCallExpressions())
+    for (auto call : analysis.getCallExpressions())
         getTaskTimingControls(*call, visited, controls);
 }
 
-DriverList AnalysisManager::getDrivers(const ValueSymbol& symbol) const {
+void AnalysisManager::analyzeNonProceduralExprs(const TimingControl& timing,
+                                                const Symbol& containingSymbol) {
+    NonProceduralExprVisitor visitor(*this, containingSymbol);
+    timing.visit(visitor);
+}
+
+void AnalysisManager::analyzeNonProceduralExprs(const Expression& expr,
+                                                const Symbol& containingSymbol,
+                                                bool isDisableCondition) {
+    NonProceduralExprVisitor visitor(*this, containingSymbol, isDisableCondition);
+    expr.visit(visitor);
+}
+
+std::vector<const ValueDriver*> AnalysisManager::getDrivers(const ValueSymbol& symbol) const {
     return driverTracker.getDrivers(symbol);
 }
 
 std::optional<InstanceDriverState> AnalysisManager::getInstanceDriverState(
-    const ast::InstanceBodySymbol& symbol) const {
+    const InstanceBodySymbol& symbol) const {
     return driverTracker.getInstanceState(symbol);
 }
 
-Diagnostics AnalysisManager::getDiagnostics(const SourceManager* sourceManager) {
+Diagnostics AnalysisManager::getDiagnostics() {
     wait();
 
     ASTDiagMap diagMap;
@@ -303,7 +300,63 @@ Diagnostics AnalysisManager::getDiagnostics(const SourceManager* sourceManager) 
     return diagMap.coalesce(sourceManager);
 }
 
-PendingAnalysis AnalysisManager::analyzeSymbol(const Symbol& symbol) {
+AnalysisManager::Stats AnalysisManager::getStats() const {
+    Stats stats;
+    for (auto& state : workerStates) {
+        stats.memoryUsage += state.context.alloc.getTotalBytesAllocated();
+        stats.memoryUsage += state.scopeAlloc.getTotalBytesAllocated();
+    }
+
+    auto mapBytes = [](const auto& m) {
+        return m.size() * sizeof(typename std::remove_reference_t<decltype(m)>::value_type);
+    };
+    stats.memoryUsage += mapBytes(analyzedScopes);
+    stats.memoryUsage += mapBytes(analyzedSubroutines);
+    stats.memoryUsage += mapBytes(analyzedAssertions);
+    stats.memoryUsage += mapBytes(visitedNonProcCalls);
+
+    stats.numScopes = analyzedScopes.size();
+    stats.numProcedures = analyzedSubroutines.size();
+
+    analyzedAssertions.visit_all([&](const auto& e) {
+        stats.numAssertions += e.second.size();
+        stats.memoryUsage += e.second.capacity() * sizeof(AnalyzedAssertion);
+    });
+
+    analyzedSubroutines.visit_all(
+        [&](auto& item) { stats.memoryUsage += item.second->getMemoryUsage(); });
+
+    analyzedScopes.visit_all([&](auto& item) {
+        if (item.second) {
+            auto& scope = *item.second.value();
+            stats.numProcedures += scope.procedures.size();
+            for (auto& proc : scope.procedures)
+                stats.memoryUsage += proc.getMemoryUsage();
+        }
+    });
+
+    return stats;
+}
+
+const AnalyzedScope& AnalysisManager::analyzeScopeBlocking(
+    const Scope& scope, const AnalyzedProcedure* parentProcedure) {
+
+    auto& state = getState();
+    auto& result = *state.scopeAlloc.emplace(scope);
+
+    AnalysisScopeVisitor visitor(state, result, parentProcedure);
+    for (auto& member : scope.members())
+        member.visit(visitor);
+
+    // Check for constraint ordering cycles (func-arg implicit ordering and
+    // explicit solve...before directives, LRM 18.5.11).
+    if (visitor.hasConstraints)
+        analyzeConstraints(state.context, scope);
+
+    return result;
+}
+
+void AnalysisManager::analyzeSymbolAsync(const Symbol& symbol) {
     analyzeScopeAsync(getAsScope(symbol));
 
     // If this is an instance with a canonical body, record that
@@ -315,46 +368,136 @@ PendingAnalysis AnalysisManager::analyzeSymbol(const Symbol& symbol) {
             driverTracker.noteNonCanonicalInstance(state.context, state.driverAlloc, inst);
         }
     }
-
-    return PendingAnalysis(*this, symbol);
 }
 
 void AnalysisManager::analyzeScopeAsync(const Scope& scope) {
     // Kick off a new analysis task if we haven't already seen
     // this scope before.
     if (analyzedScopes.try_emplace(&scope, std::nullopt)) {
-#if defined(SLANG_USE_THREADS)
-        threadPool.detach_task([this, &scope] {
-            SLANG_TRY {
-                auto& result = analyzeScopeBlocking(scope);
-                analyzedScopes.visit(&scope, [&result](auto& item) { item.second = &result; });
-            }
-            SLANG_CATCH(...) {
-                std::unique_lock<std::mutex> lock(mutex);
-                pendingException = std::current_exception();
-            }
-        });
-#else
-        auto& result = analyzeScopeBlocking(scope);
-        analyzedScopes.visit(&scope, [&result](auto& item) { item.second = &result; });
-#endif
+        if (threadPool) {
+            threadPool->detach_task([this, &scope] {
+                SLANG_TRY {
+                    auto& result = analyzeScopeBlocking(scope);
+                    addScopeResult(scope, result);
+                }
+                SLANG_CATCH(...) {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    pendingException = std::current_exception();
+                }
+            });
+        }
+        else {
+            auto& result = analyzeScopeBlocking(scope);
+            addScopeResult(scope, result);
+        }
+    }
+}
+
+void AnalysisManager::addScopeResult(const Scope& scope, const AnalyzedScope& result) {
+    analyzedScopes.visit(&scope, [&result](auto& item) { item.second = &result; });
+    for (auto& listener : scopeListeners)
+        listener(result);
+}
+
+AnalyzedProcedure AnalysisManager::analyzeProcedure(AnalysisContext& context, const Symbol& symbol,
+                                                    const AnalyzedProcedure* parentProcedure) {
+    if (customDFAProvider)
+        return customDFAProvider(context, symbol, parentProcedure);
+
+    DefaultDFA dfa(context, symbol, true);
+    dfa.run();
+
+    if (dfa.bad)
+        return AnalyzedProcedure(symbol, parentProcedure);
+    else
+        return AnalyzedProcedure(context, symbol, parentProcedure, dfa);
+}
+
+const AnalyzedProcedure& AnalysisManager::analyzeSubroutine(
+    AnalysisContext& context, const SubroutineSymbol& symbol,
+    const AnalyzedProcedure* parentProcedure) {
+
+    if (auto result = getAnalyzedSubroutine(symbol))
+        return *result;
+
+    auto proc = std::make_unique<AnalyzedProcedure>(
+        analyzeProcedure(context, symbol, parentProcedure));
+
+    const AnalyzedProcedure* result = nullptr;
+    auto updater = [&result](auto& item) { result = item.second.get(); };
+
+    if (analyzedSubroutines.try_emplace_and_cvisit(&symbol, std::move(proc), updater, updater)) {
+        // If we successfully inserted a new procedure, we need to
+        // add it to the driver tracker. If not, someone else already
+        // did it for us.
+        SLANG_ASSERT(result);
+
+        auto& state = getState();
+        driverTracker.add(state.context, state.driverAlloc, *result);
+
+        for (auto& listener : procListeners)
+            listener(*result);
+    }
+
+    return *result;
+}
+
+void AnalysisManager::handleAssertion(std::unique_ptr<AnalyzedAssertion>&& assertion) {
+    if (!assertion->bad) {
+        for (auto& listener : assertListeners)
+            listener(*assertion);
+
+        auto updater = [&](auto& item) { item.second.emplace_back(std::move(assertion)); };
+        analyzedAssertions.try_emplace_and_visit(assertion->containingSymbol, updater, updater);
     }
 }
 
 AnalysisManager::WorkerState& AnalysisManager::getState() {
 #if defined(SLANG_USE_THREADS)
-    return workerStates[BS::this_thread::get_index().value_or(workerStates.size() - 1)];
-#else
-    return workerStates[0];
+    if (threadPool)
+        return workerStates[BS::this_thread::get_index().value_or(workerStates.size() - 1)];
 #endif
+    return workerStates[0];
 }
 
 void AnalysisManager::wait() {
-#if defined(SLANG_USE_THREADS)
-    threadPool.wait();
-    if (pendingException)
-        std::rethrow_exception(pendingException);
-#endif
+    if (threadPool) {
+        threadPool->wait();
+        if (pendingException)
+            std::rethrow_exception(pendingException);
+    }
+}
+
+const TimingControl* AnalysisManager::NonProceduralExprVisitor::getDefaultClocking() const {
+    if (isDisableCondition)
+        return nullptr;
+
+    auto scope = containingSymbol.getParentScope();
+    SLANG_ASSERT(scope);
+
+    if (auto defClk = scope->getCompilation().getDefaultClocking(*scope))
+        return &defClk->as<ClockingBlockSymbol>().getEvent();
+
+    return nullptr;
+}
+
+void AnalysisManager::NonProceduralExprVisitor::visitCall(const CallExpression& expr) {
+    auto& state = manager.getState();
+    if (ClockInference::isSampledValueFuncCall(expr)) {
+        // If we don't have a default clocking active in this scope then
+        // we should check the call to be sure it has an explicit clock provided.
+        if (getDefaultClocking() == nullptr)
+            ClockInference::checkSampledValueFuncs(state.context, containingSymbol, expr);
+    }
+
+    SmallVector<const ValueDriver*, 2> drivers;
+    manager.getFunctionValUses(
+        expr, containingSymbol,
+        [&](const SubroutineSymbol& sub) { return manager.visitedNonProcCalls.insert(&sub); },
+        drivers, nullptr);
+
+    if (!drivers.empty())
+        manager.driverTracker.add(state.context, state.driverAlloc, drivers);
 }
 
 } // namespace slang::analysis

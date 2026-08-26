@@ -20,17 +20,12 @@ Diagnostics analyze(const std::string& text, Compilation& compilation) {
     AnalysisManager analysisManager(options);
     analysisManager.analyze(compilation);
 
-    diags.append_range(analysisManager.getDiagnostics(compilation.getSourceManager()));
+    diags.append_range(analysisManager.getDiagnostics());
     return diags;
 }
 
 TEST_CASE("Inout ports are treated as readers and writers") {
     auto& text = R"(
-interface I;
-    wire integer i;
-    modport m(inout i);
-endinterface
-
 module m(inout wire a);
     wire local_a;
     pullup(local_a);
@@ -38,8 +33,6 @@ module m(inout wire a);
 endmodule
 
 module top;
-    I i();
-
     wire a;
     m m1(.*);
     m m2(.*);
@@ -162,7 +155,7 @@ endmodule
 
     Compilation compilation;
     auto diags = analyze(text, compilation);
-    diags = diags.filter({diag::StaticInitOrder, diag::StaticInitValue});
+    diags = diags.filter({diag::StaticInitOrder, diag::StaticInitValue, diag::ImplicitNet});
     REQUIRE(diags.size() == 19);
     CHECK(diags[0].code == diag::UnusedPort);
     CHECK(diags[1].code == diag::UndrivenPort);
@@ -193,9 +186,21 @@ interface I(input clk);
     modport n(output baz);
 endinterface
 
+module i_reader(I.m intf, output logic obs);
+    assign obs = intf.clk & intf.baz;
+endmodule
+
+module i_writer(I.n intf);
+    assign intf.baz = 1'b0;
+endmodule
+
 module m(output v);
     wire clk = 1;
     I i(clk);
+    logic rd_obs;
+    i_reader ir(i, rd_obs);
+    i_writer iw(i);
+    initial $display(rd_obs);
 
     int x,z;
     if (0) begin : blk1
@@ -234,7 +239,7 @@ endmodule
 endmodule
 
 package p;
-    int i;
+    (* unused *) int i;
 endpackage
 
 module q(
@@ -265,11 +270,11 @@ function int C::foo(int a);
     return a;
 endfunction
 
-import "DPI-C" function void dpi_func(int i);
+(*unused*) import "DPI-C" function void dpi_func(int i);
 
 class D;
-    int s1[$];
-    int s2[int];
+    (*maybe_unused*) int s1[$];
+    (*maybe_unused*) int s2[int];
     function void f();
         int i = 0;
         foreach (s2[j]) begin
@@ -278,6 +283,151 @@ class D;
         end
     endfunction
 endclass
+
+module s;
+    C c = new;
+    D d = new;
+    initial begin
+        void'(c.bar(0));
+        void'(c.foo(0));
+        d.f();
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("No unused warning for error typed value") {
+    auto& text = R"(
+module m;
+    missing_type unused;
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].isError());
+}
+
+TEST_CASE("Unused diagnostics cover the symbol name") {
+    auto& text = R"(
+module m;
+    int unused_name;
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UnusedVariable);
+    REQUIRE(diags[0].ranges.size() == 1);
+
+    auto range = diags[0].ranges[0];
+    auto sm = compilation.getSourceManager();
+    CHECK(range.end() - range.start() == 11);
+    CHECK(sm->getColumnNumber(range.start()) == 9);
+    CHECK(sm->getColumnNumber(range.end()) == 20);
+}
+
+TEST_CASE("Unused definition inside macro expansion uses point diagnostic") {
+    auto libTree = SyntaxTree::fromText(R"(
+`define DEFINE_UNUSED_DEF module unused_from_macro; endmodule
+`DEFINE_UNUSED_DEF
+)");
+    libTree->isLibraryUnit = true;
+
+    auto userTree = SyntaxTree::fromText(R"(
+module top;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(libTree);
+    compilation.addSyntaxTree(userTree);
+
+    auto diags = compilation.getAllDiagnostics();
+    compilation.freeze();
+
+    AnalysisOptions options;
+    options.flags = AnalysisFlags::CheckUnused;
+    AnalysisManager analysisManager(options);
+    analysisManager.analyze(compilation);
+
+    diags.append_range(analysisManager.getDiagnostics());
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UnusedDefinition);
+    REQUIRE(diags[0].args.size() == 1);
+    CHECK(std::get<std::string>(diags[0].args[0]) == "module");
+    CHECK(compilation.getSourceManager()->isMacroLoc(diags[0].location));
+    CHECK(diags[0].ranges.empty());
+}
+
+TEST_CASE("Undriven net via unused modport writer") {
+    auto& text = R"(
+interface status_if;
+    wire status;
+    modport reader(input status);
+    modport writer(output status);
+endinterface
+
+module status_consumer(status_if.reader intf, output wire observed_status);
+    assign observed_status = intf.status;
+endmodule
+
+module top;
+    status_if intf();
+    wire observed_status;
+    status_consumer u(.intf(intf), .observed_status(observed_status));
+    initial $display(observed_status);
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UndrivenNet);
+}
+
+TEST_CASE("Explicit modport output does not mask unused variable") {
+    auto& text = R"(
+interface I;
+    logic a;
+    modport m(output .x(a));
+endinterface
+
+module top;
+    I i();
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UnusedVariable);
+}
+
+TEST_CASE("Modport facade forwards reads and writes to underlying signal") {
+    auto& text = R"(
+interface I;
+    wire a;
+    modport m(inout a);
+endinterface
+
+module user(I.m iface, output wire b);
+    assign iface.a = 1'b1;
+    assign b = iface.a;
+endmodule
+
+module top;
+    I i();
+    wire b;
+    user u(i, b);
+    initial $display(b);
+endmodule
 )";
 
     Compilation compilation;
@@ -300,6 +450,8 @@ class C;
 endclass
 
 module top;
+    C c = new;
+    initial void'(c.f2());
 endmodule
 )";
 
@@ -320,8 +472,8 @@ interface I;
 endinterface
 
 class TB;
-    virtual I intf;
-    task run();
+    (* unused *) virtual I intf;
+    (* unused *) task run();
         @(intf.cb);
         if (intf.cb.a) begin
             $display("error!");
@@ -381,7 +533,7 @@ class C;
         i.cb_driver.a <= 1'b0;
     endtask
 
-    logic q = i.a;
+    (*unused*) logic q = i.a;
 endclass
 
 module top;
@@ -408,7 +560,7 @@ endmodule
 
 TEST_CASE("Unused function args") {
     auto& text = R"(
-function foo(input x, output y);
+(*unused*) function foo(input x, output y);
     y = 1;
     return 0;
 endfunction
@@ -426,7 +578,7 @@ endmodule
 TEST_CASE("System function args count as outputs") {
     auto& text = R"(
 class C;
-    function bit f();
+    (* maybe_unused *) function bit f();
         bit a;
         int rc = std::randomize(a);
         assert(rc != 0);
@@ -435,11 +587,11 @@ class C;
 endclass
 
 module m;
-    int i;
     string a = "foo", s = "a 3";
     int b = 0;
+    enum { A, B } e;
     initial begin
-        $cast(i, i);
+        $cast(e, e);
         void'($sscanf(s, "%s %d", a, b));
     end
 
@@ -460,7 +612,8 @@ endclass
 
 class C;
     task t1(A a);
-        a.i = 3;
+        if (a.i != 3)
+            a.i = 3;
     endtask
 
     task t2(A a);
@@ -470,6 +623,12 @@ class C;
 endclass
 
 module m;
+    A a = new;
+    C c = new;
+    initial begin
+        c.t1(a);
+        c.t2(a);
+    end
 endmodule
 )";
 
@@ -501,8 +660,11 @@ endclass
 
 module top;
     I intf();
+    C c = new;
     initial begin
         intf.clk = 0;
+        c.i = intf;
+        c.t();
         forever begin
             #1ns;
             intf.clk = ~intf.clk;
@@ -651,9 +813,10 @@ endmodule
 
     Compilation compilation;
     auto diags = analyze(text, compilation);
-    REQUIRE(diags.size() == 2);
-    CHECK(diags[0].code == diag::UnusedImport);
-    CHECK(diags[1].code == diag::UnusedWildcardImport);
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::UnusedPackageVar);
+    CHECK(diags[1].code == diag::UnusedImport);
+    CHECK(diags[2].code == diag::UnusedWildcardImport);
 }
 
 TEST_CASE("Not gate undriven warning regress GH #1227") {
@@ -669,5 +832,397 @@ endmodule
 
     Compilation compilation;
     auto diags = analyze(text, compilation);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Unused package stuff") {
+    auto& text = R"(
+package p;
+    int a;
+
+    sequence s;
+        1;
+    endsequence
+
+    typedef int I;
+
+    parameter p = 1;
+    parameter type T = real;
+
+    function void foo;
+    endfunction
+endpackage
+
+package P;
+    const logic [7:0] A = 8'b0000_0001;
+endpackage
+
+interface rules
+    import P::*;
+(
+    input logic clk,
+    input logic rst_b,
+    input logic v,
+    input logic [7:0] a
+);
+    label: assert property(@(posedge clk) disable iff (rst_b !== 1) v |-> a != A);
+endinterface
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 7);
+    CHECK(diags[0].code == diag::UnusedPackageVar);
+    CHECK(diags[1].code == diag::UnusedPackageAssertionDecl);
+    CHECK(diags[2].code == diag::UnusedPackageTypedef);
+    CHECK(diags[3].code == diag::UnusedPackageParameter);
+    CHECK(diags[4].code == diag::UnusedPackageTypeParameter);
+    CHECK(diags[5].code == diag::UnusedPackageSubroutine);
+    CHECK(diags[6].code == diag::UnusedDefinition);
+}
+
+TEST_CASE("Unused subroutines") {
+    auto& text = R"(
+task t;
+endtask
+
+virtual class A;
+    virtual function void g;
+    endfunction
+
+    pure virtual function void h;
+endclass
+
+class C extends A;
+    function int f;
+        return 0;
+    endfunction
+
+    function void g;
+    endfunction
+
+    function void h;
+    endfunction
+
+    function new;
+    endfunction
+
+    local function void i;
+    endfunction
+endclass
+
+class D;
+    function new; endfunction
+endclass
+
+module m;
+    A a = C::new;
+    initial a.g();
+endmodule
+
+import "DPI-C" function void dpi_func(int i);
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 6);
+    CHECK(diags[0].code == diag::UnusedSubroutine);
+    CHECK(diags[1].code == diag::UnusedClassMethod);
+    CHECK(diags[2].code == diag::UnusedClassMethod);
+    CHECK(diags[3].code == diag::UnusedLocalClassMethod);
+    CHECK(diags[4].code == diag::UnusedConstructor);
+    CHECK(diags[5].code == diag::UnusedDPIImport);
+}
+
+TEST_CASE("Unused class properties") {
+    auto& text = R"(
+class C;
+    int i;
+    int j;
+    int k;
+    local int l;
+    local int m;
+    local int n;
+
+    (*unused*) function void foo;
+        j = k;
+        m = n;
+    endfunction
+endclass
+
+class D;
+    rand int unsigned cnt;
+
+    constraint my_cons_c {
+        cnt inside {[100:200]};
+    }
+
+    task body();
+        repeat (cnt) begin
+            // test traffic
+        end
+    endtask
+
+endclass
+
+class E;
+    (*unused*) task body();
+        D d = new();
+        void'(d.randomize());
+        d.body();
+    endtask
+
+    function void pre_randomize();
+    endfunction
+
+    function void post_randomize();
+    endfunction
+endclass
+
+class C1;
+    int a;
+
+    (*unused*) function void f();
+        if (a == 3) begin
+        end
+    endfunction
+endclass
+
+class C2;
+    C1 c1;
+endclass
+
+module top;
+    C1 c1;
+    C2 c2;
+    initial begin
+        c1 = new();
+        c2 = new();
+        c2.c1 = c1;
+        c2.c1.a = 3;
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 6);
+    CHECK(diags[0].code == diag::UnusedClassProperty);
+    CHECK(diags[1].code == diag::UnusedButSetProperty);
+    CHECK(diags[2].code == diag::UnassignedProperty);
+    CHECK(diags[3].code == diag::UnusedLocalClassProperty);
+    CHECK(diags[4].code == diag::UnusedButSetLocalProperty);
+    CHECK(diags[5].code == diag::UnassignedLocalProperty);
+}
+
+TEST_CASE("Unused class property false positive on class handle array") {
+    auto& text = R"(
+class C;
+    bit clear;
+
+    function int f();
+        if (clear) begin
+        end
+        return 0;
+    endfunction
+endclass
+
+class A;
+    C c1[];
+    C c2;
+    C c3[4];
+    C c4[string];
+
+    function new();
+        c1 = new[4];
+        c2 = new;
+    endfunction
+
+    function void setup(int i, C c);
+        c1[i] = c;
+        c3[i] = c;
+        c4["a"] = c;
+    endfunction
+
+    function void clr(int i);
+        c1[i].clear = 1'b1;
+        c2.clear = 1'b1;
+        c3[i].clear = 1'b1;
+        c4["a"].clear = 1'b1;
+    endfunction
+endclass
+
+module top;
+    A a;
+    initial begin
+        automatic C c = new();
+        a = new();
+        a.setup(0, c);
+        a.clr(0);
+        $display(c.f());
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    CHECK_DIAGS_EMPTY;
+}
+
+// Helper that runs analysis with only the CheckShadow flag enabled.
+static Diagnostics analyzeShadow(const std::string& text, Compilation& compilation) {
+    AnalysisOptions options;
+    options.flags = AnalysisFlags::CheckShadow;
+
+    AnalysisManager manager(options);
+    return analyze(text, compilation, manager);
+}
+
+TEST_CASE("Shadowing warnings") {
+    auto& text = R"(
+class C;
+endclass
+
+typedef int Foo;
+
+module m;
+    int x;
+    initial begin
+        int x;  // shadows outer x
+        x = 1;
+    end
+
+    initial begin
+        int C;
+    end
+
+    function void Foo(real x);
+    endfunction
+
+    int m;
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
+    REQUIRE(diags.size() == 4);
+    CHECK(diags[0].code == diag::ShadowValue);
+    CHECK(diags[1].code == diag::ShadowHierarchy);
+    CHECK(diags[2].code == diag::ShadowHierarchy);
+    CHECK(diags[3].code == diag::ShadowValue);
+}
+
+TEST_CASE("Shadowing false positives") {
+    auto& text = R"(
+interface intf;
+    logic clk;
+    logic a;
+
+    clocking cb @(posedge clk);
+        default input #1step;
+        input a;
+    endclocking
+endinterface
+
+module top;
+    for (genvar i = 0; i < 4; i++) begin: gen_1
+    end
+
+    intf inst();
+endmodule
+
+module top2;
+    localparam bit A = 1'b1;
+    localparam bit B = 1'b1;
+
+    if (A) begin
+        if (B) begin
+            always_comb begin
+            end
+        end
+    end
+
+endmodule
+
+class C;
+    rand int a;
+    rand int b;
+
+    covergroup CG;
+        cp_a: coverpoint a;
+        cp_b: coverpoint b;
+        cx_ab: cross cp_a, cp_b;
+    endgroup
+endclass
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Shadow property warning") {
+    auto& text = R"(
+class Base;
+    int x;
+    int y;
+endclass
+
+class Derived extends Base;
+    int x;  // shadows Base::x
+endclass
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ShadowProperty);
+}
+
+TEST_CASE("Shadow property warning - no false positives") {
+    auto& text = R"(
+class Base;
+    int x;
+    function void f(); endfunction
+endclass
+
+class Derived extends Base;
+    // Overriding a method is not a property shadow.
+    function void f(); endfunction
+    // A property that doesn't exist in the base is fine.
+    int z;
+endclass
+
+class Base2;
+    int x;
+endclass
+
+class Mid extends Base2;
+endclass
+
+class Derived3 extends Mid;
+    int x;
+endclass
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ShadowProperty);
+}
+
+TEST_CASE("Shadow property - method shadowing property not warned") {
+    auto& text = R"(
+class Base;
+    function void f(); endfunction
+endclass
+
+class Derived extends Base;
+    int f;
+endclass
+)";
+
+    Compilation compilation;
+    auto diags = analyzeShadow(text, compilation);
     CHECK_DIAGS_EMPTY;
 }

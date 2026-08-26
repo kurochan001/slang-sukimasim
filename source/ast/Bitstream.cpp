@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/Bitstream.h"
 
+#include "../text/FormatBuffer.h"
 #include <numeric>
 
 #include "slang/ast/Compilation.h"
@@ -19,7 +20,6 @@
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/TypesDiags.h"
 #include "slang/numeric/MathUtils.h"
-#include "slang/text/FormatBuffer.h"
 
 namespace slang::ast {
 
@@ -117,7 +117,7 @@ static DynamicSize dynamicBitstreamSize(const Type& type, BitstreamSizeMode mode
     else if (type.isClass()) {
         auto& ct = type.getCanonicalType().as<ClassType>();
         SLANG_ASSERT(!ct.hasCycles());
-        for (auto& prop : ct.membersOfType<ClassPropertySymbol>()) {
+        for (auto& prop : ct.properties()) {
             if (!handleField(prop))
                 return {};
         }
@@ -622,7 +622,7 @@ bool Bitstream::checkClassAccess(const Type& type, const ASTContext& context,
         return true;
 
     auto& ct = type.getCanonicalType().as<ClassType>();
-    for (auto& prop : ct.membersOfType<ClassPropertySymbol>()) {
+    for (auto& prop : ct.properties()) {
         if (prop.visibility != Visibility::Public && prop.lifetime == VariableLifetime::Automatic) {
             if (!Lookup::isVisibleFrom(prop, *context.scope)) {
                 context.addDiag(diag::ClassPrivateMembersBitstream, sourceRange) << type;
@@ -698,9 +698,12 @@ ConstantValue Bitstream::reOrder(ConstantValue&& value, uint64_t sliceSize, uint
             auto bit = width - slice;
             result.emplace_back(slicePacked(iter, std::cend(packed), bit, slice));
             width -= slice;
+            // slicePacked already advanced iter past packed[index] (it consumed
+            // the element's last `slice` bits), so do not advance it again.
         }
-
-        iter++;
+        else {
+            iter++;
+        }
         auto nextIndex = index;
         while (++index < rightIndex)
             result.emplace_back(std::move(**iter++));
@@ -931,11 +934,14 @@ ConstantValue Bitstream::resizeToRange(ConstantValue&& value, ConstantRange rang
     }
 
     if (range.lower() > 0 || range.width() != value.size()) {
-        auto upper = static_cast<uint32_t>(range.upper());
-        auto lower = static_cast<uint32_t>(range.lower());
+        // A source-side streaming 'with' range may start beyond the current array/queue
+        // extent (IEEE 1800-2017 11.4.14.3); nonexistent elements are the default value.
+        // Clamp both bounds to the size so the copy range is never reversed, and take the
+        // remaining 'more' elements as default fills, keeping the result range.width() wide.
         auto size = static_cast<uint32_t>(value.size());
-        auto more = upper >= size ? upper - size + 1 : 0;
-        upper = std::min(upper + 1, size);
+        auto lower = std::min(static_cast<uint32_t>(range.lower()), size);
+        auto upper = std::min(static_cast<uint32_t>(range.upper()) + 1, size);
+        auto more = static_cast<uint32_t>(range.width()) - (upper - lower);
 
         if (value.isUnpacked()) {
             const auto old = value.elements();

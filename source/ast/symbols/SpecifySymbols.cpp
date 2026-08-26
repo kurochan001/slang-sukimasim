@@ -807,10 +807,9 @@ static void createImplicitNets(const SystemTimingCheckSymbol& timingCheck,
         }
     }
 
-    auto& comp = context.getCompilation();
     for (auto ins : implicitNets) {
         if (implicitNetNames.emplace(ins->identifier.valueText()).second)
-            results.push_back(&NetSymbol::createImplicit(comp, *ins, netType));
+            results.push_back(&NetSymbol::createImplicit(context, *ins, netType));
     }
 }
 

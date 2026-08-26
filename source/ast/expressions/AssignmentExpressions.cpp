@@ -12,6 +12,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/TimingControl.h"
+#include "slang/ast/TypeProvider.h"
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/MiscExpressions.h"
@@ -34,34 +35,32 @@ namespace slang::ast {
 using namespace parsing;
 using namespace syntax;
 
-// Helper method used by tryConnectPortArray to build a tree of selects of the sliced result.
-// `flatRange` is the bit range of the final flattened result. We map down to that flattened
-// result by walking the expression tree and selecting the appropriate elements.
-static Expression* buildPackedSelectTree(Compilation& comp, Expression* expr,
-                                         ConstantRange flatRange, const ASTContext& context) {
-    SLANG_ASSERT(flatRange.isLittleEndian());
+Expression& Expression::buildPackedSelectTree(const TypeProvider& typeProvider, Expression& expr,
+                                              ConstantRange flatRange, const ASTContext& context) {
+    SLANG_ASSERT(flatRange.isDescending());
 
     // If the range covers the entire type, just return the expression itself
-    auto& type = *expr->type;
+    auto& type = *expr.type;
     if (flatRange.width() >= type.getBitWidth())
         return expr;
 
-    auto createConcat = [&](SmallVector<Expression*>& parts) -> Expression* {
+    auto& alloc = typeProvider.alloc;
+    auto createConcat = [&](SmallVector<Expression*>& parts) -> Expression& {
         SLANG_ASSERT(!parts.empty());
 
         if (parts.size() == 1)
-            return parts.front();
+            return *parts.front();
 
-        auto& resultType = comp.getType(flatRange.width(), type.getIntegralFlags());
-        return comp.emplace<ConcatenationExpression>(resultType, parts.copy(comp),
-                                                     expr->sourceRange);
+        auto& resultType = typeProvider.getType(flatRange.width(), type.getIntegralFlags());
+        return *alloc.emplace<ConcatenationExpression>(resultType, parts.copy(alloc),
+                                                       expr.sourceRange);
     };
 
-    if (expr->kind == ExpressionKind::Concatenation) {
+    if (expr.kind == ExpressionKind::Concatenation) {
         // Handle concat: flatten bit ranges over its operands
         int32_t msb = int32_t(type.getBitWidth()) - 1;
         SmallVector<Expression*> parts;
-        for (auto op : expr->as<ConcatenationExpression>().operands()) {
+        for (auto op : expr.as<ConcatenationExpression>().operands()) {
             const int32_t opWidth = int32_t(op->type->getBitWidth());
             const int32_t opMsb = msb;
             const int32_t opLsb = msb - opWidth + 1;
@@ -73,7 +72,8 @@ static Expression* buildPackedSelectTree(Compilation& comp, Expression* expr,
                 // Map to local indices within op
                 const int32_t localMsb = overlapMsb - opLsb;
                 const int32_t localLsb = overlapLsb - opLsb;
-                parts.push_back(buildPackedSelectTree(comp, op, {localMsb, localLsb}, context));
+                parts.push_back(
+                    &buildPackedSelectTree(typeProvider, *op, {localMsb, localLsb}, context));
             }
 
             msb -= opWidth;
@@ -92,14 +92,15 @@ static Expression* buildPackedSelectTree(Compilation& comp, Expression* expr,
 
         auto getIndex = [&](int32_t logicalIndex) {
             // logicalIndex is 0-based from the LSB end (flattened order)
-            return arrRange.isLittleEndian() ? arrRange.right + logicalIndex
-                                             : arrRange.right - logicalIndex;
+            return arrRange.isDescending() ? arrRange.right + logicalIndex
+                                           : arrRange.right - logicalIndex;
         };
 
         if (leftElem == rightElem) {
             // Range is fully within a single element.
-            expr = &ElementSelectExpression::fromConstant(comp, *expr, getIndex(leftElem), context);
-            return buildPackedSelectTree(comp, expr, {localMsb, localLsb}, context);
+            auto& sel = ElementSelectExpression::fromConstant(typeProvider, expr,
+                                                              getIndex(leftElem), context);
+            return buildPackedSelectTree(typeProvider, sel, {localMsb, localLsb}, context);
         }
 
         // Otherwise we have a range of elements. If the range is partial on either end
@@ -109,9 +110,9 @@ static Expression* buildPackedSelectTree(Compilation& comp, Expression* expr,
         auto midRight = rightElem;
         if (localMsb < elemWidth - 1) {
             midLeft--;
-            auto leftExpr = &ElementSelectExpression::fromConstant(comp, *expr, getIndex(leftElem),
-                                                                   context);
-            parts.push_back(buildPackedSelectTree(comp, leftExpr, {localMsb, 0}, context));
+            auto& leftExpr = ElementSelectExpression::fromConstant(typeProvider, expr,
+                                                                   getIndex(leftElem), context);
+            parts.push_back(&buildPackedSelectTree(typeProvider, leftExpr, {localMsb, 0}, context));
         }
 
         // Middle full elements (if any): select entire elements
@@ -119,20 +120,20 @@ static Expression* buildPackedSelectTree(Compilation& comp, Expression* expr,
             midRight++;
 
         if (midLeft == midRight) {
-            parts.push_back(
-                &ElementSelectExpression::fromConstant(comp, *expr, getIndex(midLeft), context));
+            parts.push_back(&ElementSelectExpression::fromConstant(typeProvider, expr,
+                                                                   getIndex(midLeft), context));
         }
         else if (midLeft > midRight) {
             parts.push_back(&RangeSelectExpression::fromConstant(
-                comp, *expr, {getIndex(midLeft), getIndex(midRight)}, context));
+                typeProvider, expr, {getIndex(midLeft), getIndex(midRight)}, context));
         }
 
         // Right partial element (LSB side)
         if (localLsb) {
-            auto rightExpr = &ElementSelectExpression::fromConstant(comp, *expr,
+            auto& rightExpr = ElementSelectExpression::fromConstant(typeProvider, expr,
                                                                     getIndex(rightElem), context);
-            parts.push_back(buildPackedSelectTree(comp, rightExpr,
-                                                  {elemWidth - 1, elemWidth - localLsb}, context));
+            parts.push_back(&buildPackedSelectTree(typeProvider, rightExpr,
+                                                   {elemWidth - 1, localLsb}, context));
         }
 
         return createConcat(parts);
@@ -140,8 +141,8 @@ static Expression* buildPackedSelectTree(Compilation& comp, Expression* expr,
 
     // Not a packed array, so selection is simple bit vectors.
     if (flatRange.left == flatRange.right)
-        return &ElementSelectExpression::fromConstant(comp, *expr, flatRange.left, context);
-    return &RangeSelectExpression::fromConstant(comp, *expr, flatRange, context);
+        return ElementSelectExpression::fromConstant(typeProvider, expr, flatRange.left, context);
+    return RangeSelectExpression::fromConstant(typeProvider, expr, flatRange, context);
 }
 
 Expression* Expression::tryConnectPortArray(const ASTContext& context, const Type& portType,
@@ -203,7 +204,7 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
             // range. Otherwise instance index zero should map to the upper
             // bound of the array's range.
             int32_t index = int32_t(arrayPath[i]);
-            if (unpackedDims[i].isLittleEndian() != instanceDims[i].isLittleEndian())
+            if (unpackedDims[i].isDescending() != instanceDims[i].isDescending())
                 index = unpackedDims[i].upper() - index;
             else
                 index = unpackedDims[i].lower() + index;
@@ -221,7 +222,7 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
         // all of the instance dims and whatever is left should match
         // the actual port type to connect.
         if (!unpackedDims.empty()) {
-            auto& unpackedType = FixedSizeUnpackedArrayType::fromDims(*context.scope, *ct,
+            auto& unpackedType = FixedSizeUnpackedArrayType::fromDims(comp, context, *ct,
                                                                       unpackedDims,
                                                                       expr.sourceRange);
             if (!portType.isEquivalent(unpackedType)) {
@@ -238,18 +239,19 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
         if (instanceDims.empty())
             return portType.isEquivalent(*ct) ? result : bad();
 
-        // Otherwise, if there are instance dimemsions left there needs to be packed dimensions
-        // in the connection to match up with them.
-        if (ct->kind != SymbolKind::PackedArrayType)
+        // Otherwise, if there are instance dimensions left there needs to be a packed
+        // integral type in the connection (a packed array, struct, union, enum, or a
+        // plain integer) that can be sliced up to match up with them.
+        if (!ct->isIntegral())
             return bad();
     }
-    else if (ct->kind != SymbolKind::PackedArrayType) {
+    else if (!ct->isIntegral()) {
         return nullptr;
     }
 
-    // If we reach this point we're looking at a packed array connection; if there were
+    // If we reach this point we're looking at a packed integral connection; if there were
     // any unpacked dimensions we already stripped them off and accounted for them.
-    // The port type must be integral since we're assigning a packed array.
+    // The port type must be integral since we're assigning a packed value.
     if (!portType.isIntegral())
         return bad();
 
@@ -275,7 +277,7 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
             offset *= int32_t(instanceDims[i - 1].width());
 
         uint32_t index = arrayPath[i];
-        if (!instanceDims[i].isLittleEndian())
+        if (!instanceDims[i].isDescending())
             index = instanceDims[i].width() - index - 1;
 
         offset += int32_t(index);
@@ -285,7 +287,7 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
     int32_t width = int32_t(portWidth);
     offset *= width;
     ConstantRange range{offset + width - 1, offset};
-    return buildPackedSelectTree(comp, result, range, context);
+    return &buildPackedSelectTree(comp, *result, range, context);
 }
 
 Expression& AssignmentExpression::fromSyntax(Compilation& compilation,
@@ -487,6 +489,12 @@ ConstantValue AssignmentExpression::evalImpl(EvalContext& context) const {
     return rvalue;
 }
 
+bool AssignmentExpression::isEquivalentImpl(const AssignmentExpression& rhs) const {
+    return op == rhs.op && nonBlocking == rhs.nonBlocking && left().isEquivalentTo(rhs.left()) &&
+           right().isEquivalentTo(rhs.right()) && bool(timingControl) == bool(rhs.timingControl) &&
+           (!timingControl || timingControl->isEquivalentTo(*rhs.timingControl));
+}
+
 void AssignmentExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.write("left", left());
     serializer.write("right", right());
@@ -545,21 +553,14 @@ ConstantValue NewArrayExpression::evalImpl(EvalContext& context) const {
         return nullptr;
     }
 
-    // Prevent overflow when casting to size_t
-    if (*size > static_cast<int64_t>(std::numeric_limits<size_t>::max())) {
-        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange) << sz;
-        return nullptr;
-    }
+    size_t count = size_t(*size);
+    auto elemType = type->getArrayElementType();
+    SLANG_ASSERT(elemType);
 
-    size_t count = static_cast<size_t>(*size);
-
-    // Sanity check: Prevent absurdly large allocations (>1GB worth of ConstantValues)
-    // Each ConstantValue is roughly 64 bytes, so 16M elements = ~1GB
-    constexpr size_t MAX_REASONABLE_SIZE = 16 * 1024 * 1024;
-    if (count > MAX_REASONABLE_SIZE) {
-        context.addDiag(diag::InvalidArraySize, sizeExpr().sourceRange) << count;
+    // Make sure this array won't exceed our max constant size.
+    auto totalBits = checkedMulU64(count, elemType->getBitstreamWidth()).value_or(UINT64_MAX);
+    if (!context.checkBitCount(totalBits, sizeExpr().sourceRange))
         return nullptr;
-    }
 
     size_t index = 0;
     std::vector<ConstantValue> result(count);
@@ -575,12 +576,30 @@ ConstantValue NewArrayExpression::evalImpl(EvalContext& context) const {
             result[index] = elems[index];
     }
 
-    // Any remaining elements are default initialized.
-    ConstantValue def = type->getArrayElementType()->getDefaultValue();
+    // Any remaining elements are default initialized. There is a weird special case
+    // here if we have a initializer expression that is a structured assignment pattern
+    // with a default setter -- we should use that default setter value for all default
+    // inserted elements. This isn't described in the LRM anywhere but all commercial
+    // tools do the same thing.
+    ConstantValue def = elemType->getDefaultValue();
+    if (initExpr() && initExpr()->kind == ExpressionKind::StructuredAssignmentPattern) {
+        auto& sap = initExpr()->as<StructuredAssignmentPatternExpression>();
+        if (sap.defaultSetter) {
+            def = sap.defaultSetter->eval(context);
+            if (!def)
+                return nullptr;
+        }
+    }
+
     for (; index < count; index++)
         result[index] = def;
 
     return result;
+}
+
+bool NewArrayExpression::isEquivalentImpl(const NewArrayExpression& rhs) const {
+    return sizeExpr().isEquivalentTo(rhs.sizeExpr()) && bool(initExpr()) == bool(rhs.initExpr()) &&
+           (!initExpr() || initExpr()->isEquivalentTo(*rhs.initExpr()));
 }
 
 void NewArrayExpression::serializeTo(ASTSerializer& serializer) const {
@@ -740,6 +759,12 @@ ConstantValue NewClassExpression::evalImpl(EvalContext& context) const {
     return nullptr;
 }
 
+bool NewClassExpression::isEquivalentImpl(const NewClassExpression& rhs) const {
+    return bool(constructorCall()) == bool(rhs.constructorCall()) &&
+           (!constructorCall() || constructorCall()->isEquivalentTo(*rhs.constructorCall())) &&
+           isSuperClass == rhs.isSuperClass;
+}
+
 void NewClassExpression::serializeTo(ASTSerializer& serializer) const {
     if (constructorCall())
         serializer.write("constructorCall", *constructorCall());
@@ -789,6 +814,13 @@ ConstantValue NewCovergroupExpression::evalImpl(EvalContext& context) const {
     return nullptr;
 }
 
+bool NewCovergroupExpression::isEquivalentImpl(const NewCovergroupExpression& rhs) const {
+    return std::ranges::equal(arguments, rhs.arguments,
+                              [](const Expression* a, const Expression* b) {
+                                  return a->isEquivalentTo(*b);
+                              });
+}
+
 void NewCovergroupExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.startArray("arguments");
     for (auto arg : arguments)
@@ -796,25 +828,29 @@ void NewCovergroupExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.endArray();
 }
 
+static Expression& bindInvalidAssignmentPattern(const ASTContext& context,
+                                                const AssignmentPatternSyntax& syntax);
+
 Expression& Expression::bindAssignmentPattern(Compilation& comp,
                                               const AssignmentPatternExpressionSyntax& syntax,
                                               const ASTContext& context,
                                               const Type* assignmentTarget) {
-    SourceRange range = syntax.sourceRange();
+    auto range = syntax.sourceRange();
+    auto& p = *syntax.pattern;
 
     if (syntax.type) {
         assignmentTarget = &comp.getType(*syntax.type, context);
         if (!assignmentTarget->isSimpleType() && syntax.type->kind != SyntaxKind::TypeReference) {
             if (!assignmentTarget->isError())
                 context.addDiag(diag::BadAssignmentPatternType, range) << *assignmentTarget;
-            return badExpr(comp, nullptr);
+            return badExpr(comp, &bindInvalidAssignmentPattern(context, p));
         }
     }
 
     if (!assignmentTarget || assignmentTarget->isError()) {
-        if (!assignmentTarget)
+        if (!assignmentTarget && !context.flags.has(ASTFlags::UnknownPortConn))
             context.addDiag(diag::AssignmentPatternNoContext, syntax.sourceRange());
-        return badExpr(comp, nullptr);
+        return badExpr(comp, &bindInvalidAssignmentPattern(context, p));
     }
 
     const Type& type = *assignmentTarget;
@@ -852,7 +888,6 @@ Expression& Expression::bindAssignmentPattern(Compilation& comp,
         return badExpr(comp, nullptr);
     }
 
-    const AssignmentPatternSyntax& p = *syntax.pattern;
     if (context.flags.has(ASTFlags::LValue) && p.kind != SyntaxKind::SimpleAssignmentPattern) {
         context.addDiag(diag::ExpressionNotAssignable, range);
         return badExpr(comp, nullptr);
@@ -1004,6 +1039,14 @@ ConstantValue AssignmentPatternExpressionBase::evalImpl(EvalContext& context) co
 
         return values;
     }
+}
+
+bool AssignmentPatternExpressionBase::isEquivalentImpl(
+    const AssignmentPatternExpressionBase& rhs) const {
+    return std::ranges::equal(elements(), rhs.elements(),
+                              [](const Expression* a, const Expression* b) {
+                                  return a->isEquivalentTo(*b);
+                              });
 }
 
 void AssignmentPatternExpressionBase::serializeTo(ASTSerializer& serializer) const {
@@ -1218,10 +1261,8 @@ static const Expression* matchElementValue(
         if (elementType.isMatching(*defaultSetter->type))
             return defaultSetter;
 
-        if (elementType.isSimpleBitVector() &&
-            elementType.isAssignmentCompatible(*defaultSetter->type)) {
+        if (elementType.isSimpleBitVector())
             return &Expression::bindRValue(elementType, *defaultSyntax, {}, context);
-        }
     }
 
     // Otherwise, we check first if the type is a struct or array, in which
@@ -1288,6 +1329,31 @@ static const Expression* matchElementValue(
     return nullptr;
 }
 
+static void bindDefaultSetter(const ASTContext& context, const AssignmentPatternItemSyntax& item,
+                              const Expression*& defaultSetter, bool& bad) {
+    if (defaultSetter) {
+        context.addDiag(diag::AssignmentPatternKeyDupDefault, item.key->sourceRange());
+        bad = true;
+    }
+
+    // Special case for default setters that are themselves assignment patterns.
+    // There is no assignment-like context here, and self-determined binding won't
+    // work since assignment patterns need a target type.
+    auto expr = item.expr;
+    while (expr->kind == SyntaxKind::ParenthesizedExpression)
+        expr = expr->as<ParenthesizedExpressionSyntax>().expression;
+
+    if (expr->kind == SyntaxKind::AssignmentPatternExpression &&
+        !expr->as<AssignmentPatternExpressionSyntax>().type) {
+        defaultSetter = &Expression::bindRValue(context.getCompilation().getErrorType(), *item.expr,
+                                                {}, context);
+    }
+    else {
+        defaultSetter = &Expression::bind(*item.expr, context);
+        bad |= defaultSetter->bad();
+    }
+}
+
 Expression& StructuredAssignmentPatternExpression::forStruct(
     Compilation& comp, const StructuredAssignmentPatternSyntax& syntax, const ASTContext& context,
     const Type& type, const Scope& structScope, SourceRange sourceRange) {
@@ -1300,12 +1366,7 @@ Expression& StructuredAssignmentPatternExpression::forStruct(
 
     for (auto item : syntax.items) {
         if (item->key->kind == SyntaxKind::DefaultPatternKeyExpression) {
-            if (defaultSetter) {
-                context.addDiag(diag::AssignmentPatternKeyDupDefault, item->key->sourceRange());
-                bad = true;
-            }
-            defaultSetter = &selfDetermined(comp, *item->expr, context);
-            bad |= defaultSetter->bad();
+            bindDefaultSetter(context, *item, defaultSetter, bad);
         }
         else if (item->key->kind == SyntaxKind::IdentifierName) {
             auto nameToken = item->key->as<IdentifierNameSyntax>().identifier;
@@ -1439,12 +1500,7 @@ Expression& StructuredAssignmentPatternExpression::forFixedArray(
 
     for (auto item : syntax.items) {
         if (item->key->kind == SyntaxKind::DefaultPatternKeyExpression) {
-            if (defaultSetter) {
-                context.addDiag(diag::AssignmentPatternKeyDupDefault, item->key->sourceRange());
-                bad = true;
-            }
-            defaultSetter = &selfDetermined(comp, *item->expr, context);
-            bad |= defaultSetter->bad();
+            bindDefaultSetter(context, *item, defaultSetter, bad);
             continue;
         }
 
@@ -1488,7 +1544,12 @@ Expression& StructuredAssignmentPatternExpression::forFixedArray(
     std::optional<const Expression*> cachedVal;
     auto arrayRange = type.getFixedRange();
 
-    for (int32_t i = arrayRange.lower(); i <= arrayRange.upper(); i++) {
+    // Elements are stored from the leftmost declared index to the rightmost, so
+    // we walk the range in that order (which is reversed for descending ranges)
+    // to ensure keyed indices map to the correct element slot.
+    const int32_t step = arrayRange.isDescending() ? -1 : 1;
+    int32_t i = arrayRange.left;
+    for (uint32_t count = arrayRange.width(); count > 0; count--, i += step) {
         // If we already have a setter for this index we don't have to do anything else.
         if (auto it = indexMap.find(i); it != indexMap.end()) {
             elements.push_back(it->second);
@@ -1522,14 +1583,14 @@ Expression& StructuredAssignmentPatternExpression::forDynamicArray(
     const Type& type, const Type& elementType, SourceRange sourceRange) {
 
     bool bad = false;
+    const Expression* defaultSetter = nullptr;
     SmallMap<int32_t, const Expression*, 8> indexMap;
     SmallVector<IndexSetter, 4> indexSetters;
     size_t maxIndex = 0;
 
     for (auto item : syntax.items) {
         if (item->key->kind == SyntaxKind::DefaultPatternKeyExpression) {
-            context.addDiag(diag::AssignmentPatternDynamicDefault, item->key->sourceRange());
-            bad = true;
+            bindDefaultSetter(context, *item, defaultSetter, bad);
             continue;
         }
 
@@ -1556,25 +1617,40 @@ Expression& StructuredAssignmentPatternExpression::forDynamicArray(
         maxIndex = std::max(maxIndex, size_t(*index));
     }
 
+    // If there is a default setter expression, translate it to the target type
+    // of the array, and store that in case we need it to do constant evaluation.
+    if (defaultSetter) {
+        auto matched = matchElementValue(context, elementType, nullptr, syntax.sourceRange(), {},
+                                         defaultSetter);
+        if (!matched)
+            bad = true;
+        else
+            defaultSetter = matched;
+    }
+
     SmallVector<const Expression*> elements;
-    if (indexMap.size() != maxIndex + 1) {
+    if (indexMap.size() != maxIndex + 1 && !defaultSetter) {
         if (!bad) {
             context.addDiag(diag::AssignmentPatternMissingElements, sourceRange);
             bad = true;
         }
     }
-    else {
+    else if (!indexMap.empty() && !bad) {
         elements.reserve(maxIndex + 1);
         for (size_t i = 0; i <= maxIndex; i++) {
-            auto expr = indexMap[int32_t(i)];
-            SLANG_ASSERT(expr);
-            elements.push_back(expr);
+            if (auto it = indexMap.find(int32_t(i)); it != indexMap.end()) {
+                elements.push_back(it->second);
+                continue;
+            }
+
+            SLANG_ASSERT(defaultSetter);
+            elements.push_back(defaultSetter);
         }
     }
 
     auto result = comp.emplace<StructuredAssignmentPatternExpression>(
         type, std::span<const MemberSetter>{}, std::span<const TypeSetter>{},
-        indexSetters.copy(comp), nullptr, elements.copy(comp), sourceRange);
+        indexSetters.copy(comp), defaultSetter, elements.copy(comp), sourceRange);
 
     if (bad)
         return badExpr(comp, result);
@@ -1595,12 +1671,7 @@ Expression& StructuredAssignmentPatternExpression::forAssociativeArray(
 
     for (auto item : syntax.items) {
         if (item->key->kind == SyntaxKind::DefaultPatternKeyExpression) {
-            if (defaultSetter) {
-                context.addDiag(diag::AssignmentPatternKeyDupDefault, item->key->sourceRange());
-                bad = true;
-            }
-            defaultSetter = &selfDetermined(comp, *item->expr, context);
-            bad |= defaultSetter->bad();
+            bindDefaultSetter(context, *item, defaultSetter, bad);
         }
         else if (DataTypeSyntax::isKind(item->key->kind)) {
             context.addDiag(diag::AssignmentPatternDynamicType, item->key->sourceRange());
@@ -1684,13 +1755,12 @@ void StructuredAssignmentPatternExpression::serializeTo(ASTSerializer& serialize
     }
 }
 
-const Expression& ReplicatedAssignmentPatternExpression::bindReplCount(
-    Compilation& comp, const ExpressionSyntax& syntax, const ASTContext& context, size_t& count) {
-
-    const Expression& expr = bind(syntax, context);
+static const Expression& bindReplCount(Compilation& comp, const ExpressionSyntax& syntax,
+                                       const ASTContext& context, size_t& count) {
+    const Expression& expr = Expression::bind(syntax, context);
     std::optional<int32_t> c = context.evalInteger(expr);
     if (!context.requireGtZero(c, expr.sourceRange))
-        return badExpr(comp, &expr);
+        return *comp.emplace<InvalidExpression>(&expr, comp.getErrorType());
 
     count = size_t(*c);
     return expr;
@@ -1778,6 +1848,61 @@ Expression& ReplicatedAssignmentPatternExpression::forDynamicArray(
 void ReplicatedAssignmentPatternExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.write("count", count());
     AssignmentPatternExpressionBase::serializeTo(serializer);
+}
+
+static Expression& bindInvalidAssignmentPattern(const ASTContext& context,
+                                                const AssignmentPatternSyntax& syntax) {
+    auto& comp = context.getCompilation();
+    auto& et = comp.getErrorType();
+    auto range = syntax.sourceRange();
+
+    switch (syntax.kind) {
+        case SyntaxKind::SimpleAssignmentPattern: {
+            SmallVector<const Expression*> elems;
+            for (auto item : syntax.as<SimpleAssignmentPatternSyntax>().items)
+                elems.push_back(&Expression::bindRValue(et, *item, {}, context));
+
+            return *comp.emplace<SimpleAssignmentPatternExpression>(
+                et, context.flags.has(ASTFlags::LValue), elems.copy(comp), range);
+        }
+        case SyntaxKind::ReplicatedAssignmentPattern: {
+            auto& rap = syntax.as<ReplicatedAssignmentPatternSyntax>();
+
+            size_t count = 0;
+            auto& countExpr = bindReplCount(comp, *rap.countExpr, context, count);
+
+            SmallVector<const Expression*> elems;
+            for (auto item : rap.items)
+                elems.push_back(&Expression::bindRValue(et, *item, {}, context));
+
+            return *comp.emplace<ReplicatedAssignmentPatternExpression>(et, countExpr,
+                                                                        elems.copy(comp), range);
+        }
+        case SyntaxKind::StructuredAssignmentPattern: {
+            bool bad = false;
+            const Expression* defaultSetter = nullptr;
+            SmallVector<const Expression*> elems;
+            for (auto item : syntax.as<StructuredAssignmentPatternSyntax>().items) {
+                if (item->key->kind == SyntaxKind::DefaultPatternKeyExpression) {
+                    bindDefaultSetter(context, *item, defaultSetter, bad);
+                }
+                else {
+                    // Since we don't know the target type there's no way to
+                    // do anything meaningful with the key, but we can bind
+                    // the value expression to get some basic checking.
+                    elems.push_back(&Expression::bindRValue(et, *item->expr, {}, context));
+                }
+            }
+
+            using SAPE = StructuredAssignmentPatternExpression;
+            return *comp.emplace<SAPE>(et, std::span<const SAPE::MemberSetter>{},
+                                       std::span<const SAPE::TypeSetter>{},
+                                       std::span<const SAPE::IndexSetter>{}, defaultSetter,
+                                       elems.copy(comp), range);
+        }
+        default:
+            SLANG_UNREACHABLE;
+    }
 }
 
 } // namespace slang::ast

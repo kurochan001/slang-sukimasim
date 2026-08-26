@@ -7,13 +7,14 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/EvalContext.h"
 
+#include "../text/FormatBuffer.h"
+
 #include "slang/ast/ASTContext.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/ConstEvalDiags.h"
-#include "slang/text/FormatBuffer.h"
 
 namespace slang::ast {
 
@@ -112,6 +113,19 @@ bool EvalContext::step(SourceLocation loc) {
 
     addDiag(diag::ConstEvalExceededMaxSteps, loc);
     return false;
+}
+
+bool EvalContext::checkBitCount(uint64_t bits, SourceRange range) {
+    uint64_t limit = getCompilation().getOptions().maxConstantSize;
+    if (bits <= limit)
+        return true;
+
+    addDiag(diag::ConstEvalExceededMaxSize, range) << bits << limit;
+    return false;
+}
+
+bool EvalContext::checkMaxValue(const ConstantValue& val, SourceRange range) {
+    return checkBitCount(val.getBitstreamWidth(), range);
 }
 
 std::string EvalContext::dumpStack() const {

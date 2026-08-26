@@ -7,11 +7,7 @@
 //------------------------------------------------------------------------------
 #include "slang/util/Util.h"
 
-#include <fmt/core.h>
-
-#if defined(SLANG_USE_MIMALLOC)
-#    include <mimalloc-new-delete.h>
-#endif
+#include <fmt/format.h>
 
 namespace slang::assert {
 

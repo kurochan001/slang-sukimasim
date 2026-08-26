@@ -49,6 +49,9 @@ public:
     /// Indicates whether the constraint is invalid.
     bool bad() const { return kind == ConstraintKind::Invalid; }
 
+    /// Returns true if this constraint is structurally equivalent to the other one.
+    bool isEquivalentTo(const Constraint& other) const;
+
     /// Binds a constraint tree from the given syntax node.
     static const Constraint& bind(const syntax::ConstraintItemSyntax& syntax,
                                   const ASTContext& context);
@@ -115,6 +118,7 @@ public:
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::Invalid; }
 
+    bool isEquivalentImpl(const InvalidConstraint&) const { return true; }
     void serializeTo(ASTSerializer& serializer) const;
 
     template<typename TVisitor>
@@ -133,6 +137,7 @@ public:
     static Constraint& fromSyntax(const syntax::ConstraintBlockSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const ConstraintList& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::List; }
@@ -159,6 +164,7 @@ public:
     static Constraint& fromSyntax(const syntax::ExpressionConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const ExpressionConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::Expression; }
@@ -184,6 +190,7 @@ public:
     static Constraint& fromSyntax(const syntax::ImplicationConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const ImplicationConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::Implication; }
@@ -215,6 +222,7 @@ public:
     static Constraint& fromSyntax(const syntax::ConditionalConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const ConditionalConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::Conditional; }
@@ -240,6 +248,7 @@ public:
     static Constraint& fromSyntax(const syntax::UniquenessConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const UniquenessConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::Uniqueness; }
@@ -263,6 +272,7 @@ public:
     static Constraint& fromSyntax(const syntax::DisableConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const DisableSoftConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::DisableSoft; }
@@ -294,6 +304,7 @@ public:
     static Constraint& fromSyntax(const syntax::SolveBeforeConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const SolveBeforeConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::SolveBefore; }
@@ -327,6 +338,7 @@ public:
     static Constraint& fromSyntax(const syntax::LoopConstraintSyntax& syntax,
                                   const ASTContext& context);
 
+    bool isEquivalentImpl(const ForeachConstraint& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(ConstraintKind kind) { return kind == ConstraintKind::Foreach; }

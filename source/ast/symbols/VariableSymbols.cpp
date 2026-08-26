@@ -80,10 +80,12 @@ void VariableSymbol::fromSyntax(Compilation& compilation, const DataDeclarationS
     if (!hasExplicitLifetime)
         lifetime = getDefaultLifetime(scope);
 
-    const bool isInIface =
-        scope.asSymbol().kind == SymbolKind::InstanceBody &&
-        scope.asSymbol().as<InstanceBodySymbol>().getDefinition().definitionKind ==
-            DefinitionKind::Interface;
+    auto& parentSym = scope.asSymbol();
+    const bool isInIfaceOrGenBlk =
+        parentSym.kind == SymbolKind::GenerateBlock ||
+        (parentSym.kind == SymbolKind::InstanceBody &&
+         parentSym.as<InstanceBodySymbol>().getDefinition().definitionKind ==
+             DefinitionKind::Interface);
 
     for (auto declarator : syntax.declarators) {
         auto variable = compilation.emplace<VariableSymbol>(declarator->name.valueText(),
@@ -99,8 +101,8 @@ void VariableSymbol::fromSyntax(Compilation& compilation, const DataDeclarationS
         if (isCheckerFreeVar)
             variable->flags |= VariableFlags::CheckerFreeVariable;
 
-        if (isInIface)
-            variable->getDeclaredType()->addFlags(DeclaredTypeFlags::InterfaceVariable);
+        if (isInIfaceOrGenBlk)
+            variable->getDeclaredType()->addFlags(DeclaredTypeFlags::IfaceOrGenBlkVar);
 
         // If this is a static variable in a procedural context and it has an initializer,
         // the spec requires that the static keyword must be explicitly provided.
@@ -145,12 +147,14 @@ VariableSymbol::VariableSymbol(SymbolKind childKind, std::string_view name, Sour
         getDeclaredType()->addFlags(DeclaredTypeFlags::AutomaticInitializer);
 }
 
-struct StaticInitializerVisitor {
+struct InitializerVisitor {
     const ASTContext& context;
-    const Symbol& sourceVar;
+    const VariableSymbol& sourceVar;
+    const bool checkStaticOrder;
 
-    StaticInitializerVisitor(const ASTContext& context, const Symbol& sourceVar) :
-        context(context), sourceVar(sourceVar) {}
+    InitializerVisitor(const ASTContext& context, const VariableSymbol& sourceVar,
+                       bool checkStaticOrder) :
+        context(context), sourceVar(sourceVar), checkStaticOrder(checkStaticOrder) {}
 
     template<typename T>
     void visit(const T& expr) {
@@ -160,29 +164,34 @@ struct StaticInitializerVisitor {
                 case ExpressionKind::HierarchicalValue: {
                     if (auto sym = expr.getSymbolReference()) {
                         if (sym->kind == SymbolKind::Variable) {
-                            // Don't warn if this is the same var.
                             auto& var = sym->template as<VariableSymbol>();
-                            if (&var == &sourceVar)
+                            if (&var == &sourceVar) {
+                                // Warn about self-referential initializer.
+                                auto& diag = context.addDiag(diag::InitSelf, expr.sourceRange);
+                                diag << sourceVar.name;
                                 return;
+                            }
 
-                            const bool hasInit = var.getInitializer();
-                            const bool isFromPort = var.getFirstPortBackref();
-                            const bool isDeclaredBefore = var.isDeclaredBefore(sourceVar).value_or(
-                                false);
+                            if (checkStaticOrder) {
+                                const bool hasInit = var.getInitializer();
+                                const bool isFromPort = var.getFirstPortBackref();
+                                const bool isDeclaredBefore =
+                                    var.isDeclaredBefore(sourceVar).value_or(false);
 
-                            // We warn unless this var has an initializer, is declared
-                            // before us in the same instance, and isn't attached to a port.
-                            if (hasInit && !isFromPort && isDeclaredBefore)
-                                return;
+                                // We warn unless this var has an initializer, is declared
+                                // before us in the same instance, and isn't attached to a port.
+                                if (hasInit && !isFromPort && isDeclaredBefore)
+                                    return;
 
-                            auto code = (hasInit && !isFromPort) ? diag::StaticInitOrder
-                                                                 : diag::StaticInitValue;
-                            auto& diag = context.addDiag(code, expr.sourceRange);
-                            diag << sourceVar.name << var.name;
-                            diag.addNote(diag::NoteDeclarationHere, var.location);
+                                auto code = (hasInit && !isFromPort) ? diag::StaticInitOrder
+                                                                     : diag::StaticInitValue;
+                                auto& diag = context.addDiag(code, expr.sourceRange);
+                                diag << sourceVar.name << var.name;
+                                diag.addNote(diag::NoteDeclarationHere, var.location);
+                            }
                         }
-                        else if (sym->kind == SymbolKind::Net ||
-                                 sym->kind == SymbolKind::ModportPort) {
+                        else if (checkStaticOrder && (sym->kind == SymbolKind::Net ||
+                                                      sym->kind == SymbolKind::ModportPort)) {
                             auto& diag = context.addDiag(diag::StaticInitValue, expr.sourceRange);
                             diag << sourceVar.name << sym->name;
                             diag.addNote(diag::NoteDeclarationHere, sym->location);
@@ -220,7 +229,7 @@ struct StaticInitializerVisitor {
                     // Ignore new covergroup expressions.
                     break;
                 default:
-                    if constexpr (HasVisitExprs<T, StaticInitializerVisitor>)
+                    if constexpr (HasVisitExprs<T, InitializerVisitor>)
                         expr.visitExprs(*this);
                     break;
             }
@@ -229,28 +238,32 @@ struct StaticInitializerVisitor {
 };
 
 void VariableSymbol::checkInitializer() const {
-    // Check the initializer expression of static variables
-    // for references to other values that have indeterminate
-    // initialization order.
-    if (kind != SymbolKind::Variable || lifetime != VariableLifetime::Static)
+    if (kind != SymbolKind::Variable)
         return;
 
     auto scope = getParentScope();
     SLANG_ASSERT(scope);
 
-    switch (scope->asSymbol().kind) {
-        case SymbolKind::InstanceBody:
-        case SymbolKind::GenerateBlock:
-        case SymbolKind::Package:
-        case SymbolKind::CompilationUnit:
-            if (auto init = getInitializer(); init && !init->bad()) {
-                ASTContext context(*scope, LookupLocation::after(*this));
-                StaticInitializerVisitor visitor(context, *this);
-                init->visit(visitor);
-            }
-            break;
-        default:
-            break;
+    // Also check static initialization order for static variables in scopes
+    // where initialization order is not defined.
+    bool checkStaticOrder = false;
+    if (lifetime == VariableLifetime::Static) {
+        switch (scope->asSymbol().kind) {
+            case SymbolKind::InstanceBody:
+            case SymbolKind::GenerateBlock:
+            case SymbolKind::Package:
+            case SymbolKind::CompilationUnit:
+                checkStaticOrder = true;
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (auto init = getInitializer(); init && !init->bad()) {
+        ASTContext context(*scope, LookupLocation::after(*this));
+        InitializerVisitor visitor(context, *this, checkStaticOrder);
+        init->visit(visitor);
     }
 }
 
@@ -292,8 +305,9 @@ void FormalArgumentSymbol::fromSyntax(const Scope& scope, const PortDeclarationS
 
     auto& comp = scope.getCompilation();
     auto& header = syntax.header->as<VariablePortHeaderSyntax>();
-    ArgumentDirection direction = SemanticFacts::getDirection(header.direction.kind);
-    VariableLifetime lifetime = getDefaultLifetime(scope);
+    auto direction = header.direction ? SemanticFacts::getDirection(header.direction.kind)
+                                      : ArgumentDirection::In;
+    auto lifetime = getDefaultLifetime(scope);
 
     bool isConst = false;
     if (header.constKeyword) {
@@ -461,13 +475,16 @@ void NetSymbol::fromSyntax(const ASTContext& context, const UserDefinedNetDeclar
     }
 }
 
-NetSymbol& NetSymbol::createImplicit(Compilation& compilation, const IdentifierNameSyntax& syntax,
+NetSymbol& NetSymbol::createImplicit(const ASTContext& context, const IdentifierNameSyntax& syntax,
                                      const NetType& netType) {
+    auto& compilation = context.getCompilation();
     auto t = syntax.identifier;
     auto net = compilation.emplace<NetSymbol>(t.valueText(), t.location(), netType);
     net->setType(compilation.getLogicType());
     net->isImplicit = true;
     net->setSyntax(syntax);
+
+    context.addDiag(diag::ImplicitNet, t.location()) << t.valueText();
     return *net;
 }
 

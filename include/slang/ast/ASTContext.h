@@ -9,6 +9,7 @@
 
 #include <tuple>
 
+#include "slang/ast/EvaluatedDimension.h"
 #include "slang/ast/Lookup.h"
 #include "slang/ast/Scope.h"
 #include "slang/ast/SemanticFacts.h"
@@ -181,29 +182,26 @@ enum class SLANG_EXPORT ASTFlags : uint64_t {
     /// AST binding is for a bind instantiation (port connection or param value).
     BindInstantiation = 1ull << 41,
 
+
+    /// AST binding is for a wildcard port connection.
+    WildcardPortConn = 1ull << 42,
+
+    /// AST binding is for a port connection of an unknown / uninstantiated module
+    /// instance. The target port type is not known, so expressions are bound
+    /// self-determined and diagnostics that would otherwise require a context
+    /// (target) type are suppressed.
+    UnknownPortConn = 1ull << 43,
+
     /// AST binding is for a foreach loop array reference, which allows
     /// interface arrays to be used (IEEE 1800-2023 §12.7.3).
-    ForeachLoopArray = 1ull << 42,
+    ForeachLoopArray = 1ull << 44,
 
     /// AST binding is for a procedural force/assign statement (IEEE 1800-2023 §10.6).
     /// This allows nets to be assigned on the LHS while still permitting automatic
     /// variables in the RHS expression.
-    ProceduralForceAssign = 1ull << 43,
+    ProceduralForceAssign = 1ull << 45,
 };
 SLANG_BITMASK(ASTFlags, ProceduralForceAssign)
-
-// clang-format off
-#define DK(x) \
-    x(Unknown) \
-    x(Range) \
-    x(AbbreviatedRange) \
-    x(Dynamic) \
-    x(Associative) \
-    x(Queue) \
-    x(DPIOpenArray)
-// clang-format on
-SLANG_ENUM(DimensionKind, DK)
-#undef DK
 
 /// Various flags that can be applied to a constant expression evaluation.
 enum class SLANG_EXPORT EvalFlags : uint8_t {
@@ -227,29 +225,6 @@ enum class SLANG_EXPORT EvalFlags : uint8_t {
     AllowUnboundedPlaceholder = 1 << 3
 };
 SLANG_BITMASK(EvalFlags, AllowUnboundedPlaceholder)
-
-/// The result of evaluating dimension syntax nodes.
-struct SLANG_EXPORT EvaluatedDimension {
-    /// The kind of dimension indicated by the syntax nodes.
-    DimensionKind kind = DimensionKind::Unknown;
-
-    /// The compile-time constant range specifying the dimensions.
-    ConstantRange range;
-
-    /// If the dimension is for an associative type, this is a pointer to that type.
-    /// Otherwise nullptr.
-    const Type* associativeType = nullptr;
-
-    /// If the dimension is for a queue type, this is the optionally specified
-    /// max queue size.
-    uint32_t queueMaxSize = 0;
-
-    /// Indicates whether the dimension is for a range (as opposed to a single
-    /// index or an associative array access, for example).
-    bool isRange() const {
-        return kind == DimensionKind::Range || kind == DimensionKind::AbbreviatedRange;
-    }
-};
 
 /// Information required to instantiate a sequence, property, or checker instance.
 struct SLANG_EXPORT AssertionInstanceDetails {
@@ -305,7 +280,7 @@ public:
     bitmask<ASTFlags> flags;
 
 private:
-    const Symbol* instanceOrProc = nullptr;
+    const Symbol* symbolCtx = nullptr;
 
 public:
     /// If any temporary variables have been materialized in this context,
@@ -381,9 +356,12 @@ public:
     /// Sets the procedural block associated with the context.
     void setProceduralBlock(const ProceduralBlockSymbol& block);
 
-    /// Clears the parent instance and parent procedural block symbol
-    /// associated with the context.
-    void clearInstanceAndProc() { instanceOrProc = nullptr; }
+    /// Sets the port associated with the context.
+    void setPort(const Symbol& port);
+
+    /// Clears the symbol assocated with the context (either a parent instance,
+    /// a port, or a procedural block).
+    void clearSymbolCtx() { symbolCtx = nullptr; }
 
     /// Tries to fill the @a assertionInstance member by searching upward through
     /// parent scopes to find an assertion instantiation.
@@ -536,6 +514,10 @@ public:
     ///          expression, and nullptr otherwise.
     const syntax::ExpressionSyntax* requireSimpleExpr(const syntax::PropertyExprSyntax& expr,
                                                       DiagCode code) const;
+
+    /// Notes that the given value symbol has been referenced, taking into account
+    /// active AST flags to determine whether it's used as an lvalue or rvalue.
+    void noteReference(const ValueSymbol& symbol, bool isDottedAccess) const;
 
     /// Gets the rand mode for the given symbol, taking into account any randomize
     /// scope that may be active in this context.

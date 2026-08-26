@@ -3,6 +3,8 @@
 
 #include "AnalysisTests.h"
 
+#include "slang/analysis/DataFlowAnalysis.h"
+
 class TestAnalysis : public AbstractFlowAnalysis<TestAnalysis, int> {
 public:
     TestAnalysis(const Symbol& symbol) : AbstractFlowAnalysis(symbol, {}) {}
@@ -152,7 +154,7 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     REQUIRE(diags.size() == 4);
     CHECK(diags[0].code == diag::InferredLatch);
     CHECK(diags[1].code == diag::InferredLatch);
@@ -182,7 +184,7 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     std::string result = "\n" + report(diags);
     CHECK(result == R"(
 source:8:13: warning: latch inferred for 's.a' because it is not assigned on all control paths [-Winferred-latch]
@@ -219,7 +221,7 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     CHECK_DIAGS_EMPTY;
 }
 
@@ -267,7 +269,7 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::InferredLatch);
 }
@@ -306,7 +308,7 @@ endfunction
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     REQUIRE(diags.size() == 3);
     CHECK(diags[0].code == diag::MissingReturn);
     CHECK(diags[1].code == diag::IncompleteReturn);
@@ -332,7 +334,7 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::InferredLatch);
 }
@@ -352,7 +354,7 @@ endfunction
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     CHECK_DIAGS_EMPTY;
 }
 
@@ -382,7 +384,120 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("For loop unrolling with automatic var declared outside loop header") {
+    // An automatic loop variable initialized in the for header (but declared
+    // before it) should be successfully unrolled, just like one declared inside.
+    auto& code = R"(
+module Test;
+  logic [3:0] a;
+  always_comb begin
+    automatic int i;
+    for (i = 0; i < 4; i++) begin
+      a[i] = 1'b1;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("For loop unrolling with multiple automatic vars declared outside loop header") {
+    // Multiple automatic loop variables initialized in the for header (but
+    // declared before it) should all be successfully unrolled.
+    auto& code = R"(
+module Test;
+  logic [3:0] a;
+  logic [3:0] b;
+  always_comb begin
+    automatic int i;
+    automatic int j;
+    for (i = 0, j = 3; i < 4; i++, j--) begin
+      a[i] = 1'b1;
+      b[j] = 1'b0;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("For loop with missing steps: body executes at least once (automatic var)") {
+    auto& code = R"(
+module Test;
+  logic [3:0] a;
+  always_comb begin
+    automatic int i;
+    for (i = 0; i < 4; ) begin
+      a[i] = 1'b1;
+      i++;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("For loop with missing steps: body never executes when condition initially false") {
+    auto& code = R"(
+module Test;
+  logic [3:0] a;
+  always_comb begin
+    automatic int i;
+    // condition is false from the start: loop body never runs
+    for (i = 10; i < 4; ) begin
+      a[i] = 1'b1;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::LoopCondNotModified);
+}
+
+TEST_CASE("For loop with no stop expression: body always executes") {
+    // A loop with no stop expression is infinite. The body is guaranteed to
+    // execute at least once and the normal exit path is unreachable.
+    auto& code = R"(
+module Test;
+  logic [3:0] a;
+  always_comb begin
+    automatic int i = 0;
+    for (; ; i++) begin
+      a[i] = 1'b1;
+      if (i == 3) break;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
     CHECK_DIAGS_EMPTY;
 }
 
@@ -413,7 +528,104 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("For loop body modifying iter var stops unrolling -- GH #1817") {
+    // The loop body assigns to the iteration variable, so the iteration values
+    // computed from the loop header don't match what the body actually sees.
+    auto& code = R"(
+module top;
+  logic a;
+  always_latch begin
+    for (int i = 0; i < 2; ++i) begin
+      i = 100;
+      if (i == 1)
+        a = 1;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::LoopVarModify);
+}
+
+TEST_CASE("For loop body modifying iter var infers latch -- GH #1817") {
+    // Because the body assigns i = 2, the test i == 2 can no longer be proven
+    // false during unrolling. With unrolling disabled, 'a' is correctly seen as
+    // only conditionally assigned, which infers a latch.
+    auto& code = R"(
+module top;
+  logic a;
+  always_comb begin
+    for (int i = 0; i < 2; ++i) begin
+      i = 2;
+      if (i == 2)
+        a = 1;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::LoopVarModify);
+    CHECK(diags[1].code == diag::InferredLatch);
+}
+
+TEST_CASE("For loop reading but not writing iter var still unrolls -- GH #1817") {
+    // Reading the iteration variable in the body (without writing it) must not
+    // disable unrolling. Here the branch guard depends on the iteration variable
+    // being a known constant; if the loop weren't unrolled, 'a' would be only
+    // conditionally assigned and infer a latch. Correct unrolling proves every
+    // bit of 'a' is assigned, so there are no diagnostics.
+    auto& code = R"(
+module top;
+  logic [3:0] a;
+  always_comb begin
+    for (int i = 0; i < 4; i++) begin
+      if (i < 4)
+        a[i] = 1'b1;
+    end
+  end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("No latch inferred when first loop iteration is proven -- GH #1870") {
+    // Same loop shape as above inside always_comb. Since at least one iteration
+    // is guaranteed, the assignment to c must not be discarded.
+    auto& code = R"(
+module m(input in);
+    reg c;
+    always_comb begin
+        automatic int j = 4;
+        for (int i = 0; i < (i == 0 ? 4 : j); i++) begin
+            c = in;
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
     CHECK_DIAGS_EMPTY;
 }
 
@@ -538,7 +750,7 @@ endmodule // test
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     REQUIRE(diags.size() == 13);
     CHECK(diags[0].code == diag::InferredComb);
     CHECK(diags[1].code == diag::InferredComb);
@@ -570,8 +782,8 @@ endfunction
     compilation.getAllDiagnostics();
     compilation.freeze();
 
-    auto design = analysisManager.analyze(compilation);
-    auto diags = analysisManager.getDiagnostics(compilation.getSourceManager());
+    analysisManager.analyze(compilation);
+    auto diags = analysisManager.getDiagnostics();
     CHECK_DIAGS_EMPTY;
 }
 
@@ -628,7 +840,7 @@ endmodule
     Compilation compilation;
     AnalysisManager analysisManager;
 
-    auto [diags, design] = analyze(code, compilation, analysisManager);
+    auto diags = analyze(code, compilation, analysisManager);
     REQUIRE(diags.size() == 3);
     CHECK(diags[0].code == diag::AlwaysWithoutTimingControl);
     CHECK(diags[1].code == diag::AlwaysWithoutTimingControl);
@@ -648,7 +860,7 @@ endmodule
         Compilation compilation;
         AnalysisManager analysisManager;
 
-        auto [diags, design] = analyze(code, compilation, analysisManager);
+        auto diags = analyze(code, compilation, analysisManager);
         CHECK_DIAGS_EMPTY;
     }
 
@@ -664,8 +876,578 @@ endmodule
         Compilation compilation;
         AnalysisManager analysisManager;
 
-        auto [diags, design] = analyze(code, compilation, analysisManager);
+        auto diags = analyze(code, compilation, analysisManager);
         REQUIRE(diags.size() == 1);
         CHECK(diags[0].code == diag::AlwaysWithoutTimingControl);
     }
+}
+
+struct CustomState : public DataFlowState {};
+
+class CustomDFA : public DataFlowAnalysis<CustomDFA, CustomState> {
+public:
+    std::string& callName;
+
+    CustomDFA(AnalysisContext& context, const Symbol& symbol, std::string& callName) :
+        DataFlowAnalysis(context, symbol, false), callName(callName) {}
+
+    void handle(const CallExpression& call) {
+        DataFlowAnalysis::handle(call);
+        callName = std::string(call.getSubroutineName());
+    }
+};
+
+TEST_CASE("Custom DFA API test") {
+    auto& code = R"(
+function void foo;
+endfunction
+
+module m;
+    always_comb foo();
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    std::string callName;
+
+    analysisManager.setCustomDFAProvider([&](AnalysisContext& context, const Symbol& symbol,
+                                             const AnalyzedProcedure* parentProcedure) {
+        CustomDFA dfa(context, symbol, callName);
+        dfa.run();
+
+        if (dfa.bad)
+            return AnalyzedProcedure(symbol, parentProcedure);
+        else
+            return AnalyzedProcedure(context, symbol, parentProcedure, dfa);
+    });
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+
+    CHECK(callName == "foo");
+}
+
+TEST_CASE("always_comb task call with delay") {
+    auto& code = R"(
+module m;
+    task t;
+        #5;
+    endtask
+
+    always_comb begin
+        t();
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::BlockingDelayInTask);
+}
+
+TEST_CASE("DFA handles ambiguous conditional expression") {
+    auto& code = R"(
+module m(input l);
+    int a;
+    always_comb begin
+        if (l) begin
+            automatic int i = 'x ? (a = 1) : 3;
+        end
+        else begin
+            a = 1;
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("DFA general randsequence") {
+    auto& code = R"(
+module m;
+    int a;
+    int cnt;
+
+    always_comb begin
+        randsequence (main)
+            main : first second done ;
+            first : add("foo") | dec ;
+            second : pop | push ;
+            done : { $display("done"); return; } ;
+            add(string s) : { $display(s); } ;
+            dec : { begin : foo $display("dec"); break; end } ;
+            pop : repeat($urandom_range( 2, 6 )) push;
+            push : if (1) done else pop | rand join (0.5) first second done;
+            baz : case (a & 7) 1, 2: push; 3: pop; default done; endcase;
+        endsequence
+
+        randsequence( bin_op )
+            void bin_op : value operator value // void type is optional
+            { $display("%s %b %b", operator, value[1], value[2]); }
+            ;
+            bit [7:0] value : { return 8'($urandom); } ;
+            string operator : add := 5 { return "+" ; }
+                            | dec := 2 { return "-" ; }
+                            | mult := 1 { return "*" ; }
+            ;
+            add : { $display("add"); };
+            dec : { $display("dec"); };
+            mult : { $display("mult"); };
+        endsequence
+
+        cnt = 0;
+        randsequence( A )
+            void A : A1 A2;
+            void A1 : { cnt = 1; } B repeat(5) C B
+            { $display("c=%d, b1=%d, b2=%d", C, B[1], B[2]); }
+            ;
+            void A2 : if (a != 0) D(5) else D(20)
+            { $display("d1=%d, d2=%d", D[1], D[2]); }
+            ;
+            int B : C { return C;}
+                  | C C { return C[2]; }
+                  | C C C { return C[3]; }
+            ;
+            int C : { cnt = cnt + 1; return cnt; };
+            int D (int prm) : { return prm; };
+        endsequence
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("DFA unsequenced expression warnings") {
+    auto& code = R"(
+function void f1(input int a, output int b);
+endfunction
+
+function void f2(input int a, b);
+endfunction
+
+class C;
+    function void foo(output C c); endfunction
+    function void bar(C c); endfunction
+endclass
+
+module m;
+    int i, j;
+    C c;
+    initial begin
+        j = i++ + (i = i - 1);
+        j = i++ + (i = 1);
+        j[j++] = i; // ok
+        j[j++] = j;
+        j[(i = 1)] = i;
+        j = (j = 1); // ok
+        j += (j = 1);
+
+        f1(i, i); // ok
+        f1(i++, i);
+        f2(i++, (i = 1));
+
+        if ((++i || i == 1) + i) begin end
+
+        c.foo(c);
+        c.bar((c = new));
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 10);
+    CHECK(diags[0].code == diag::MultiWriteExpr);
+    CHECK(diags[1].code == diag::ReadWriteExpr);
+    CHECK(diags[2].code == diag::MultiWriteExpr);
+    CHECK(diags[3].code == diag::ReadWriteExpr);
+    CHECK(diags[4].code == diag::ReadWriteExpr);
+    CHECK(diags[5].code == diag::ReadWriteExpr);
+    CHECK(diags[6].code == diag::ReadWriteExpr);
+    CHECK(diags[7].code == diag::MultiWriteExpr);
+    CHECK(diags[8].code == diag::ReadWriteExpr);
+    CHECK(diags[9].code == diag::ReadWriteExpr);
+}
+
+TEST_CASE("DFA unsequenced expression corner cases") {
+    auto& code = R"(
+module m;
+    int i, j;
+    initial begin
+        // ok due to intra-assignment delay
+        j[(i = 1)] = #3 i;
+
+        if (++i || i == 1) begin end
+        if (++i && i == 1) begin end
+        if ((i = 1) ? i : i) begin end
+    end
+
+    function automatic void foo;
+        logic [4:0] data[2];
+        logic [4:0] a;
+        logic b,c,d,e,f;
+        '{ a, '{ b,c,d,e,f } } = data;
+    endfunction
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("DFA unsequenced expression dynamic selects") {
+    auto& code = R"(
+module m;
+    struct { logic a, b; } s[2];
+    logic d[];
+    int i;
+
+    initial begin
+        {d[0], d[1]} = 2;
+        i = s[i].a++ + s[i].b++;
+
+        // These should still error.
+        {d[0], d[0]} = 2;
+        i = s[i].a++ + s[i].a++;
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::MultiWriteExpr);
+    CHECK(diags[1].code == diag::MultiWriteExpr);
+}
+
+TEST_CASE("Fork loop var: basic for loop with join_none") {
+    auto& code = R"(
+module m;
+    task automatic do_something(int x); endtask
+    initial begin
+        for (int i = 0; i < 4; i++) begin
+            fork
+                do_something(i);
+            join_none
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ForkLoopVar);
+}
+
+TEST_CASE("Fork loop var: no warning for fork-join (join_all)") {
+    auto& code = R"(
+module m;
+    task automatic do_something(int x); endtask
+    initial begin
+        for (int i = 0; i < 4; i++) begin
+            fork
+                do_something(i);
+            join
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Fork loop var using automatic local") {
+    auto& code = R"(
+module m;
+    task automatic do_something(int x); endtask
+    initial begin
+        for (int i = 0; i < 4; i++) begin
+            fork
+                automatic int inst = i;
+                do_something(inst);
+            join_none
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Fork loop var: foreach loop variable") {
+    auto& code = R"(
+module m;
+    task automatic do_something(int x); endtask
+    initial begin
+        int arr[4];
+        foreach (arr[i]) begin
+            fork
+                do_something(i);
+            join_none
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ForkLoopVar);
+}
+
+TEST_CASE("Fork loop var: nested loops, only outer loop var referenced") {
+    auto& code = R"(
+module m;
+    task automatic do_something(int x, int y); endtask
+    initial begin
+        for (int i = 0; i < 4; i++) begin
+            for (int j = 0; j < 4; j++) begin
+                fork
+                    do_something(i, j);
+                join_none
+            end
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::ForkLoopVar);
+    CHECK(diags[1].code == diag::ForkLoopVar);
+}
+
+TEST_CASE("Loop var double step: prefix increment in step and body") {
+    auto& code = R"(
+module m;
+    initial begin
+        for (int i = 0; i < 10; i++) begin
+            i++;
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::LoopVarModify);
+}
+
+TEST_CASE("Loop var double step: compound add assignment in body") {
+    auto& code = R"(
+module m;
+    initial begin
+        for (int i = 0; i < 10; i++) begin
+            i += 2;
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::LoopVarModify);
+}
+
+TEST_CASE("Loop var double step: no warning when only body modifies") {
+    auto& code = R"(
+module m;
+    initial begin
+        // No step expression that increments i; only body does it.
+        for (int i = 0; i < 10; ) begin
+            i++;
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Loop cond not modified: variable updated in body") {
+    auto& code = R"(
+module m;
+    int limit;
+    initial begin
+        limit = 10;
+        for (int i = 0; i < limit; ) begin
+            i++;
+            limit--;
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Loop cond not modified: all condition variables unmodified") {
+    auto& code = R"(
+module m;
+    int lo, hi;
+    initial begin
+        lo = 0;
+        hi = 10;
+        for (int i = lo; i < hi; ) begin
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::LoopCondNotModified);
+}
+
+TEST_CASE("Loop cond not modified: nested loop regress") {
+    auto& code = R"(
+class C;
+    function void f();
+        logic [7:0][3:0] a;
+
+        for (int i = 0; i < 8; i++) begin
+            for (int unsigned j = 0; j < a[i]; j++) begin
+            end
+        end
+    endfunction
+endclass
+
+module m;
+    initial begin
+        for (int i = 0; i < 10; i = i + 1) begin
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Nested loop: double-step detected in nested loop body") {
+    auto& code = R"(
+module m;
+    initial begin
+        for (int i = 0; i < 4; i++) begin
+            for (int j = 0; j < 4; j++) begin
+                i++;
+            end
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::LoopVarModify);
+}
+
+TEST_CASE("Fork loop var: loop nested inside fork body does not warn") {
+    auto& code = R"(
+module m;
+    task automatic do_something(int x); endtask
+    initial begin
+        for (int i = 0; i < 4; i++) begin
+            fork
+                for (int j = 0; j < 4; j++) begin
+                    do_something(j);
+                end
+            join_none
+        end
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
+}
+
+TEST_CASE("Const eval step limit in loop condition doesn't crash -- GH #1889") {
+    auto& code = R"(
+module t;
+  function int unsigned foo(input int unsigned n);
+    foo = 1;
+    while (n != 0) begin
+      n = n + 1;
+    end
+  endfunction
+
+  initial begin
+    while (foo(1) != 1) begin end
+  end
+endmodule
+)";
+
+    CompilationOptions options;
+    options.maxConstexprSteps = 10;
+
+    Compilation compilation(options);
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    CHECK_DIAGS_EMPTY;
 }

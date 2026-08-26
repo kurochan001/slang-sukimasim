@@ -335,14 +335,17 @@ const Statement& Statement::bindBlock(const StatementBlockSymbol& block, const S
         bindScopeInitializers(context, buffer);
 
         const StatementSyntax* ss;
-        if (syntax.kind == SyntaxKind::PatternCaseItem)
+        bool labelHandled;
+        if (syntax.kind == SyntaxKind::PatternCaseItem) {
             ss = syntax.as<PatternCaseItemSyntax>().statement;
-        else
+            labelHandled = false;
+        }
+        else {
             ss = &syntax.as<StatementSyntax>();
+            labelHandled = true;
+        }
 
-        auto& stmt = bind(*ss, context, stmtCtx, /* inList */ false,
-                          /* labelHandled */ true);
-
+        auto& stmt = bind(*ss, context, stmtCtx, /* inList */ false, labelHandled);
         buffer.push_back(&stmt);
         anyBad |= stmt.bad();
 
@@ -373,8 +376,14 @@ const Statement& Statement::bindItems(const SyntaxList<SyntaxNode>& items,
     if (buffer.size() == 1)
         return *buffer[0];
 
+    SourceRange range;
+    if (buffer.empty())
+        range = SourceRange::NoLocation;
+    else
+        range = {buffer.front()->sourceRange.start(), buffer.back()->sourceRange.end()};
+
     auto& comp = context.getCompilation();
-    return *comp.emplace<StatementList>(buffer.copy(comp), SourceRange());
+    return *comp.emplace<StatementList>(buffer.copy(comp), range);
 }
 
 void Statement::bindScopeInitializers(const ASTContext& context,
@@ -658,8 +667,8 @@ std::span<const StatementBlockSymbol* const> Statement::createAndAddBlockItems(
                 scope.addMembers(*item);
                 break;
             case SyntaxKind::PortDeclaration:
-                if (item->previewNode)
-                    scope.addMembers(*item->previewNode);
+                if (auto preview = item->previewNode())
+                    scope.addMembers(*preview);
 
                 if (scope.asSymbol().kind == SymbolKind::Subroutine) {
                     SmallVector<const FormalArgumentSymbol*> args;
@@ -739,8 +748,7 @@ void StatementList::serializeTo(ASTSerializer& serializer) const {
 
 Statement& StatementList::makeEmpty(Compilation& compilation) {
     return *compilation.emplace<StatementList>(std::span<const Statement* const>(),
-                                               SourceRange(SourceLocation::NoLocation,
-                                                           SourceLocation::NoLocation));
+                                               SourceRange::NoLocation);
 }
 
 Statement& BlockStatement::fromSyntax(Compilation& comp, const BlockStatementSyntax& syntax,
@@ -813,9 +821,9 @@ Statement& BlockStatement::fromSyntax(Compilation& comp, const BlockStatementSyn
 }
 
 BlockStatement& BlockStatement::makeEmpty(Compilation& compilation) {
-    return *compilation.emplace<BlockStatement>(
-        StatementList::makeEmpty(compilation), StatementBlockKind::Sequential,
-        SourceRange(SourceLocation::NoLocation, SourceLocation::NoLocation));
+    return *compilation.emplace<BlockStatement>(StatementList::makeEmpty(compilation),
+                                                StatementBlockKind::Sequential,
+                                                SourceRange::NoLocation);
 }
 
 void BlockStatement::serializeTo(ASTSerializer& serializer) const {

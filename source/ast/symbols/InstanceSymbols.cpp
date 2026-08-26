@@ -53,11 +53,13 @@ public:
     // Resets the builder to be ready to create more instances with different settings.
     // Must be called at least once prior to creating instances.
     void reset(const DefinitionSymbol& def_, ParameterBuilder& paramBuilder_,
-               const ResolvedConfig* resolvedConfig_, const ConfigBlockSymbol* newConfigRoot_) {
+               const ResolvedConfig* resolvedConfig_, const ConfigBlockSymbol* newConfigRoot_,
+               uint32_t instanceDepth_) {
         definition = &def_;
         paramBuilder = &paramBuilder_;
         resolvedConfig = resolvedConfig_;
         newConfigRoot = newConfigRoot_;
+        instanceDepth = instanceDepth_;
     }
 
     // Creates instance(s) for the given syntax node.
@@ -89,7 +91,7 @@ public:
     const NetType& netType;
 
 private:
-    using DimIterator = std::span<VariableDimensionSyntax*>::iterator;
+    using DimIterator = SyntaxList<VariableDimensionSyntax>::const_iterator;
 
     Compilation& comp;
     const ASTContext& context;
@@ -103,13 +105,14 @@ private:
     SmallVector<uint32_t> path;
     std::span<const AttributeInstanceSyntax* const> attributes;
     bitmask<InstanceFlags> flags;
+    uint32_t instanceDepth = 0;
 
     Symbol* createInstance(const HierarchicalInstanceSyntax& syntax,
                            const HierarchyOverrideNode* overrideNode) {
         paramBuilder->setOverrides(overrideNode);
         auto [name, loc] = ast::detail::getNameLoc(syntax);
-        auto inst = comp.emplace<InstanceSymbol>(comp, name, loc, *definition, *paramBuilder,
-                                                 flags);
+        auto inst = comp.emplace<InstanceSymbol>(comp, name, loc, *definition, *paramBuilder, flags,
+                                                 instanceDepth);
         inst->arrayPath = path.copy(comp);
         inst->setSyntax(syntax);
         inst->setAttributes(*context.scope, attributes);
@@ -138,16 +141,21 @@ private:
         // make up an empty array so that we don't get further errors when
         // things try to reference this symbol.
         auto dim = context.evalDimension(dimSyntax, /* requireRange */ true, /* isPacked */ false);
-        if (!dim.isRange())
-            return &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
-                                                     nameToken.location());
+        if (!dim.isRange()) {
+            auto result = &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
+                                                            nameToken.location());
+            result->setSyntax(syntax);
+            return result;
+        }
 
         ConstantRange range = dim.range;
         if (range.width() > comp.getOptions().maxInstanceArray) {
             auto& diag = context.addDiag(diag::MaxInstanceArrayExceeded, dimSyntax.sourceRange());
             diag << definition->getKindString() << comp.getOptions().maxInstanceArray;
-            return &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
-                                                     nameToken.location());
+            auto result = &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
+                                                            nameToken.location());
+            result->setSyntax(syntax);
+            return result;
         }
 
         SmallVector<const Symbol*> elements;
@@ -347,30 +355,29 @@ void InstanceSymbolBase::getArrayDimensions(SmallVectorBase<ConstantRange>& dime
         getInstanceArrayDimensions(scope->asSymbol().as<InstanceArraySymbol>(), dimensions);
 }
 
-InstanceSymbol::InstanceSymbol(std::string_view name, SourceLocation loc,
-                               InstanceBodySymbol& body) :
-    InstanceSymbolBase(SymbolKind::Instance, name, loc), body(body) {
+InstanceSymbol::InstanceSymbol(std::string_view name, SourceLocation loc, InstanceBodySymbol& body,
+                               uint32_t instanceDepth) :
+    InstanceSymbolBase(SymbolKind::Instance, name, loc), body(body), instanceDepth(instanceDepth) {
     body.parentInstance = this;
 }
 
 InstanceSymbol::InstanceSymbol(Compilation& compilation, std::string_view name, SourceLocation loc,
                                const DefinitionSymbol& definition, ParameterBuilder& paramBuilder,
-                               bitmask<InstanceFlags> flags) :
+                               bitmask<InstanceFlags> flags, uint32_t instanceDepth) :
     InstanceSymbol(name, loc,
                    InstanceBodySymbol::fromDefinition(compilation, definition, loc, paramBuilder,
-                                                      flags)) {
+                                                      flags),
+                   instanceDepth) {
 }
 
 InstanceSymbol& InstanceSymbol::createDefault(Compilation& comp, const DefinitionSymbol& definition,
                                               const HierarchyOverrideNode* hierarchyOverrideNode,
                                               const ConfigBlockSymbol* configBlock,
-                                              const ConfigRule* configRule,
-                                              SourceLocation locationOverride) {
-    auto loc = locationOverride ? locationOverride : definition.location;
-    auto& result = *comp.emplace<InstanceSymbol>(
-        definition.name, loc,
-        InstanceBodySymbol::fromDefinition(comp, definition, loc, InstanceFlags::None,
-                                           hierarchyOverrideNode, configBlock, configRule));
+                                              const ConfigRule* configRule) {
+    auto& body = InstanceBodySymbol::fromDefinition(comp, definition, definition.location,
+                                                    InstanceFlags::None, hierarchyOverrideNode,
+                                                    configBlock, configRule);
+    auto& result = *comp.emplace<InstanceSymbol>(definition.name, definition.location, body, 0u);
 
     if (configBlock) {
         auto rc = comp.emplace<ResolvedConfig>(*configBlock, result);
@@ -387,7 +394,7 @@ InstanceSymbol& InstanceSymbol::createDefault(Compilation& comp, const Definitio
     return result;
 }
 
-InstanceSymbol& InstanceSymbol::createVirtual(
+const InstanceSymbol& InstanceSymbol::createVirtual(
     const ASTContext& context, SourceLocation loc, const DefinitionSymbol& definition,
     const ParameterValueAssignmentSyntax* paramAssignments) {
 
@@ -398,24 +405,15 @@ InstanceSymbol& InstanceSymbol::createVirtual(
 
     auto& comp = context.getCompilation();
     auto& result = *comp.emplace<InstanceSymbol>(comp, definition.name, loc, definition,
-                                                 paramBuilder, InstanceFlags::None);
+                                                 paramBuilder, InstanceFlags::None, 0u);
 
     // Set the parent pointer so that traversing upwards still works to find
     // the instantiation scope. This "virtual" instance never actually gets
     // added to the scope the proper way as a member.
     result.setParent(*context.scope);
 
-    // Force all parameter values to resolve. This is necessary because otherwise we
-    // can get into tricky loops when doing type checking against other virtual
-    // interface type usages.
-    for (auto param : result.body.getParameters()) {
-        if (param->symbol.kind == SymbolKind::Parameter)
-            param->symbol.as<ParameterSymbol>().getValue();
-        else
-            param->symbol.as<TypeParameterSymbol>().targetType.getType();
-    }
-
-    return result;
+    // Allow the compilation to cache this virtual interface instance.
+    return comp.getOrAddVirtualIface(result);
 }
 
 Symbol& InstanceSymbol::createDefaultNested(const Scope& scope,
@@ -430,16 +428,16 @@ Symbol& InstanceSymbol::createDefaultNested(const Scope& scope,
     SmallVector<TokenOrSyntax, 4> instances;
     auto& header = *syntax.header;
     auto loc = header.name.location();
-    auto instName = comp.emplace<InstanceNameSyntax>(header.name,
-                                                     std::span<VariableDimensionSyntax*>());
+    auto instName = comp.emplace<InstanceNameSyntax>(header.name, nullptr);
     auto instance = comp.emplace<HierarchicalInstanceSyntax>(
-        instName, missing(TokenKind::OpenParenthesis, loc), std::span<TokenOrSyntax>(),
+        instName, missing(TokenKind::OpenParenthesis, loc), nullptr,
         missing(TokenKind::CloseParenthesis, loc));
 
     instances.push_back(instance);
 
     auto instantiation = comp.emplace<HierarchyInstantiationSyntax>(
-        std::span<AttributeInstanceSyntax*>(), header.name, nullptr, instances.copy(comp),
+        nullptr, header.name, nullptr,
+        syntax::SeparatedSyntaxList<syntax::HierarchicalInstanceSyntax>(comp, instances),
         header.semi);
 
     ASTContext context(scope, LookupLocation::max);
@@ -460,14 +458,13 @@ Symbol& InstanceSymbol::createDefaultNested(const Scope& scope,
     return result;
 }
 
-InstanceSymbol& InstanceSymbol::createInvalid(Compilation& compilation,
+InstanceSymbol& InstanceSymbol::createInvalid(Compilation& comp,
                                               const DefinitionSymbol& definition) {
     // Give this instance an empty name so that it can't be referenced by name.
-    return *compilation.emplace<InstanceSymbol>(
-        "", SourceLocation::NoLocation,
-        InstanceBodySymbol::fromDefinition(compilation, definition, definition.location,
-                                           InstanceFlags::Uninstantiated, nullptr, nullptr,
-                                           nullptr));
+    auto& body = InstanceBodySymbol::fromDefinition(comp, definition, definition.location,
+                                                    InstanceFlags::Uninstantiated, nullptr, nullptr,
+                                                    nullptr);
+    return *comp.emplace<InstanceSymbol>("", SourceLocation::NoLocation, body, 0u);
 }
 
 void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationSyntax& syntax,
@@ -508,7 +505,8 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
 
     // If this instance is not instantiated then we'll just fill in a placeholder
     // and move on. This is likely inside an untaken generate branch.
-    if (flags.has(InstanceFlags::Uninstantiated)) {
+    if (flags.has(InstanceFlags::Uninstantiated) &&
+        !comp.hasFlag(CompilationFlags::CheckUninstantiated)) {
         UninstantiatedDefSymbol::fromSyntax(comp, syntax, context, results, implicitNets);
         return;
     }
@@ -530,6 +528,7 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
     const DefinitionSymbol* owningDefinition = nullptr;
     const HierarchyOverrideNode* parentOverrideNode = nullptr;
     const ResolvedConfig* resolvedConfig = nullptr;
+    uint32_t instanceDepth = 0;
     if (parentInst) {
         owningDefinition = &parentInst->getDefinition();
 
@@ -543,8 +542,10 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
         // Check if our parent has a configuration applied. If so, and if
         // that configuration has instance overrides, we need to check if
         // any of them apply to the instances we're about to create.
-        if (parentInst->parentInstance)
+        if (parentInst->parentInstance) {
             resolvedConfig = parentInst->parentInstance->resolvedConfig;
+            instanceDepth = parentInst->parentInstance->instanceDepth;
+        }
 
         if (flags.has(InstanceFlags::FromBind)) {
             if (flags.has(InstanceFlags::ParentFromBind)) {
@@ -561,6 +562,12 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
     InstanceBuilder builder(context, implicitNets, parentOverrideNode, syntax.attributes, flags,
                             overrideSyntax);
 
+    auto createUninstantiated = [&](const HierarchicalInstanceSyntax* specificInstance) {
+        UninstantiatedDefSymbol::fromSyntax(comp, syntax, specificInstance, context, results,
+                                            implicitNets, builder.implicitNetNames,
+                                            builder.netType);
+    };
+
     // Creates instance symbols -- if specificInstance is provided then only that
     // instance will be created, otherwise all instances in the original syntax
     // node will be created in one go.
@@ -568,9 +575,7 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
                                const HierarchicalInstanceSyntax* specificInstance) {
         auto def = defResult.definition;
         if (!def) {
-            UninstantiatedDefSymbol::fromSyntax(comp, syntax, specificInstance, context, results,
-                                                implicitNets, builder.implicitNetNames,
-                                                builder.netType);
+            createUninstantiated(specificInstance);
             return;
         }
 
@@ -623,6 +628,24 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
             }
         }
 
+        // This check breaks infinitely recursive hierarchies. Note that this is deliberately
+        // off by one; most of the time this will get hit first in ElabVisitors and we won't
+        // even try to create more instances beneath that. In certain cases (or when visiting
+        // the AST manually) it's possible to get in here instead.
+        if (instanceDepth > comp.getOptions().maxInstanceDepth + 1) {
+            auto loc = syntax.type.location();
+            if (specificInstance)
+                loc = detail::getNameLoc(*specificInstance).second;
+            else if (!syntax.instances.empty())
+                loc = detail::getNameLoc(*syntax.instances[0]).second;
+
+            auto& diag = context.addDiag(diag::MaxInstanceDepthExceeded, loc);
+            diag << definition.getKindString();
+            diag << comp.getOptions().maxInstanceDepth;
+            createUninstantiated(specificInstance);
+            return;
+        }
+
         ParameterBuilder paramBuilder(*context.scope, definition.name, definition.parameters);
         if (syntax.parameters)
             paramBuilder.setAssignments(*syntax.parameters, /* isFromConfig */ false);
@@ -644,7 +667,8 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
             }
         }
 
-        builder.reset(definition, paramBuilder, localConfig, defResult.configRoot);
+        builder.reset(definition, paramBuilder, localConfig, defResult.configRoot,
+                      instanceDepth + 1);
 
         if (specificInstance) {
             results.push_back(builder.create(*specificInstance));
@@ -694,7 +718,7 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
 
     // Simple case: look up the definition and create all instances in one go.
     auto defResult = comp.getDefinition(defName, *context.scope, syntax.type.range(),
-                                        diag::UnknownModule);
+                                        diag::UnknownModule, syntax.attributes);
     createInstances(defResult, nullptr);
 }
 
@@ -721,15 +745,16 @@ void InstanceSymbol::fromFixupSyntax(Compilation& comp, const DefinitionSymbol& 
 
         auto instName = comp.emplace<InstanceNameSyntax>(decl->name, decl->dimensions);
         auto instance = comp.emplace<HierarchicalInstanceSyntax>(
-            instName, missing(TokenKind::OpenParenthesis, loc), std::span<TokenOrSyntax>(),
+            instName, missing(TokenKind::OpenParenthesis, loc), nullptr,
             missing(TokenKind::CloseParenthesis, loc));
 
         instances.push_back(instance);
     }
 
     auto instantiation = comp.emplace<HierarchyInstantiationSyntax>(
-        std::span<AttributeInstanceSyntax*>(), syntax.type->getFirstToken(), nullptr,
-        instances.copy(comp), syntax.semi);
+        nullptr, syntax.type->getFirstToken(), nullptr,
+        syntax::SeparatedSyntaxList<syntax::HierarchicalInstanceSyntax>(comp, instances),
+        syntax.semi);
 
     SmallVector<const Symbol*> implicitNets;
     fromSyntax(comp, *instantiation, context, results, implicitNets);
@@ -755,22 +780,6 @@ bool InstanceSymbol::isTopLevel() const {
 }
 
 const PortConnection* InstanceSymbol::getPortConnection(const PortSymbol& port) const {
-    if (!connectionMap)
-        resolvePortConnections();
-
-    // If connectionMap is still null (e.g., instance has no parent scope),
-    // return null since we can't resolve connections.
-    if (!connectionMap)
-        return nullptr;
-
-    auto it = connectionMap->find(reinterpret_cast<uintptr_t>(&port));
-    if (it == connectionMap->end())
-        return nullptr;
-
-    return reinterpret_cast<const PortConnection*>(it->second);
-}
-
-const PortConnection* InstanceSymbol::getPortConnection(const MultiPortSymbol& port) const {
     if (!connectionMap)
         resolvePortConnections();
 
@@ -857,24 +866,260 @@ void InstanceSymbol::resolvePortConnections() const {
     PortConnection::makeConnections(*this, portList,
                                     syntax->as<HierarchicalInstanceSyntax>().connections, conns);
 
-    auto portIt = portList.begin();
     for (auto conn : conns) {
-        SLANG_ASSERT(portIt != portList.end());
-        connectionMap->emplace(reinterpret_cast<uintptr_t>(*portIt++),
+        connectionMap->emplace(reinterpret_cast<uintptr_t>(&conn->port),
                                reinterpret_cast<uintptr_t>(conn));
     }
-
-    SLANG_ASSERT(portIt == portList.end());
     connections = conns.copy(comp);
+}
+
+struct IfaceParamAccess {
+    std::string_view portName;
+    std::string_view paramName;
+    SmallVector<const syntax::ExpressionSyntax*, 4> elementSelectors;
+};
+
+static bool parseIfacePortBase(const syntax::ExpressionSyntax& expr, std::string_view& portName,
+                               SmallVectorBase<const syntax::ExpressionSyntax*>& selectors) {
+    if (expr.kind == syntax::SyntaxKind::IdentifierName) {
+        portName = expr.as<syntax::IdentifierNameSyntax>().identifier.valueText();
+        return true;
+    }
+
+    if (expr.kind == syntax::SyntaxKind::IdentifierSelectName) {
+        auto& selected = expr.as<syntax::IdentifierSelectNameSyntax>();
+        portName = selected.identifier.valueText();
+        for (auto select : selected.selectors) {
+            if (!select->selector || select->selector->kind != syntax::SyntaxKind::BitSelect)
+                return false;
+            selectors.push_back(select->selector->as<syntax::BitSelectSyntax>().expr);
+        }
+        return true;
+    }
+
+    if (expr.kind == syntax::SyntaxKind::ElementSelectExpression) {
+        auto& selected = expr.as<syntax::ElementSelectExpressionSyntax>();
+        if (!selected.select->selector ||
+            selected.select->selector->kind != syntax::SyntaxKind::BitSelect) {
+            return false;
+        }
+
+        if (!parseIfacePortBase(*selected.left, portName, selectors))
+            return false;
+        selectors.push_back(selected.select->selector->as<syntax::BitSelectSyntax>().expr);
+        return true;
+    }
+
+    return false;
+}
+
+// Returns the port and parameter names if `expr` is `<port>.<param>`. The access can parse either
+// as a member-access expression or, when the left side could be a scope, as a dotted scoped name.
+static std::optional<IfaceParamAccess> asPortParamAccess(const syntax::ExpressionSyntax& expr) {
+    if (expr.kind == syntax::SyntaxKind::MemberAccessExpression) {
+        auto& access = expr.as<syntax::MemberAccessExpressionSyntax>();
+        IfaceParamAccess result;
+        if (!parseIfacePortBase(*access.left, result.portName, result.elementSelectors))
+            return std::nullopt;
+        result.paramName = access.name.valueText();
+        return result;
+    }
+
+    if (expr.kind == syntax::SyntaxKind::ScopedName) {
+        auto& scoped = expr.as<syntax::ScopedNameSyntax>();
+        if (scoped.separator.kind != parsing::TokenKind::Dot)
+            return std::nullopt;
+        if (scoped.right->kind != syntax::SyntaxKind::IdentifierName)
+            return std::nullopt;
+
+        IfaceParamAccess result;
+        if (!parseIfacePortBase(*scoped.left, result.portName, result.elementSelectors))
+            return std::nullopt;
+        result.paramName = scoped.right->as<syntax::IdentifierNameSyntax>().identifier.valueText();
+        return result;
+    }
+
+    return std::nullopt;
+}
+
+using IfacePortMap = SmallMap<std::string_view, const InterfacePortSymbol*, 8>;
+
+struct IfaceParamConstraintMatch {
+    const InterfacePortSymbol* port;
+    std::string_view paramName;
+    const syntax::ExpressionSyntax* constraintExpr;
+    SmallVector<const syntax::ExpressionSyntax*, 4> elementSelectors;
+    bool isType;
+};
+
+// Given a `$static_assert` condition expression, see if it pins an interface port parameter to a
+// constant. Two shapes are recognized (with either operand on the left):
+//   - value:  `<port>.<param> == <expr>`
+//   - type:   `type(<port>.<param>) == type(<expr>)`
+static std::optional<IfaceParamConstraintMatch> matchIfaceParamConstraint(
+    const syntax::ExpressionSyntax& condition, const IfacePortMap& ifacePorts) {
+    if (condition.kind != syntax::SyntaxKind::EqualityExpression)
+        return std::nullopt;
+
+    auto& binExpr = condition.as<syntax::BinaryExpressionSyntax>();
+    const syntax::ExpressionSyntax* paramExpr = binExpr.left;
+    const syntax::ExpressionSyntax* constraintExpr = binExpr.right;
+
+    // In the type form both sides are `type(...)` references. Keep the full constraint expression
+    // for use as the parameter assignment, but unwrap the candidate parameter expression for
+    // matching the port access.
+    bool isType = paramExpr->kind == syntax::SyntaxKind::TypeReference &&
+                  constraintExpr->kind == syntax::SyntaxKind::TypeReference;
+    auto getParamAccess = [&](const syntax::ExpressionSyntax& expr)
+        -> std::optional<std::pair<const InterfacePortSymbol*, IfaceParamAccess>> {
+        auto& access = isType ? *expr.as<syntax::TypeReferenceSyntax>().expr : expr;
+        auto result = asPortParamAccess(access);
+        if (!result)
+            return std::nullopt;
+
+        auto portIt = ifacePorts.find(result->portName);
+        if (portIt == ifacePorts.end())
+            return std::nullopt;
+        return std::pair{portIt->second, std::move(*result)};
+    };
+
+    auto paramAccess = getParamAccess(*paramExpr);
+    if (!paramAccess) {
+        std::swap(paramExpr, constraintExpr);
+        paramAccess = getParamAccess(*paramExpr);
+    }
+
+    if (!paramAccess)
+        return std::nullopt;
+
+    return IfaceParamConstraintMatch{paramAccess->first, paramAccess->second.paramName,
+                                     constraintExpr,
+                                     std::move(paramAccess->second.elementSelectors), isType};
+}
+
+struct IfaceParamAssignment {
+    std::string_view paramName;
+    const syntax::ExpressionSyntax* constraintExpr;
+};
+
+using IfaceParamAssignmentMap =
+    flat_hash_map<const InterfacePortSymbol*, SmallVector<IfaceParamAssignment>>;
+
+// Scan direct-body `$static_assert`s once and collect the parameter assignments they imply for
+// each interface port. Asserts nested in generate blocks are skipped because their constraints are
+// conditional, but parameter assignments must be applied before elaborating generate branches.
+static IfaceParamAssignmentMap collectIfaceParamAssignments(
+    const syntax::ModuleDeclarationSyntax* topBody, const IfacePortMap& ifacePorts,
+    const ASTContext& context) {
+    IfaceParamAssignmentMap result;
+    if (!topBody)
+        return result;
+
+    for (auto member : topBody->members) {
+        if (member->kind != syntax::SyntaxKind::ElabSystemTask)
+            continue;
+
+        auto& task = member->as<syntax::ElabSystemTaskSyntax>();
+        if (SemanticFacts::getElabSystemTaskKind(task.name) != ElabSystemTaskKind::StaticAssert)
+            continue;
+        if (!task.arguments || task.arguments->parameters.empty())
+            continue;
+
+        auto firstArg = task.arguments->parameters[0];
+        if (firstArg->kind != syntax::SyntaxKind::OrderedArgument)
+            continue;
+
+        // Unwrap the property/sequence wrappers down to a plain expression.
+        auto& propExpr = *firstArg->as<syntax::OrderedArgumentSyntax>().expr;
+        if (propExpr.kind != syntax::SyntaxKind::SimplePropertyExpr)
+            continue;
+
+        auto& seqExpr = *propExpr.as<syntax::SimplePropertyExprSyntax>().expr;
+        if (seqExpr.kind != syntax::SyntaxKind::SimpleSequenceExpr)
+            continue;
+
+        auto& simpleSeq = seqExpr.as<syntax::SimpleSequenceExprSyntax>();
+        if (simpleSeq.repetition)
+            continue;
+
+        auto match = matchIfaceParamConstraint(*simpleSeq.expr, ifacePorts);
+        if (!match)
+            continue;
+
+        // Only override parameters the interface actually declares, and require the constraint
+        // form to agree with the parameter kind. Localparams cannot be overridden.
+        auto& def = *match->port->interfaceDef;
+        auto declIt = std::ranges::find(def.parameters, match->paramName,
+                                        &DefinitionSymbol::ParameterDecl::name);
+        if (declIt == def.parameters.end() || declIt->isLocalParam ||
+            declIt->isTypeParam != match->isType) {
+            continue;
+        }
+
+        auto dims = match->port->getDeclaredRange();
+        if (!dims || dims->size() != match->elementSelectors.size())
+            continue;
+
+        // An interface instance array has one shared parameterization. The selectors identify a
+        // valid element whose parameter can appear in the assertion; the inferred assignment is
+        // applied to every element below.
+        bool validPath = true;
+        for (size_t i = 0; i < dims->size(); i++) {
+            auto& selectorExpr = Expression::bind(*match->elementSelectors[i], context);
+            auto selectorValue = context.tryEval(selectorExpr);
+            auto index = selectorValue.isInteger() ? selectorValue.integer().as<int32_t>()
+                                                   : std::optional<int32_t>{};
+            if (selectorExpr.hasHierarchicalReference() || !index ||
+                !(*dims)[i].containsPoint(*index)) {
+                validPath = false;
+                break;
+            }
+        }
+        if (!validPath)
+            continue;
+
+        // The assignment is bound before default interface instances exist, so values that
+        // traverse the instance hierarchy could observe stale parameter defaults. Restrict
+        // inference to expressions that are constant without any hierarchical references.
+        if (!match->isType) {
+            auto& expr = Expression::bind(*match->constraintExpr, context);
+            if (expr.hasHierarchicalReference() || !context.tryEval(expr))
+                continue;
+        }
+        else {
+            auto& typeRef = match->constraintExpr->as<syntax::TypeReferenceSyntax>();
+            auto access = asPortParamAccess(*typeRef.expr);
+            if (access && ifacePorts.contains(access->portName))
+                continue;
+        }
+
+        result[match->port].push_back({match->paramName, match->constraintExpr});
+    }
+
+    return result;
 }
 
 static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSymbol& port,
                                        const InstanceSymbol*& firstInst,
+                                       std::span<const IfaceParamAssignment> paramAssignments,
+                                       const ASTContext& assignmentContext,
                                        std::span<const ConstantRange>::iterator it,
                                        std::span<const ConstantRange>::iterator end) {
     if (it == end) {
-        auto& result = InstanceSymbol::createDefault(comp, *port.interfaceDef, nullptr, nullptr,
-                                                     nullptr, port.location);
+        auto& def = *port.interfaceDef;
+        ParameterBuilder paramBuilder(*def.getParentScope(), def.name, def.parameters);
+        if (comp.hasFlag(CompilationFlags::AllowInvalidTop)) {
+            paramBuilder.setSuppressErrors(true);
+        }
+
+        paramBuilder.setInstanceContext(assignmentContext);
+        for (auto& assignment : paramAssignments)
+            paramBuilder.addAssignment(assignment.paramName, *assignment.constraintExpr);
+
+        auto& body = InstanceBodySymbol::fromDefinition(comp, def, port.location, paramBuilder,
+                                                        InstanceFlags::None);
+
+        auto& result = *comp.emplace<InstanceSymbol>(port.name, port.location, body, 0u);
 
         if (!firstInst)
             firstInst = &result;
@@ -887,7 +1132,8 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
 
     SmallVector<const Symbol*> elements;
     for (uint32_t i = 0; i < range.width(); i++) {
-        auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, it, end);
+        auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, paramAssignments,
+                                              assignmentContext, it, end);
         symbol->name = "";
         elements.push_back(symbol);
     }
@@ -906,18 +1152,44 @@ void InstanceSymbol::connectDefaultIfacePorts() const {
 
     auto& comp = parent->getCompilation();
     ASTContext context(*parent, LookupLocation::max);
+    ASTContext assignmentContext(body, LookupLocation::max);
+
+    // The body of the instantiating module may contain `$static_assert` constraints that
+    // pin interface-port parameters to specific values; we honor those when synthesizing
+    // the default interface instances below. Ideally one day the language will allow
+    // specifying these constraints in the port declaration itself, or typdefing parameterized
+    // interfaces.
+    auto bodySyntax = body.getSyntax() ? body.getSyntax()->as_if<syntax::ModuleDeclarationSyntax>()
+                                       : nullptr;
+    auto ports = body.getPortList();
+    IfacePortMap ifacePorts;
+    for (auto port : ports) {
+        if (port->kind == SymbolKind::InterfacePort) {
+            auto& ifacePort = port->as<InterfacePortSymbol>();
+            if (ifacePort.interfaceDef)
+                ifacePorts.emplace(ifacePort.name, &ifacePort);
+        }
+    }
+    auto ifaceParamAssignments = collectIfaceParamAssignments(bodySyntax, ifacePorts,
+                                                              assignmentContext);
 
     SmallVector<const PortConnection*> conns;
-    for (auto port : body.getPortList()) {
+    for (auto port : ports) {
         if (port->kind == SymbolKind::InterfacePort) {
             auto& ifacePort = port->as<InterfacePortSymbol>();
             if (ifacePort.interfaceDef) {
+                std::span<const IfaceParamAssignment> paramAssignments;
+                if (auto it = ifaceParamAssignments.find(&ifacePort);
+                    it != ifaceParamAssignments.end()) {
+                    paramAssignments = it->second;
+                }
+
                 Symbol* inst;
                 const ModportSymbol* modport = nullptr;
                 if (auto dims = ifacePort.getDeclaredRange()) {
                     const InstanceSymbol* firstInst = nullptr;
-                    inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, dims->begin(),
-                                                   dims->end());
+                    inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, paramAssignments,
+                                                   assignmentContext, dims->begin(), dims->end());
 
                     if (firstInst) {
                         auto portRange = SourceRange{port->location,
@@ -976,6 +1248,10 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
     ParameterBuilder paramBuilder(*definition.getParentScope(), definition.name,
                                   definition.parameters);
     paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated));
+    if (compilation.hasFlag(CompilationFlags::AllowInvalidTop) &&
+        instanceLoc == definition.location) {
+        paramBuilder.setSuppressErrors(true);
+    }
     if (hierarchyOverrideNode)
         paramBuilder.setOverrides(hierarchyOverrideNode);
 
@@ -1191,32 +1467,8 @@ bool InstanceBodySymbol::hasSameType(const InstanceBodySymbol& other) const {
     if (&definition != &other.definition)
         return false;
 
-    if (parameters.size() != other.parameters.size())
-        return false;
-
-    for (auto li = parameters.begin(), ri = other.parameters.begin(); li != parameters.end();
-         li++, ri++) {
-
-        auto& lp = (*li)->symbol;
-        auto& rp = (*ri)->symbol;
-        if (lp.kind != rp.kind)
-            return false;
-
-        if (lp.kind == SymbolKind::Parameter) {
-            auto& lv = lp.as<ParameterSymbol>().getValue();
-            auto& rv = rp.as<ParameterSymbol>().getValue();
-            if (lv != rv)
-                return false;
-        }
-        else {
-            auto& lt = lp.as<TypeParameterSymbol>().targetType.getType();
-            auto& rt = rp.as<TypeParameterSymbol>().targetType.getType();
-            if (!lt.isMatching(rt))
-                return false;
-        }
-    }
-
-    return true;
+    auto getSym = std::views::transform([](auto& paramBase) { return &paramBase->symbol; });
+    return ParameterSymbolBase::allMatching(parameters | getSym, other.parameters | getSym);
 }
 
 void InstanceBodySymbol::serializeTo(ASTSerializer& serializer) const {
@@ -1280,15 +1532,18 @@ static std::span<const Expression* const> createUninstantiatedParams(
 
     SmallVector<const Expression*> params;
     if (syntax.parameters) {
+        auto& comp = context.getCompilation();
         for (auto expr : syntax.parameters->parameters) {
             // Empty expressions are just ignored here.
-            if (expr->kind == SyntaxKind::OrderedParamAssignment) {
-                params.push_back(
-                    &Expression::bind(*expr->as<OrderedParamAssignmentSyntax>().expr, context));
-            }
-            else if (expr->kind == SyntaxKind::NamedParamAssignment) {
-                if (auto ex = expr->as<NamedParamAssignmentSyntax>().expr)
-                    params.push_back(&Expression::bind(*ex, context, ASTFlags::AllowDataType));
+            const ExpressionSyntax* connSyntax = nullptr;
+            if (expr->kind == SyntaxKind::OrderedParamAssignment)
+                connSyntax = expr->as<OrderedParamAssignmentSyntax>().expr;
+            else if (expr->kind == SyntaxKind::NamedParamAssignment)
+                connSyntax = expr->as<NamedParamAssignmentSyntax>().expr;
+
+            if (connSyntax) {
+                params.push_back(&Expression::bindRValue(comp.getErrorType(), *connSyntax, {},
+                                                         context, ASTFlags::AllowDataType));
             }
         }
     }
@@ -1370,7 +1625,8 @@ static const AssertionExpr* bindUnknownPortConn(const ASTContext& context,
     // We have to check for a simple reference to an interface instance or port here,
     // since we don't know whether this is an interface port connection or even
     // a normal connection with a virtual interface type.
-    const auto flags = ASTFlags::AllowUnboundedLiteral | ASTFlags::StreamingAllowed;
+    const auto flags = ASTFlags::AllowUnboundedLiteral | ASTFlags::StreamingAllowed |
+                       ASTFlags::UnknownPortConn;
     const SyntaxNode* node = &syntax;
     if (node->kind == SyntaxKind::SimplePropertyExpr) {
         node = node->as<SimplePropertyExprSyntax>().expr;
@@ -1403,6 +1659,9 @@ static const AssertionExpr* bindUnknownPortConn(const ASTContext& context,
                     }
                 }
 
+                // Bind self-determined so that typeable connections keep their real
+                // type. The UnknownPortConn flag suppresses diagnostics for the
+                // genuinely context-dependent expressions that have no such type.
                 return comp.emplace<SimpleAssertionExpr>(Expression::bind(*expr, context, flags),
                                                          std::nullopt);
             }
@@ -1438,7 +1697,9 @@ std::span<const AssertionExpr* const> UninstantiatedDefSymbol::getPortConnection
                     results.push_back(bindUnknownPortConn(context, *ex));
                 }
                 else if (npc.openParen) {
-                    results.push_back(comp.emplace<InvalidAssertionExpr>(nullptr));
+                    auto emptyExpr = comp.emplace<EmptyArgumentExpression>(comp.getVoidType(),
+                                                                           npc.sourceRange());
+                    results.push_back(comp.emplace<SimpleAssertionExpr>(*emptyExpr, std::nullopt));
                 }
                 else {
                     auto idName = comp.emplace<IdentifierNameSyntax>(npc.name);
@@ -1453,6 +1714,9 @@ std::span<const AssertionExpr* const> UninstantiatedDefSymbol::getPortConnection
         portNames = names.copy(comp);
 
         for (auto port : *ports) {
+            if (port->kind == AssertionExprKind::Invalid)
+                continue;
+
             if (port->kind != AssertionExprKind::Simple ||
                 port->as<SimpleAssertionExpr>().repetition) {
                 mustBeChecker = true;
@@ -1520,7 +1784,7 @@ PrimitiveInstanceSymbol* createPrimInst(Compilation& compilation, const Scope& s
     return result;
 }
 
-using DimIterator = std::span<VariableDimensionSyntax*>::iterator;
+using DimIterator = SyntaxList<VariableDimensionSyntax>::const_iterator;
 
 Symbol* recursePrimArray(Compilation& comp, const PrimitiveSymbol& primitive,
                          const HierarchicalInstanceSyntax& instance, const ASTContext& context,
@@ -1539,14 +1803,21 @@ Symbol* recursePrimArray(Compilation& comp, const PrimitiveSymbol& primitive,
     // make up an empty array so that we don't get further errors when
     // things try to reference this symbol.
     auto dim = context.evalDimension(dimSyntax, /* requireRange */ true, /* isPacked */ false);
-    if (!dim.isRange())
-        return &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(), nameToken.location());
+    if (!dim.isRange()) {
+        auto result = &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
+                                                        nameToken.location());
+        result->setSyntax(instance);
+        return result;
+    }
 
     ConstantRange range = dim.range;
     if (range.width() > comp.getOptions().maxInstanceArray) {
         auto& diag = context.addDiag(diag::MaxInstanceArrayExceeded, dimSyntax.sourceRange());
         diag << "primitive"sv << comp.getOptions().maxInstanceArray;
-        return &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(), nameToken.location());
+        auto result = &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
+                                                        nameToken.location());
+        result->setSyntax(instance);
+        return result;
     }
 
     SmallVector<const Symbol*> elements;
@@ -1563,6 +1834,7 @@ Symbol* recursePrimArray(Compilation& comp, const PrimitiveSymbol& primitive,
     auto result = comp.emplace<InstanceArraySymbol>(comp, nameToken.valueText(),
                                                     nameToken.location(), elements.copy(comp),
                                                     range);
+    result->setSyntax(instance);
     for (auto element : elements)
         result->addMember(*element);
 
@@ -1673,7 +1945,7 @@ void PrimitiveInstanceSymbol::fromSyntax(const PrimitiveInstantiationSyntax& syn
                 auto pvas = comp.emplace<ParameterValueAssignmentSyntax>(
                     delaySyntax.hash,
                     missing(TokenKind::OpenParenthesis, delayVal.getFirstToken().location()),
-                    parameters.copy(comp),
+                    syntax::SeparatedSyntaxList<syntax::ParamAssignmentSyntax>(comp, parameters),
                     missing(TokenKind::CloseParenthesis, delayVal.getLastToken().location()));
 
                 // Rebuild the instance list. The const_casts are fine because
@@ -1689,7 +1961,10 @@ void PrimitiveInstanceSymbol::fromSyntax(const PrimitiveInstantiationSyntax& syn
                 }
 
                 auto instantiation = comp.emplace<HierarchyInstantiationSyntax>(
-                    syntax.attributes, syntax.type, pvas, instanceBuf.copy(comp), syntax.semi);
+                    syntax.attributes, syntax.type, pvas,
+                    syntax::SeparatedSyntaxList<syntax::HierarchicalInstanceSyntax>(comp,
+                                                                                    instanceBuf),
+                    syntax.semi);
                 InstanceSymbol::fromSyntax(comp, *instantiation, context, results, implicitNets);
                 return;
             }
@@ -1973,10 +2248,9 @@ void createImplicitNets(const HierarchicalInstanceSyntax& instance, const ASTCon
         SmallVector<const IdentifierNameSyntax*> implicitNets;
         Expression::findPotentiallyImplicitNets(*expr, ctx, implicitNets);
 
-        auto& comp = ctx.getCompilation();
         for (auto ins : implicitNets) {
             if (implicitNetNames.emplace(ins->identifier.valueText()).second)
-                results.push_back(&NetSymbol::createImplicit(comp, *ins, netType));
+                results.push_back(&NetSymbol::createImplicit(ctx, *ins, netType));
         }
     }
 }

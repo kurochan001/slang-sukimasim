@@ -56,12 +56,13 @@ target_sources(
           Bitstream.cpp
           Compilation.cpp
           Constraints.cpp
+          DefParamResolver.cpp
           EvalContext.cpp
           Expression.cpp
           FmtHelpers.cpp
           HierarchicalReference.cpp
+          InstanceCacheKey.cpp
           Lookup.cpp
-          LSPUtilities.cpp
           LValue.cpp
           OpaqueInstancePath.cpp
           Patterns.cpp
@@ -72,4 +73,6 @@ target_sources(
           Statement.cpp
           Symbol.cpp
           SystemSubroutine.cpp
-          TimingControl.cpp)
+          TimingControl.cpp
+          TypeProvider.cpp
+          ValuePath.cpp)

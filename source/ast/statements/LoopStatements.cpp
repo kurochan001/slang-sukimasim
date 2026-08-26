@@ -167,9 +167,9 @@ Statement& ForLoopStatement::fromSyntax(Compilation& compilation,
         }
     }
 
-    if (anyBad || (stopExpr && stopExpr->bad()))
-        return badStmt(compilation, nullptr);
-
+    // Always bind the body, even if something above was bad, so that any implicit
+    // blocks created for nested statements get consumed and stay in sync with the
+    // StatementContext's block list.
     auto guard = stmtCtx.enterLoop();
     auto& bodyStmt = Statement::bind(*syntax.statement, context, stmtCtx);
 
@@ -178,7 +178,7 @@ Statement& ForLoopStatement::fromSyntax(Compilation& compilation,
                                                         syntax.sourceRange());
     result->loopVars = loopVars.copy(compilation);
 
-    if (bodyStmt.bad())
+    if (anyBad || (stopExpr && stopExpr->bad()) || bodyStmt.bad())
         return badStmt(compilation, result);
 
     return *result;
@@ -356,7 +356,7 @@ const Expression* ForeachLoopStatement::buildLoopDims(const ForeachLoopListSynta
     }
 
     if (!arraySym || !type->isIterable()) {
-        context.addDiag(diag::NotAnArray, arrayRef.sourceRange);
+        context.addDiag(diag::NotAnArray, arrayRef.sourceRange) << *type;
         return nullptr;
     }
 
@@ -395,7 +395,7 @@ const Expression* ForeachLoopStatement::buildLoopDims(const ForeachLoopListSynta
             return nullptr;
         }
 
-        if (name == arraySym->name) {
+        if (arraySym && name == arraySym->name) {
             context.addDiag(diag::LoopVarShadowsArray, loopVar->sourceRange()) << name;
             return nullptr;
         }
@@ -569,18 +569,18 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
             elements = cv.elements();
 
         ConstantRange range;
-        bool isLittleEndian;
+        bool isDescending;
         if (dim.range) {
             range = *dim.range;
-            isLittleEndian = range.isLittleEndian();
+            isDescending = range.isDescending();
         }
         else {
             range = {0, int32_t(elements.size()) - 1};
-            isLittleEndian = false;
+            isDescending = false;
         }
 
-        for (int32_t i = range.left; isLittleEndian ? i >= range.right : i <= range.right;
-             isLittleEndian ? i-- : i++) {
+        for (int32_t i = range.left; isDescending ? i >= range.right : i <= range.right;
+             isDescending ? i-- : i++) {
 
             *local = SVInt(32, uint64_t(i), true);
 

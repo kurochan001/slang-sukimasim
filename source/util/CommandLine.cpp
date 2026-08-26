@@ -9,7 +9,7 @@
 
 #include <charconv>
 #include <filesystem>
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include "slang/text/CharInfo.h"
 #include "slang/util/OS.h"
@@ -85,9 +85,18 @@ void CommandLine::add(std::string_view name, std::vector<std::string>& value, st
     addInternal(name, &value, desc, valueName, flags);
 }
 
-void CommandLine::add(std::string_view name, OptionCallback cb, std::string_view desc,
+void CommandLine::add(std::string_view name, OptionStrCallback cb, std::string_view desc,
                       std::string_view valueName, bitmask<CommandLineFlags> flags) {
-    addInternal(name, cb, desc, valueName, flags);
+    addInternal(name, std::move(cb), desc, valueName, flags);
+}
+
+void CommandLine::add(std::string_view name, OptionBoolCallback cb, std::string_view desc,
+                      bitmask<CommandLineFlags> flags) {
+    addInternal(name, std::move(cb), desc, {}, flags);
+}
+
+void CommandLine::setGroup(std::string_view name) {
+    currentGroup = name;
 }
 
 void CommandLine::addInternal(std::string_view name, OptionStorage storage, std::string_view desc,
@@ -95,10 +104,11 @@ void CommandLine::addInternal(std::string_view name, OptionStorage storage, std:
     if (name.empty())
         SLANG_THROW(std::invalid_argument("Name cannot be empty"));
 
-    auto option = std::make_shared<Option>();
+    auto option = std::make_shared<Option>(*this);
     option->desc = desc;
     option->valueName = valueName;
     option->allArgNames = name;
+    option->group = currentGroup;
     option->storage = std::move(storage); // NOLINT
     option->flags = flags;
 
@@ -141,65 +151,88 @@ void CommandLine::setPositional(std::vector<std::string>& values, std::string_vi
     if (positional)
         SLANG_THROW(std::runtime_error("Can only set one positional argument"));
 
-    positional = std::make_shared<Option>();
+    positional = std::make_shared<Option>(*this);
     positional->valueName = valueName;
     positional->storage = &values;
     positional->flags = flags;
 }
 
-void CommandLine::setPositional(const OptionCallback& cb, std::string_view valueName,
+void CommandLine::setPositional(const OptionStrCallback& cb, std::string_view valueName,
                                 bitmask<CommandLineFlags> flags) {
     if (positional)
         SLANG_THROW(std::runtime_error("Can only set one positional argument"));
 
-    positional = std::make_shared<Option>();
+    positional = std::make_shared<Option>(*this);
     positional->valueName = valueName;
     positional->storage = cb;
     positional->flags = flags;
 }
 
-bool CommandLine::parse(int argc, const char* const argv[]) {
+bool CommandLine::parse(int argc, const char* const argv[], const ParseOptions& options) {
     SmallVector<std::string_view, 8> args{size_t(argc), UninitializedTag()};
     for (int i = 0; i < argc; i++)
         args.push_back(argv[i]);
 
-    return parse(args);
-}
-
-bool CommandLine::parse(std::string_view argList, ParseOptions options) {
-    bool hasArg = false;
-    std::string current;
-    SmallVector<std::string, 8> storage;
-
-    parseStr(argList, options, hasArg, current, storage);
-
-    if (hasArg)
-        storage.emplace_back(std::move(current));
-
-    SmallVector<std::string_view, 8> args(storage.size(), UninitializedTag());
-    for (auto& arg : storage)
-        args.push_back(arg);
-
     return parse(args, options);
 }
 
-void CommandLine::parseStr(std::string_view argList, ParseOptions options, bool& hasArg,
-                           std::string& current, SmallVectorBase<std::string>& storage) {
-    auto pushArg = [&]() {
-        if (hasArg) {
-            storage.emplace_back(std::move(current));
-            current.clear();
-            hasArg = false;
-        }
-    };
+bool CommandLine::parse(std::string_view argList, const ParseOptions& options) {
+    TokenBuilder builder(options.sourceBuffer);
+    tokenize(argList, options, builder);
+    builder.finish();
 
+    return parseImpl(builder.getTokens(), options);
+}
+
+void CommandLine::TokenBuilder::setPending(const char* ptr) {
+    if (!hasArg) {
+        SourceLocation loc;
+        if (overrideLoc)
+            loc = *overrideLoc;
+        else if (buffer)
+            loc = {buffer.id, uint64_t(ptr - buffer.data.data())};
+        tokens.push_back({{}, loc});
+        hasArg = true;
+    }
+}
+
+void CommandLine::TokenBuilder::append(const char* ptr) {
+    setPending(ptr);
+    current += *ptr;
+}
+
+void CommandLine::TokenBuilder::append(const char* ptr, const std::string& value) {
+    setPending(ptr);
+    current.append(value);
+}
+
+void CommandLine::TokenBuilder::finish() {
+    if (hasArg) {
+        storage.emplace_back(std::move(current));
+        tokens.back().str = storage.back();
+        current.clear();
+        hasArg = false;
+    }
+}
+
+void CommandLine::TokenBuilder::setOverrideLoc(const char* ptr) {
+    if (!overrideLoc && buffer)
+        overrideLoc = {buffer.id, uint64_t(ptr - buffer.data.data())};
+}
+
+void CommandLine::TokenBuilder::clearOverrideLoc() {
+    overrideLoc.reset();
+}
+
+void CommandLine::tokenize(std::string_view argList, const ParseOptions& options,
+                           TokenBuilder& builder) {
     auto ptr = argList.data();
     auto end = ptr + argList.size();
     while (ptr != end) {
         // Whitespace breaks up arguments.
         char c = *ptr++;
-        if (isWhitespace(c)) {
-            pushArg();
+        if (isWhitespace(c) || c == '\0') {
+            builder.finish();
             continue;
         }
 
@@ -208,22 +241,22 @@ void CommandLine::parseStr(std::string_view argList, ParseOptions options, bool&
             // Slash character only applies if we aren't building an argument already.
             // The hash always applies, even if adjacent to an argument.
             if (c == '#') {
-                pushArg();
+                builder.finish();
                 while (ptr != end && !isNewline(*ptr))
                     ptr++;
                 continue;
             }
 
-            if (!hasArg && ptr != end) {
+            if (!builder.isPending() && ptr != end) {
                 if (*ptr == '/') {
-                    pushArg();
+                    builder.finish();
                     ptr++;
                     while (ptr != end && !isNewline(*ptr))
                         ptr++;
                     continue;
                 }
                 else if (*ptr == '*') {
-                    pushArg();
+                    builder.finish();
                     ptr++;
                     while (ptr != end) {
                         c = *ptr++;
@@ -241,23 +274,30 @@ void CommandLine::parseStr(std::string_view argList, ParseOptions options, bool&
         if (c == '$' && options.expandEnvVars && ptr != end) {
             std::string result = OS::parseEnvVar(ptr, end);
 
+            // All tokens expanded from the env variable get
+            // the location of the '$'.
+            builder.setOverrideLoc(ptr - 1);
+
             ParseOptions newOptions = options;
             newOptions.expandEnvVars = false;
-            parseStr(result, newOptions, hasArg, current, storage);
+            newOptions.sourceBuffer = SourceBuffer{};
+            tokenize(result, newOptions, builder);
+
+            builder.clearOverrideLoc();
             continue;
         }
 
         // Escape character preserves the value of the next character.
         if (c == '\\') {
-            if (ptr != end && *ptr != '\n' && *ptr != '\r') {
-                current += *ptr++;
-                hasArg = true;
-            }
+            if (ptr != end && *ptr != '\n' && *ptr != '\r')
+                builder.append(ptr++);
             continue;
         }
 
         // Any non-whitespace character here means we are building an argument.
-        hasArg = true;
+        // This is necessary because the quote handling below might create an
+        // empty string which should still be recognized as an argument.
+        builder.setPending(ptr - 1);
 
         // Single quotes consume all characters until the next single quote.
         if (c == '\'') {
@@ -265,7 +305,7 @@ void CommandLine::parseStr(std::string_view argList, ParseOptions options, bool&
                 c = *ptr++;
                 if (c == '\'')
                     break;
-                current += c;
+                builder.append(ptr - 1);
             }
             continue;
         }
@@ -282,19 +322,26 @@ void CommandLine::parseStr(std::string_view argList, ParseOptions options, bool&
                     c = *ptr++;
 
                 if (c == '$' && options.expandEnvVars && ptr != end)
-                    current.append(OS::parseEnvVar(ptr, end));
+                    builder.append(ptr - 1, OS::parseEnvVar(ptr, end));
                 else
-                    current += c;
+                    builder.append(ptr - 1);
             }
             continue;
         }
 
         // Otherwise we just have a normal character.
-        current += c;
+        builder.append(ptr - 1);
     }
 }
 
-bool CommandLine::parse(std::span<const std::string_view> args, ParseOptions options) {
+bool CommandLine::parse(std::span<const std::string_view> args, const ParseOptions& options) {
+    SmallVector<ArgToken, 8> tokens(args.size(), UninitializedTag{});
+    for (auto arg : args)
+        tokens.push_back({arg, {}});
+    return parseImpl(tokens, options);
+}
+
+bool CommandLine::parseImpl(std::span<const ArgToken> args, const ParseOptions& options) {
     if (optionMap.empty())
         SLANG_THROW(std::runtime_error("No options defined"));
 
@@ -302,30 +349,30 @@ bool CommandLine::parse(std::span<const std::string_view> args, ParseOptions opt
         if (args.empty())
             SLANG_THROW(std::runtime_error("Expected at least one argument"));
 
-        programName = getU8Str(fs::path(args[0]).filename());
+        programName = getU8Str(fs::path(args[0].str).filename());
         args = args.subspan(1);
     }
 
     Option* expectingVal = nullptr;
-    std::string expectingValName;
+    ArgToken expectingValToken;
+    ArgToken firstPositional;
     bool doubleDash = false;
     bool hadUnknowns = false;
-    std::string_view firstPositional;
 
     int skip = 0;
-    for (auto arg : args) {
+    for (auto& token : args) {
         // Skip N arguments if needed (set by the cmdIgnore feature).
         if (skip) {
             skip--;
             continue;
         }
 
+        auto arg = token.str;
+        auto loc = token.loc;
+
         // If we were previously expecting a value, set that now.
         if (expectingVal) {
-            std::string result = expectingVal->set(expectingValName, arg, options.ignoreDuplicates);
-            if (!result.empty())
-                errors.emplace_back(fmt::format("{}: {}", programName, result));
-
+            expectingVal->set(expectingValToken.str, arg, options.ignoreDuplicates, loc);
             expectingVal = nullptr;
             continue;
         }
@@ -335,11 +382,11 @@ bool CommandLine::parse(std::span<const std::string_view> args, ParseOptions opt
         // - Is exactly '-'
         // - Or we've seen a double dash already
         if (arg.length() <= 1 || doubleDash || (arg[0] != '-' && arg[0] != '+')) {
-            if (firstPositional.empty())
-                firstPositional = arg;
+            if (firstPositional.str.empty())
+                firstPositional = token;
 
             if (positional)
-                positional->set(""sv, arg, options.ignoreDuplicates);
+                positional->set(""sv, arg, options.ignoreDuplicates, loc);
 
             continue;
         }
@@ -392,8 +439,8 @@ bool CommandLine::parse(std::span<const std::string_view> args, ParseOptions opt
                             renamed = it->second + '=' +
                                       std::string(remainder.substr(0, plusIndex));
 
-                            handleArg(renamed, expectingVal, expectingValName, hadUnknowns,
-                                      options);
+                            handleArg(renamed, expectingVal, expectingValToken, hadUnknowns,
+                                      options, loc);
 
                             if (plusIndex == std::string_view::npos)
                                 break;
@@ -409,35 +456,35 @@ bool CommandLine::parse(std::span<const std::string_view> args, ParseOptions opt
                     }
                 }
 
-                handleArg(renamed, expectingVal, expectingValName, hadUnknowns, options);
+                handleArg(renamed, expectingVal, expectingValToken, hadUnknowns, options, loc);
                 continue;
             }
         }
 
         // Otherwise just handle the argument.
-        handleArg(arg, expectingVal, expectingValName, hadUnknowns, options);
+        handleArg(arg, expectingVal, expectingValToken, hadUnknowns, options, loc);
     }
 
     if (expectingVal) {
-        errors.emplace_back(fmt::format("{}: no value provided for argument '{}'"sv, programName,
-                                        expectingValName));
+        addError(fmt::format("no value provided for argument '{}'", expectingValToken.str),
+                 expectingValToken.loc);
     }
 
-    if (!positional && !firstPositional.empty() && !hadUnknowns) {
-        errors.emplace_back(
-            fmt::format("{}: positional arguments are not allowed (see e.g. '{}')"sv, programName,
-                        firstPositional));
+    if (!positional && !firstPositional.str.empty() && !hadUnknowns) {
+        addError(fmt::format("positional arguments are not allowed (see e.g. '{}')",
+                             firstPositional.str),
+                 firstPositional.loc);
     }
 
     return errors.empty();
 }
 
 void CommandLine::handleArg(std::string_view arg, Option*& expectingVal,
-                            std::string& expectingValName, bool& hadUnknowns,
-                            ParseOptions options) {
+                            ArgToken& expectingValToken, bool& hadUnknowns,
+                            const ParseOptions& options, SourceLocation loc) {
     // Handle plus args, which are treated differently from all others.
     if (arg[0] == '+') {
-        handlePlusArg(arg, options, hadUnknowns);
+        handlePlusArg(arg, options, hadUnknowns, loc);
         return;
     }
 
@@ -455,7 +502,7 @@ void CommandLine::handleArg(std::string_view arg, Option*& expectingVal,
     // If we didn't find the option and there was only a single dash,
     // maybe this was actually a group of single-char options or a prefixed value.
     if (!option && !longName) {
-        option = tryGroupOrPrefix(name, value, options);
+        option = tryGroupOrPrefix(name, value, options, loc);
         if (option)
             arg = name;
     }
@@ -463,13 +510,13 @@ void CommandLine::handleArg(std::string_view arg, Option*& expectingVal,
     // If we still didn't find it, that's an error.
     if (!option) {
         // Try to find something close to give a better error message.
-        auto error = fmt::format("{}: unknown command line argument '{}'"sv, programName, arg);
+        auto error = fmt::format("unknown command line argument '{}'", arg);
         auto nearest = findNearestMatch(arg);
         if (!nearest.empty())
-            error += fmt::format(", did you mean '{}'?"sv, nearest);
+            error += fmt::format(", did you mean '{}'?", nearest);
 
         hadUnknowns = true;
-        errors.emplace_back(std::move(error));
+        addError(std::move(error), loc);
         return;
     }
 
@@ -478,16 +525,14 @@ void CommandLine::handleArg(std::string_view arg, Option*& expectingVal,
     // in the next argument.
     if (value.empty() && option->expectsValue()) {
         expectingVal = option;
-        expectingValName = arg;
+        expectingValToken = {arg, loc};
     }
     else {
-        std::string result = option->set(arg, value, options.ignoreDuplicates);
-        if (!result.empty())
-            errors.emplace_back(fmt::format("{}: {}", programName, result));
+        option->set(arg, value, options.ignoreDuplicates, loc);
     }
 }
 
-std::string CommandLine::getHelpText(std::string_view overview) const {
+std::string CommandLine::getHelpText(std::string_view overview, size_t maxWidth) const {
     std::string result;
     if (!overview.empty())
         result = fmt::format("OVERVIEW: {}\n\n"sv, overview);
@@ -498,10 +543,12 @@ std::string CommandLine::getHelpText(std::string_view overview) const {
 
     result += "\n\nOPTIONS:\n"sv;
 
-    // For each option group that takes a value, tack on the value name.
-    // Then compute the maximum length of any particular group's key.
+    // For each option, tack on the value name if it takes one, and track the
+    // maximum key length for alignment. Simultaneously bucket the options into
+    // their display groups, preserving the order in which each group was first seen.
     size_t maxLen = 0;
-    std::vector<std::pair<Option*, std::string>> lines;
+    std::vector<std::string_view> groupOrder;
+    std::map<std::string_view, std::vector<std::pair<Option*, std::string>>> groups;
     for (auto& opt : orderedOptions) {
         std::string key = opt->allArgNames;
         std::string& val = opt->valueName;
@@ -512,37 +559,144 @@ std::string CommandLine::getHelpText(std::string_view overview) const {
         }
 
         maxLen = std::max(maxLen, key.length());
-        lines.emplace_back(opt.get(), std::move(key));
+
+        auto [it, inserted] = groups.try_emplace(opt->group);
+        if (inserted)
+            groupOrder.push_back(it->first);
+        it->second.emplace_back(opt.get(), std::move(key));
     }
 
     // Add two spaces so that the description text is offset from the longest option name.
     maxLen += 2;
 
-    // Finally append all groups to the output.
-    std::string indent = fmt::format("  {:{}}"sv, " "sv, maxLen);
-    for (auto& [opt, key] : lines) {
-        result += fmt::format("  {:{}}"sv, key, maxLen);
-        if (!opt->desc.empty()) {
-            std::string_view desc = opt->desc;
-            while (true) {
-                size_t index = desc.find_first_of('\n');
-                if (index == std::string_view::npos) {
-                    result += desc;
-                    break;
-                }
+    // Descriptions are word-wrapped so that no line exceeds this many columns.
+    // A width of zero means detect the current terminal width, falling back to a
+    // sensible default when the output isn't attached to a terminal.
+    size_t maxLineWidth = maxWidth;
+    if (maxLineWidth == 0) {
+        maxLineWidth = OS::getTerminalWidth();
+        if (maxLineWidth == 0)
+            maxLineWidth = 100;
+    }
 
-                result += desc.substr(0, index + 1);
+    // The description column starts after the two leading spaces and the padded key.
+    // On narrow terminals cap it so descriptions keep at least a minimum width; any
+    // option whose key is too long then has its description start on the next line.
+    static constexpr size_t minDescWidth = 20;
+    size_t descCol = maxLen + 2;
+    if (maxLineWidth > minDescWidth && descCol + minDescWidth > maxLineWidth)
+        descCol = maxLineWidth - minDescWidth;
+
+    const size_t descWidth = descCol < maxLineWidth ? maxLineWidth - descCol : minDescWidth;
+    const std::string indent(descCol, ' ');
+
+    // Appends a description, honoring explicit newlines and soft-wrapping long lines
+    // at word boundaries. A word that is too long to fit on a line by itself is
+    // hard-broken so that no line ever exceeds the maximum width.
+    auto appendDescription = [&](std::string_view desc) {
+        size_t col = 0;
+        for (size_t i = 0; i < desc.size();) {
+            char c = desc[i];
+            if (c == '\n') {
+                result += '\n';
                 result += indent;
-                desc = desc.substr(index + 1);
+                col = 0;
+                i++;
+            }
+            else if (c == ' ') {
+                // Measure the next word to decide whether it still fits on this line.
+                size_t j = i + 1;
+                while (j < desc.size() && desc[j] != ' ' && desc[j] != '\n')
+                    j++;
+
+                size_t wordLen = j - (i + 1);
+                if (col != 0 && col + 1 + wordLen > descWidth) {
+                    // Break here; the wrapped word starts the next line, so drop the space.
+                    result += '\n';
+                    result += indent;
+                    col = 0;
+                    i++;
+                }
+                else {
+                    result += ' ';
+                    col++;
+                    i++;
+                }
+            }
+            else {
+                // Hard-break a word that is too long to fit on a line by itself.
+                if (col >= descWidth) {
+                    result += '\n';
+                    result += indent;
+                    col = 0;
+                }
+                result += c;
+                col++;
+                i++;
             }
         }
+    };
+
+    auto appendOption = [&](Option* opt, const std::string& key) {
+        result += "  ";
+        result += key;
+        if (!opt->desc.empty()) {
+            // Pad to the description column, or wrap to the next line if the key is
+            // too long to leave room for the description.
+            size_t keyEnd = 2 + key.size();
+            if (keyEnd + 1 > descCol) {
+                result += '\n';
+                result += indent;
+            }
+            else {
+                result.append(descCol - keyEnd, ' ');
+            }
+            appendDescription(opt->desc);
+        }
         result += "\n";
+    };
+
+    // The default (unnamed) group is always printed first, without a header, so
+    // that ungrouped options appear at the top of the list. The named groups then
+    // follow in the order they were first seen.
+    if (auto it = groups.find(std::string_view{}); it != groups.end()) {
+        for (auto& [opt, key] : it->second)
+            appendOption(opt, key);
+    }
+
+    for (auto groupName : groupOrder) {
+        if (groupName.empty())
+            continue;
+
+        result += fmt::format("\n{}:\n"sv, groupName);
+        for (auto& [opt, key] : groups.at(groupName))
+            appendOption(opt, key);
     }
 
     return result;
 }
 
-void CommandLine::handlePlusArg(std::string_view arg, ParseOptions options, bool& hadUnknowns) {
+std::vector<std::pair<std::string, std::string>> CommandLine::getHelpOptions() const {
+    std::vector<std::pair<std::string, std::string>> result;
+    result.reserve(orderedOptions.size());
+
+    for (const auto& opt : orderedOptions) {
+        std::string key = opt->allArgNames;
+
+        if (!opt->valueName.empty()) {
+            if (opt->valueName[0] != '=')
+                key += ' ';
+            key += opt->valueName;
+        }
+
+        result.emplace_back(std::move(key), opt->desc);
+    }
+
+    return result;
+}
+
+void CommandLine::handlePlusArg(std::string_view arg, const ParseOptions& options,
+                                bool& hadUnknowns, SourceLocation loc) {
     // Values are plus separated.
     std::string_view value;
     size_t idx = arg.find_first_of('+', 2);
@@ -554,21 +708,16 @@ void CommandLine::handlePlusArg(std::string_view arg, ParseOptions options, bool
     auto it = optionMap.find(std::string(arg));
     if (it == optionMap.end()) {
         hadUnknowns = true;
-        errors.emplace_back(
-            fmt::format("{}: unknown command line argument '{}'"sv, programName, arg));
+        addError(fmt::format("unknown command line argument '{}'", arg), loc);
         return;
     }
 
     auto option = it->second.get();
     if (value.empty()) {
-        if (option->expectsValue()) {
-            errors.emplace_back(
-                fmt::format("{}: no value provided for argument '{}'"sv, programName, arg));
-        }
-        else {
-            std::string result = option->set(arg, value, options.ignoreDuplicates);
-            SLANG_ASSERT(result.empty());
-        }
+        if (option->expectsValue())
+            addError(fmt::format("no value provided for argument '{}'", arg), loc);
+        else
+            option->set(arg, value, options.ignoreDuplicates, loc);
         return;
     }
 
@@ -583,9 +732,7 @@ void CommandLine::handlePlusArg(std::string_view arg, ParseOptions options, bool
             value = {};
         }
 
-        std::string result = option->set(arg, curr, options.ignoreDuplicates);
-        if (!result.empty())
-            errors.emplace_back(fmt::format("{}: {}", programName, result));
+        option->set(arg, curr, options.ignoreDuplicates, loc);
 
     } while (!value.empty());
 }
@@ -606,7 +753,8 @@ CommandLine::Option* CommandLine::findOption(std::string_view arg, std::string_v
 }
 
 CommandLine::Option* CommandLine::tryGroupOrPrefix(std::string_view& arg, std::string_view& value,
-                                                   ParseOptions options) {
+                                                   const ParseOptions& options,
+                                                   SourceLocation loc) {
     // This function handles cases like:
     // -abcvalue
     // Where -a, -b, and -c are arguments and value is the value for argument -c
@@ -625,7 +773,7 @@ CommandLine::Option* CommandLine::tryGroupOrPrefix(std::string_view& arg, std::s
         }
 
         // Otherwise this is a single flag and we should move on.
-        option->set(name, ""sv, options.ignoreDuplicates);
+        option->set(name, ""sv, options.ignoreDuplicates, loc);
         arg = value;
     }
 }
@@ -645,7 +793,7 @@ std::string CommandLine::findNearestMatch(std::string_view arg) const {
         if (key[0] == '+')
             continue;
 
-        int dist = editDistance(key, arg, /* allowReplacements */ true, bestDistance);
+        int dist = editDistance(key, arg, bestDistance);
         if (dist < bestDistance) {
             bestName = key;
             bestDistance = dist;
@@ -661,14 +809,20 @@ std::string CommandLine::findNearestMatch(std::string_view arg) const {
     return "--"s + std::string(bestName);
 }
 
-bool CommandLine::Option::expectsValue() const {
-    return storage.index() != 0;
+void CommandLine::addError(std::string msg, SourceLocation loc) {
+    errors.push_back({std::move(msg), loc});
 }
 
-std::string CommandLine::Option::set(std::string_view name, std::string_view value,
-                                     bool ignoreDup) {
+bool CommandLine::Option::expectsValue() const {
+    return storage.index() != 0 && !std::holds_alternative<OptionBoolCallback>(storage);
+}
+
+void CommandLine::Option::set(std::string_view name, std::string_view value, bool ignoreDup,
+                              SourceLocation loc) {
     std::string pathMem;
-    if (flags.has(CommandLineFlags::FilePath) && !value.empty() && value != "-") {
+    if (flags.has(CommandLineFlags::FilePath) && !value.empty() && value != "-" &&
+        !value.starts_with("..."sv)) {
+
         std::error_code ec;
         fs::path path = fs::weakly_canonical(value, ec);
         if (!ec) {
@@ -677,25 +831,32 @@ std::string CommandLine::Option::set(std::string_view name, std::string_view val
         }
     }
 
-    return std::visit(
+    std::visit(
         [&](auto&& arg) {
-            if constexpr (std::is_same_v<OptionCallback, std::decay_t<decltype(arg)>>) {
-                return set(arg, name, value);
+            if constexpr (std::is_same_v<OptionStrCallback, std::decay_t<decltype(arg)>>) {
+                set(arg, name, value, loc);
+            }
+            else if constexpr (std::is_same_v<OptionBoolCallback, std::decay_t<decltype(arg)>>) {
+                set(arg, name, value, loc);
             }
             else {
                 if (!allowValue(*arg)) {
-                    if (ignoreDup)
-                        return std::string();
-                    return fmt::format("more than one value provided for argument '{}'"sv, name);
+                    if (!ignoreDup) {
+                        parent.addError(
+                            fmt::format("more than one value provided for argument '{}'", name),
+                            loc);
+                    }
                 }
-                return set(*arg, name, value);
+                else {
+                    set(*arg, name, value, loc);
+                }
             }
         },
         storage);
 }
 
-static std::optional<bool> parseBool(std::string_view name, std::string_view value,
-                                     std::string& error) {
+std::optional<bool> CommandLine::Option::parseBool(std::string_view name, std::string_view value,
+                                                   SourceLocation loc) {
     if (value.empty())
         return true;
     if (value == "True" || value == "true")
@@ -703,13 +864,13 @@ static std::optional<bool> parseBool(std::string_view name, std::string_view val
     if (value == "False" || value == "false")
         return false;
 
-    error = fmt::format("invalid value '{}' for boolean argument '{}'", value, name);
+    parent.addError(fmt::format("invalid value '{}' for boolean argument '{}'", value, name), loc);
     return {};
 }
 
 template<typename T>
-static std::optional<T> parseInt(std::string_view name, std::string_view value,
-                                 std::string& error) {
+static std::optional<T> parseIntImpl(std::string_view name, std::string_view value,
+                                     std::string& error) {
     if (value.empty()) {
         error = fmt::format("expected value for argument '{}'", name);
         return {};
@@ -726,69 +887,67 @@ static std::optional<T> parseInt(std::string_view name, std::string_view value,
     return val;
 }
 
-static std::optional<double> parseDouble(std::string_view name, std::string_view value,
-                                         std::string& error) {
+template<typename T>
+std::optional<T> CommandLine::Option::parseInt(std::string_view name, std::string_view value,
+                                               SourceLocation loc) {
+    std::string error;
+    auto result = parseIntImpl<T>(name, value, error);
+    if (!result)
+        parent.addError(std::move(error), loc);
+    return result;
+}
+
+std::optional<double> CommandLine::Option::parseDouble(std::string_view name,
+                                                       std::string_view value, SourceLocation loc) {
     if (value.empty()) {
-        error = fmt::format("expected value for argument '{}'", name);
+        parent.addError(fmt::format("expected value for argument '{}'", name), loc);
         return {};
     }
 
     size_t pos;
     std::optional<double> val = strToDouble(value, &pos);
     if (!val || pos != value.size()) {
-        error = fmt::format("invalid value '{}' for float argument '{}'", value, name);
+        parent.addError(fmt::format("invalid value '{}' for float argument '{}'", value, name),
+                        loc);
         return {};
     }
 
     return val;
 }
 
-std::string CommandLine::Option::set(std::optional<bool>& target, std::string_view name,
-                                     std::string_view value) {
-    std::string error;
-    target = parseBool(name, value, error);
-    return error;
+void CommandLine::Option::set(std::optional<bool>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    target = parseBool(name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::optional<int32_t>& target, std::string_view name,
-                                     std::string_view value) {
-    std::string error;
-    target = parseInt<int32_t>(name, value, error);
-    return error;
+void CommandLine::Option::set(std::optional<int32_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    target = parseInt<int32_t>(name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::optional<uint32_t>& target, std::string_view name,
-                                     std::string_view value) {
-    std::string error;
-    target = parseInt<uint32_t>(name, value, error);
-    return error;
+void CommandLine::Option::set(std::optional<uint32_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    target = parseInt<uint32_t>(name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::optional<int64_t>& target, std::string_view name,
-                                     std::string_view value) {
-    std::string error;
-    target = parseInt<int64_t>(name, value, error);
-    return error;
+void CommandLine::Option::set(std::optional<int64_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    target = parseInt<int64_t>(name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::optional<uint64_t>& target, std::string_view name,
-                                     std::string_view value) {
-    std::string error;
-    target = parseInt<uint64_t>(name, value, error);
-    return error;
+void CommandLine::Option::set(std::optional<uint64_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    target = parseInt<uint64_t>(name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::optional<double>& target, std::string_view name,
-                                     std::string_view value) {
-    std::string error;
-    target = parseDouble(name, value, error);
-    return error;
+void CommandLine::Option::set(std::optional<double>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    target = parseDouble(name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::optional<std::string>& target, std::string_view,
-                                     std::string_view value) {
+void CommandLine::Option::set(std::optional<std::string>& target, std::string_view,
+                              std::string_view value, SourceLocation) {
     target = value;
-    return {};
 }
 
 static std::span<const std::string_view> parseList(std::string_view value, bool allowCommaList,
@@ -808,71 +967,71 @@ static std::span<const std::string_view> parseList(std::string_view value, bool 
 }
 
 template<typename T>
-static std::string setIntList(std::vector<T>& target, std::string_view name, std::string_view value,
-                              bitmask<CommandLineFlags> flags) {
+void CommandLine::Option::setIntList(std::vector<T>& target, std::string_view name,
+                                     std::string_view value, SourceLocation loc) {
     SmallVector<std::string_view> splitMem;
     for (auto entry : parseList(value, flags.has(CommandLineFlags::CommaList), splitMem)) {
-        std::string error;
-        auto result = parseInt<T>(name, entry, error);
+        auto result = parseInt<T>(name, entry, loc);
         if (!result)
-            return error;
-
+            return;
         target.push_back(*result);
     }
-    return {};
 }
 
-std::string CommandLine::Option::set(std::vector<int32_t>& target, std::string_view name,
-                                     std::string_view value) {
-    return setIntList(target, name, value, flags);
+void CommandLine::Option::set(std::vector<int32_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    setIntList(target, name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::vector<uint32_t>& target, std::string_view name,
-                                     std::string_view value) {
-    return setIntList(target, name, value, flags);
+void CommandLine::Option::set(std::vector<uint32_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    setIntList(target, name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::vector<int64_t>& target, std::string_view name,
-                                     std::string_view value) {
-    return setIntList(target, name, value, flags);
+void CommandLine::Option::set(std::vector<int64_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    setIntList(target, name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::vector<uint64_t>& target, std::string_view name,
-                                     std::string_view value) {
-    return setIntList(target, name, value, flags);
+void CommandLine::Option::set(std::vector<uint64_t>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    setIntList(target, name, value, loc);
 }
 
-std::string CommandLine::Option::set(std::vector<double>& target, std::string_view name,
-                                     std::string_view value) {
+void CommandLine::Option::set(std::vector<double>& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
     SmallVector<std::string_view> splitMem;
     for (auto entry : parseList(value, flags.has(CommandLineFlags::CommaList), splitMem)) {
-        std::string error;
-        auto result = parseDouble(name, entry, error);
+        auto result = parseDouble(name, entry, loc);
         if (!result)
-            return error;
-
+            return;
         target.push_back(*result);
     }
-    return {};
 }
 
-std::string CommandLine::Option::set(std::vector<std::string>& target, std::string_view,
-                                     std::string_view value) {
+void CommandLine::Option::set(std::vector<std::string>& target, std::string_view,
+                              std::string_view value, SourceLocation) {
     SmallVector<std::string_view> splitMem;
     for (auto entry : parseList(value, flags.has(CommandLineFlags::CommaList), splitMem))
         target.emplace_back(entry);
-    return {};
 }
 
-std::string CommandLine::Option::set(OptionCallback& target, std::string_view,
-                                     std::string_view value) {
+void CommandLine::Option::set(OptionStrCallback& target, std::string_view, std::string_view value,
+                              SourceLocation loc) {
     SmallVector<std::string_view> splitMem;
     for (auto entry : parseList(value, flags.has(CommandLineFlags::CommaList), splitMem)) {
         auto result = target(entry);
-        if (!result.empty())
-            return result;
+        if (!result.empty()) {
+            parent.addError(std::move(result), loc);
+            return;
+        }
     }
-    return {};
+}
+
+void CommandLine::Option::set(OptionBoolCallback& target, std::string_view name,
+                              std::string_view value, SourceLocation loc) {
+    if (auto result = parseBool(name, value, loc))
+        target(*result);
 }
 
 std::string CommandLine::addIgnoreCommand(std::string_view value) {
@@ -885,7 +1044,7 @@ std::string CommandLine::addIgnoreCommand(std::string_view value) {
     value = value.substr(0, firstCommaIndex);
 
     std::string error;
-    auto result = parseInt<int>("", numArgs, error);
+    auto result = parseIntImpl<int>("", numArgs, error);
     if (result) {
         cmdIgnore[std::string(value)] = *result;
         return {};

@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #include "slang/util/OS.h"
 
+#include "../text/FormatBuffer.h"
 #include <iostream>
 
 #include "slang/text/CharInfo.h"
@@ -21,11 +22,19 @@
 #    ifndef STRICT
 #        define STRICT
 #    endif
-#    include <Windows.h>
+// clang-format off
 #    include <fcntl.h>
 #    include <io.h>
 #    include <process.h>
-
+#    include <windows.h>
+#    include <psapi.h> // MUST be included after windows.h, for some stupid reason.
+// clang-format on
+#elif !defined(__wasi__)
+#    include <fcntl.h>
+#    include <sys/ioctl.h>
+#    include <sys/resource.h>
+#    include <sys/stat.h>
+#    include <unistd.h>
 #else
 #    include <fcntl.h>
 #    include <sys/stat.h>
@@ -290,8 +299,8 @@ std::error_code OS::readFile(const fs::path& path, SmallVector<char>& buffer) {
 
 void OS::writeFile(const fs::path& path, std::string_view contents) {
     if (path == "-") {
-        if (capturingOutput) {
-            capturedStdout += contents;
+        if (outputCallback) {
+            outputCallback(contents, /* isStdout */ true);
         }
         else {
             std::cout.write(contents.data(), (std::streamsize)contents.size());
@@ -307,35 +316,49 @@ void OS::writeFile(const fs::path& path, std::string_view contents) {
 }
 
 void OS::print(std::string_view text) {
-    if (capturingOutput)
-        capturedStdout += text;
-    else
+    if (outputCallback) {
+        outputCallback(text, /* isStdout */ true);
+    }
+    else {
         fmt::detail::print(stdout, fmt::detail::to_string_view(text));
+    }
 }
 
-void OS::print(const fmt::text_style& style, std::string_view text) {
-    if (capturingOutput)
-        capturedStdout += text;
-    else if (showColorsStdout)
-        fmt::print(stdout, style, "{}"sv, text);
-    else
+void OS::print(const TextStyle& style, std::string_view text) {
+    if (outputCallback) {
+        outputCallback(text, /* isStdout */ true);
+    }
+    else if (showColorsStdout) {
+        fmt::print(stdout, detail::toFmtTextStyle(style), "{}"sv, text);
+    }
+    else {
         fmt::detail::print(stdout, fmt::detail::to_string_view(text));
+    }
 }
 
 void OS::printE(std::string_view text) {
-    if (capturingOutput)
-        capturedStderr += text;
-    else
+    if (outputCallback) {
+        outputCallback(text, /* isStdout */ false);
+    }
+    else {
         fmt::detail::print(stderr, fmt::detail::to_string_view(text));
+    }
 }
 
-void OS::printE(const fmt::text_style& style, std::string_view text) {
-    if (capturingOutput)
-        capturedStderr += text;
-    else if (showColorsStderr)
-        fmt::print(stderr, style, "{}"sv, text);
-    else
+void OS::printE(const TextStyle& style, std::string_view text) {
+    if (outputCallback) {
+        outputCallback(text, /* isStdout */ false);
+    }
+    else if (showColorsStderr) {
+        fmt::print(stderr, detail::toFmtTextStyle(style), "{}"sv, text);
+    }
+    else {
         fmt::detail::print(stderr, fmt::detail::to_string_view(text));
+    }
+}
+
+void OS::printException(std::string_view format, std::string_view what) {
+    printE(fmt::vformat(format, fmt::make_format_args(what)));
 }
 
 std::string OS::getEnv(const std::string& name) {
@@ -390,6 +413,61 @@ int OS::getpid() {
     return 1;
 #else
     return ::getpid();
+#endif
+}
+
+uint64_t OS::getPeakMemoryBytes() {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS info;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info)))
+        return static_cast<uint64_t>(info.PeakWorkingSetSize);
+    return 0;
+#elif defined(__wasi__)
+    return 0;
+#elif defined(__APPLE__)
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0)
+        return static_cast<uint64_t>(usage.ru_maxrss);
+    return 0;
+#else
+    // Linux and other POSIX systems: ru_maxrss is in kilobytes
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0)
+        return static_cast<uint64_t>(usage.ru_maxrss) * 1024;
+    return 0;
+#endif
+}
+
+uint32_t OS::getTerminalWidth() {
+#if defined(_WIN32)
+    auto queryHandle = [](DWORD which) -> uint32_t {
+        HANDLE handle = GetStdHandle(which);
+        if (handle == INVALID_HANDLE_VALUE || handle == nullptr)
+            return 0;
+
+        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        if (GetConsoleScreenBufferInfo(handle, &csbi))
+            return static_cast<uint32_t>(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+        return 0;
+    };
+
+    if (uint32_t width = queryHandle(STD_OUTPUT_HANDLE))
+        return width;
+    return queryHandle(STD_ERROR_HANDLE);
+#elif defined(__wasi__)
+    // WASI has no concept of a terminal.
+    return 0;
+#else
+    auto queryFd = [](int fd) -> uint32_t {
+        struct winsize ws;
+        if (::ioctl(fd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+            return static_cast<uint32_t>(ws.ws_col);
+        return 0;
+    };
+
+    if (uint32_t width = queryFd(STDOUT_FILENO))
+        return width;
+    return queryFd(STDERR_FILENO);
 #endif
 }
 
