@@ -817,7 +817,10 @@ void CoverageBinSymbol::resolve() const {
             break;
         }
         case SyntaxKind::ExpressionCoverageBinInitializer:
-            setCoverageExpr = &bindCovergroupExpr(
+            // `bins b = <array>` names a runtime array of values (IEEE 1800-2023
+            // §19.5.1); it is not required to be a constant expression, so bind
+            // without the const-eval step that bindCovergroupExpr performs.
+            setCoverageExpr = &Expression::bind(
                 *init->as<ExpressionCoverageBinInitializerSyntax>().expr, context);
 
             if (!setCoverageExpr->bad()) {
