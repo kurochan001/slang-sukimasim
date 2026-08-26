@@ -175,6 +175,7 @@ $get_assertion_coverage GetAssertionCoverage
 $get_toggle_coverage GetToggleCoverage
 $system_coverage SystemCoverage
 
+$deposit Deposit
 $display Display
 $displayb DisplayB
 $displayo DisplayO

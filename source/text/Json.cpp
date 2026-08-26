@@ -7,9 +7,9 @@
 //------------------------------------------------------------------------------
 #include "slang/text/Json.h"
 
+#include "FormatBuffer.h"
 #include <climits>
 
-#include "slang/text/FormatBuffer.h"
 #include "slang/util/SmallVector.h"
 #include "slang/util/String.h"
 
@@ -98,6 +98,20 @@ void JsonWriter::writeValue(bool value) {
 
 void JsonWriter::writeNewLine() {
     buffer->append("\n");
+}
+
+void JsonWriter::flushTo(std::ostream& out) {
+    // Write everything up to (but not including) the trailing separator
+    // (trailing comma and any following whitespace/newlines), then discard
+    // that content while keeping the separator in the buffer so the next
+    // write continues with correct punctuation and indentation.
+    size_t contentEnd = findLastComma();
+    out.write(buffer->data(), (std::streamsize)contentEnd);
+
+    // Preserve only the trailing separator.
+    std::string trailing(buffer->data() + contentEnd, buffer->size() - contentEnd);
+    buffer->clear();
+    buffer->append(trailing);
 }
 
 void JsonWriter::writeQuoted(std::string_view str) {

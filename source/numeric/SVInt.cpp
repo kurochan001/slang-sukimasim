@@ -9,7 +9,7 @@
 
 #include "SVIntHelpers.h"
 #include <cmath>
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <ostream>
 #include <stdexcept>
 
@@ -640,14 +640,14 @@ std::ostream& operator<<(std::ostream& os, const SVInt& rhs) {
 }
 
 std::string SVInt::toString(bitwidth_t abbreviateThresholdBits, bool exactUnknowns) const {
-    // guess the base to use
-    // unknown bits require binary base for lossless representation
+    // Guess the base to use based on some heuristics.
+    const bool isAllXOrAllZ = unknownFlag && (countXs() == bitWidth || countZs() == bitWidth);
     LiteralBase base;
     if ((bitWidth < 8 && !signFlag) || (unknownFlag && exactUnknowns) ||
-        (unknownFlag && bitWidth <= 64)) {
+        (unknownFlag && bitWidth <= 64 && !isAllXOrAllZ)) {
         base = LiteralBase::Binary;
     }
-    else if (bitWidth <= 32 || signFlag) {
+    else if (bitWidth <= 32 || signFlag || isAllXOrAllZ) {
         base = LiteralBase::Decimal;
     }
     else {
@@ -818,7 +818,7 @@ void SVInt::writeTo(SmallVectorBase<char>& buffer, LiteralBase base, bool includ
         logic_t x = tmp != 0;
         while (x || x.isUnknown()) {
             if (bitsLeft < int(shiftAmount))
-                maskAmount = (1 << bitsLeft) - 1;
+                maskAmount = (1 << bitsLeft) - 1; // NOLINT(clang-analyzer-core.BitwiseShift)
 
             uint32_t digit = uint32_t(tmp.getRawData()[0]) & maskAmount;
             if (!tmp.unknownFlag)

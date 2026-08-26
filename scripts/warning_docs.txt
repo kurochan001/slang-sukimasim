@@ -7,6 +7,8 @@
 An implicit conversion in an expression expands a type. This may be harmless,
 but the warning provides a mechanism for discovering unintended conversions.
 An explicit cast can be used to silence the warning.
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 logic [1:0] a;
 int b = a;
@@ -15,6 +17,8 @@ int b = a;
 -Wwidth-trunc
 An implicit conversion in an expression truncates a type. This conversion
 potentially loses data. An explicit cast can be used to silence the warning.
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 int a;
 logic [1:0] b = a;
@@ -68,6 +72,8 @@ endmodule
 -Wsign-conversion
 An implicit conversion changes the signedness of an integer type
 (from signed to unsigned or vice versa).
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 module m;
     logic signed [31:0] a;
@@ -100,6 +106,8 @@ endmodule
 
 -Wfloat-int-conv
 A floating point value (real or shortreal) is implicitly converted to an integer.
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 function automatic f(real r);
     int i = r;
@@ -108,6 +116,8 @@ endfunction
 
 -Wint-float-conv
 A integer value is implicitly converted to a floating point type (real or shortreal).
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 function automatic f(int i);
     real r = i;
@@ -116,6 +126,8 @@ endfunction
 
 -Wfloat-widen
 A floating point value is implicitly converted to a wider floating point type.
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 function automatic f(shortreal s);
     real r = s;
@@ -124,6 +136,8 @@ endfunction
 
 -Wfloat-narrow
 A floating point value is implicitly converted to a narrower floating point type.
+Note that this warning is not issued for constant expressions;
+see -Wconstant-conversion instead.
 ```
 function automatic f(real r);
     shortreal s = r;
@@ -183,6 +197,21 @@ module m;
 endmodule
 ```
 
+-Wreal-case-eq
+The case equality operators `===` and `!==` differ from the ordinary equality operators `==` and
+`!=` only in how they treat x and z bits. Real, shortreal, and realtime values have no x or z
+bits, so applying a case equality operator to a real operand performs an ordinary equality
+comparison, exactly as `==` or `!=` would. This warning is issued when a case equality
+operator is applied to a real operand, in case a plain equality operator was intended.
+```
+module m;
+    real a;
+    real b;
+    bit c;
+    initial c = (a === b);
+endmodule
+```
+
 -Wpacked-array-conv
 Indicates an implicit conversion between types with differing
 packed array dimensions, even if their overall bit width is the same.
@@ -207,10 +236,32 @@ endmodule
 
 @category Port Connections
 
--Wunconnected-port
-An instance port was left unconnected and it has no default value.
+-Wunconnected-input-port
+An instance input port was left unconnected and it has no default value.
 ```
 module m(input int i);
+endmodule
+
+module n;
+    m m1();
+endmodule
+```
+
+-Wunconnected-output-port
+An instance output port was left unconnected and it has no default value.
+```
+module m(output int o);
+endmodule
+
+module n;
+    m m1();
+endmodule
+```
+
+-Wunconnected-inout-port
+An instance inout port was left unconnected.
+```
+module m(inout wire w);
 endmodule
 
 module n;
@@ -230,13 +281,52 @@ module n;
 endmodule
 ```
 
+-Wempty-input-connection
+An instance input port was explicitly connected to nothing via `.port_name()` syntax.
+This causes the port to receive the default value of its *type* (e.g. `'x` for `logic`),
+not the default value expression declared on the port, if any.
+If the intent is to use the port's default value expression, omit the connection entirely
+or use a named connection with the default value explicitly.
+```
+module m(input logic a = 1, input logic b);
+endmodule
+
+module n;
+    m m1(.a(), .b());   // a defaults to 'x, not 1; b also defaults to 'x
+endmodule
+```
+
+-Wempty-output-connection
+An instance output port was explicitly connected to nothing via `.port_name()` syntax.
+The driven value from the module is silently discarded.
+```
+module m(output logic o);
+    assign o = 1;
+endmodule
+
+module n;
+    m m1(.o());   // driven value is discarded
+endmodule
+```
+
+-Wempty-inout-connection
+An instance inout port was explicitly connected to nothing via `.port_name()` syntax.
+```
+module m(inout wire w);
+endmodule
+
+module n;
+    m m1(.w());   // inout left disconnected
+endmodule
+```
+
 -Wudp-port-empty
 A connection to a user-defined primitive instance is an empty expression.
 While allowed, this is easily confused with a misplaced comma and is likely
 not what you want.
 ```
 primitive p1 (output a, input b);
-    table 00:0; endtable
+    table 0:0; endtable
 endprimitive
 
 module m;
@@ -288,6 +378,17 @@ signing keyword but the actual data type of the port does not permit that signin
 module m(a);
     input unsigned a;
     int a;
+endmodule
+```
+
+-Wnull-port
+A non-ANSI module port list contains a port with no name and no connection.
+This is almost always caused by an accidental extra comma in the port list
+rather than an intentional empty port.
+```
+module m(a, , b);
+    input a;
+    input b;
 endmodule
 ```
 
@@ -685,6 +786,65 @@ module m;
 endmodule
 ```
 
+-Wdangling-else
+A confusingly nested if/else statement lacks begin/end delimiters. The `else` clause
+could be misread as belonging to a different `if` statement than it actually does.
+Add begin/end blocks around the inner `if` statement to make the association clear.
+```
+module m(input a, b);
+    initial begin
+        if (a)
+            if (b)
+                $display("A");
+            else
+                $display("B");
+    end
+endmodule
+```
+
+-Wmissing-else-clause
+An `if` statement appears on the same line as the preceding `end` token from a prior
+`if` statement that has no `else` clause. This often indicates a typo where
+`end else if (...)` was intended but `else` was omitted.
+```
+module m(input a, b);
+    initial begin
+        if (a) begin
+        end if (b) begin
+        end
+    end
+endmodule
+```
+
+-Wmisleading-indentation
+A statement follows a loop or conditional statement that does not use `begin`/`end`, and that
+statement is at the same indentation level as the body of the preceding construct. This is
+misleading because it appears as if both statements are guarded by the loop or conditional,
+when in fact only the first statement is.
+```
+module m;
+    initial begin
+        int x;
+        if (x)
+            x = 1;
+            x = 2; // misleading: this is not guarded by the if
+    end
+endmodule
+```
+
+-Wcolon-plus
+A range select contains `':+'` which is parsed as a simple range `[a : +b]` where the right
+operand has unary plus applied. This is almost always a typo for the ascending part-select
+operator `'+:'`, as in `[a +: b]`. Check whether the intent was an ascending range select and
+rewrite accordingly.
+```
+module m;
+    logic [7:0] v;
+    logic [3:0] x;
+    initial x = v[4:+4]; // probably meant v[4+:4]
+endmodule
+```
+
 -Wdup-attr
 A design element has more than one attribute of the same name.
 Only the last one will apply.
@@ -864,6 +1024,63 @@ function bit[31:0] f1(int unsigned i);
 endfunction
 ```
 
+-Wsigned-logical-shift
+A logical right shift of a signed integral type shifts in zeros regardless of the sign of the
+operand, which may not be intended. If the value could be negative, consider using the arithmetic
+right shift operator `>>>` which will shift in the sign bit instead.
+```
+function automatic int f1(int i);
+    return i >> 5;
+endfunction
+```
+
+-Wshift-count-overflow
+The shift count is a constant that is greater than or equal to the bit width of the
+left-hand operand. Shifting by this amount always produces zero (for left shifts or logical
+right shifts) or all ones (for arithmetic right shifts of negative values), which is almost
+certainly not the intended behavior.
+```
+module m;
+    logic [2:0] v;
+    logic [3:0] result;
+    initial result = v << 4;
+endmodule
+```
+
+-Wshift-count-negative
+The shift count is a constant negative value. In SystemVerilog the shift amount is always
+treated as an unsigned number, so a negative shift amount is interpreted as a very large
+positive number, which will shift out all bits of the operand.
+```
+module m;
+    int v;
+    int result;
+    initial result = v << -1;
+endmodule
+```
+
+-Wdivide-by-zero
+The right-hand side of a division or modulo operation is a compile-time constant with
+value zero. Integer division by zero in SystemVerilog produces an X result, and floating
+point division by zero produces infinity, both of which are almost certainly unintended.
+```
+module m;
+    int result;
+    initial result = 10 / 0;
+endmodule
+```
+
+-Winc-dec-bit
+An increment or decrement operator is applied to a 1-bit operand. The result always wraps around
+and is likely not what was intended (e.g. incrementing a `bit` from 0 gives 1, but incrementing
+from 1 wraps back to 0).
+```
+module m;
+    bit b;
+    initial b++;
+endmodule
+```
+
 -Wstatic-init-value
 A static variable's initializer expression refers to an uninitialized variable, a net, a port,
 or a modport member, which won't have a value assigned by the time the initializer runs. The variable
@@ -871,6 +1088,17 @@ therefore will always be initialized to the default value.
 ```
 module m(input i);
     logic j = i;
+endmodule
+```
+
+-Winit-self
+A variable's initializer expression refers to the variable itself, which is uninitialized at
+that point and will always read as the default value (i.e. `x` or zero). References in unevaluated
+contexts (such as the argument to `$bits`) are not flagged.
+```
+module m;
+    int i = i;
+    int j = j + 1;
 endmodule
 ```
 
@@ -977,8 +1205,8 @@ endmodule
 -Wseq-no-match
 Warns about a sequence expression that can never be matched.
 ```
-module top;
-    assert property ((1'b1 ##1 1'b0) intersect (1'b1[*0] ##2 1'b1));
+module top(input clk);
+    assert property (@(posedge clk) (1'b1 ##1 1'b0) intersect (1'b1[*0] ##2 1'b1));
 endmodule
 ```
 
@@ -1025,12 +1253,270 @@ function int foo(input a);
 endfunction
 ```
 
+-Wfork-loop-var
+A variable declared as a `for` or `foreach` loop variable is referenced inside a
+fork-join_none or fork-join_any block. Since those block types allow the parent
+thread to continue running before all spawned threads finish, the loop variable
+may have advanced to a new value by the time a spawned thread reads it. All
+iterations of the loop will typically end up sharing the final value of the
+variable instead of the value at the time the thread was spawned.
+\n\n
+The fix is to capture the loop variable's value into a local automatic variable
+declared at the start of the fork block, so that each spawned thread gets its
+own copy of the value.
+```
+module m;
+    task automatic do_something(int x); endtask
+
+    initial begin
+        // BAD: all threads will see the same final value of i
+        for (int i = 0; i < 4; i++) begin
+            fork
+                do_something(i);
+            join_none
+        end
+
+        // GOOD: capture current value into an automatic variable
+        for (int i = 0; i < 4; i++) begin
+            fork
+                automatic int inst = i;
+                do_something(inst);
+            join_none
+        end
+    end
+endmodule
+```
+
+-Wloop-var-modify
+A `for` loop has a step expression that increments or decrements a variable, and
+that same variable is also modified inside the loop body. This usually indicates
+an unintentional double-step of the loop variable, which could cause incorrect
+iteration counts, skipped values, or infinite loops.
+```
+module m;
+    initial begin
+        for (int i = 0; i < 10; i++) begin
+            i++;
+        end
+    end
+endmodule
+```
+
+-Wloop-cond-not-modified
+None of the variables that appear in the condition (stop expression) of a `for`
+loop are modified by either the loop's step expressions or its body. When no
+condition variable can change, the loop will either run forever or never execute
+at all (depending on the initial value of the variables).
+\n\n
+Note: the warning is suppressed when at least one condition variable is modified
+elsewhere in the loop, because the condition can still change in that case (for
+example, `i < j` where `i` is the counter and `j` is a fixed bound).
+```
+module m;
+    int flag;
+
+    initial begin
+        // Neither 'i' nor 'flag' is changed by the step or body,
+        // so this loop may run forever.
+        for (int i = 0; i < flag; ) begin
+        end
+    end
+endmodule
+```
+
 -Wvacuous-cover
 A property used in a `cover` statement allows vacuous success,
 which can cause confusing coverage results.
 ```
 module m(input clk, a, b);
     cover property (@(posedge clk) a |-> b);
+endmodule
+```
+
+-Wmulti-write
+A variable is written more than once within a single expression, in a way
+that has undefined sequencing semantics.
+```
+module m;
+    int i;
+    initial begin
+        i = ++i + i++;
+    end
+endmodule
+```
+
+-Wread-write
+A variable is both read and written within a single expression, in a way
+that has undefined sequencing semantics.
+```
+module m;
+    int i, j;
+    initial begin
+        j = i + ++i;
+    end
+endmodule
+```
+
+-Wshadow-value
+A declaration of a value (net, variable, etc) shadows another value declaration with
+the same name in an outer scope. This can lead to subtle bugs where the programmer
+intends to reference the outer declaration but unintentionally references the
+inner (shadowing) one instead.
+```
+int unitVar;
+
+module m;
+    int x;
+    function automatic int f(int x);  // shadows m.x
+        return x;
+    endfunction
+
+    initial begin
+        int unitVar;  // shadows $unit::unitVar
+        unitVar = 1;
+    end
+endmodule
+```
+
+-Wshadow-hierarchy
+A declaration shadows another declaration with the same name in an outer scope, where either
+declaration is a named element of the hierarchy (generate block, task, function, etc).
+This can lead to subtle bugs where the programmer intends to reference the outer declaration
+but unintentionally references the inner (shadowing) one instead.
+```
+module m;
+    if (1) begin : gen
+        initial begin : gen  // shadows m.gen
+        end
+
+        initial begin
+            int gen;  // shadows m.gen.gen
+        end
+    end
+endmodule
+```
+
+-Wshadow-property
+A class property declaration shadows a property with the same name declared in a base class.
+This can lead to subtle bugs where the programmer intends to reference the base class property
+but unintentionally references the derived class property instead.
+```
+class Base;
+    int x;
+endclass
+
+class Derived extends Base;
+    int x;  // shadows Base::x
+endclass
+```
+
+-Wrandomize-var-shadow
+An identifier used inside a `randomize()` 'with' constraint block resolves to a member of
+the class being randomized, but a variable with the same name also exists in an enclosing
+scope. This is a frequent source of subtle bugs where the programmer intended to reference
+the outer variable but unintentionally references the class member instead.
+Use the `local::` prefix to explicitly reference the variable from the enclosing scope,
+or the `this.` prefix to indicate the intention to use the class member.
+```
+class A;
+    rand int x;
+    rand int y;
+endclass
+
+class B;
+    function void f();
+        A a;
+        int y = 5;
+        // 'y' below refers to A::y, not the local 'y'.
+        // Use 'local::y' to reference the local variable.
+        a.randomize() with { x == y; };
+    endfunction
+endclass
+```
+
+-Wconstraint-func-cycle
+When a `rand` (or `randc`) variable appears as an argument to a user-defined function call
+inside a constraint expression, it gains a higher implicit solve priority than any `rand`
+variable that appears as a non-argument in the same expression. A diagnostic is issued when
+this implicit ordering produces a cycle across the constraint blocks of a class, since the
+solver cannot satisfy a circular solve-before relationship.
+\n\n
+If possible, break the cycle by restructuring the constraints to avoid passing a `rand`
+variable as a function argument while another variable in the same expression also contributes
+an ordering back to it. Note that there may not actually be a cycle at runtime when the
+constraints are evaluated if some of the constraints are disabled dynamically via a
+call to `constraint_mode` or `rand_mode`.
+```
+class C;
+    rand int x, y;
+    function int F(int a); return a; endfunction
+    function int G(int a); return a; endfunction
+    // F(y) gives y higher priority than x (y must be solved before x).
+    // G(x) gives x higher priority than y (x must be solved before y).
+    // These two orderings form a cycle.
+    constraint C1 { x <= F(y); }
+    constraint C2 { y <= G(x); }
+endclass
+```
+
+-Wconstraint-solve-cycle
+An explicit `solve...before` directive, or a combination of such directives, creates a
+circular solve ordering.
+\n\n
+Restructure the constraints to remove the circular ordering. Note that there may not
+actually be a cycle at runtime if some of the constraints are disabled dynamically via a
+call to `constraint_mode` or `rand_mode`.
+```
+class C;
+    rand int x, y;
+    // x must be solved before y, and y must be solved before x -- a cycle.
+    constraint C1 { solve x before y; }
+    constraint C2 { solve y before x; }
+endclass
+```
+
+-Wbits-of-integer-constant
+$bits applied to a parameter with a simple integer or scalar type always returns
+the fixed width of that type, not a value derived from the parameter itself.
+For example, `$bits(P)` where P is `parameter int` always returns 32.
+The intention here is often to instead use the parameter directly, or use $clog2().
+```
+module m;
+    parameter int max_value = 10;
+    logic[$bits(max_value+1)-1:0] value;
+
+    logic[$clog2(max_value+1)-1:0] value;
+endmodule
+```
+
+-Wdynamic-cast-const
+A dynamic `$cast` call has a statically known result - it will always succeed or always
+fail regardless of any runtime state.
+\n\n
+If the cast always succeeds, you can replace it with a direct assignment or static cast instead.
+If it always fails, the cast is useless and can be removed.
+```
+class A;
+endclass
+
+class B extends A;
+endclass
+
+class C;
+endclass
+
+module m;
+    int i;
+    real r;
+    A a;
+    B b;
+    C c;
+
+    initial begin
+        $cast(a, b);            // always succeeds: B is a subtype of A
+        if ($cast(i, r)) begin end  // always succeeds: non-class static conversion
+        $cast(a, c);            // always fails: A and C are unrelated
+    end
 endmodule
 ```
 
@@ -1187,7 +1673,7 @@ module m(logic p);
 endmodule
 
 module n;
-    int p;
+    wire [3:0] p;
     m m1(.p);
 endmodule
 ```
@@ -1251,6 +1737,407 @@ class A;
 endclass
 ```
 
+-Wdynamic-non-procedural
+A member or element of a dynamic type is accessed outside of a procedural context (such as in
+a continuous assignment). This is not allowed in SystemVerilog but can be downgraded to a
+warning for compatibility with other tools.
+```
+module m;
+    int a[];
+    assign i = a[3];
+endmodule
+```
+
+-Wnonstandard-string-concat
+String concatenation using the `+` operator is not part of the SystemVerilog standard but is
+supported by some commercial tools. This warning is issued when `+` or `+=` is used to
+concatenate strings.
+```
+module m;
+    function automatic string foo();
+        string a = "hello";
+        a += " world";
+        return a;
+    endfunction
+endmodule
+```
+
+-Wnested-comment
+Nested block comments are not allowed in SystemVerilog but most tools ignore them and
+just include them as part of the containing comment block. Note that the opening characters
+are simply skipped, meaning the next closing comment sequence will end the containing block instead.
+```
+/* foo /* bar */
+module m;
+endmodule
+```
+
+-Wmixed-var-assigns
+A mix of procedural and continuous assignments are applied to the same variable (or longest static
+prefix of a variable). This is not allowed in SystemVerilog but can be downgraded to a warning for
+compatibility with other tools.
+```
+module m;
+    int i;
+    assign i = 1;
+    initial i = 2;
+endmodule
+```
+
+-Wmultiple-cont-assigns
+Multiple continuous assignments are applied to the same variable (or longest static
+prefix of a variable). This is not allowed in SystemVerilog but can be downgraded to a warning for
+compatibility with other tools.
+```
+module m;
+    int i;
+    assign i = 1;
+    assign i = 2;
+endmodule
+```
+
+-Wmultiple-always-assigns
+Multiple always_comb/latch/ff blocks assign to the same variable (or longest static
+prefix of a variable). This is not allowed in SystemVerilog but can be downgraded to a warning for
+compatibility with other tools.
+```
+module m;
+    int i;
+    always_comb i = 1;
+    always_comb i = 2;
+endmodule
+```
+
+-Wmisplaced-trailing-separator
+A trailing separator (comma or semicolon) was found in a list where it is not
+allowed by the SystemVerilog standard. This is an error by default but can be
+downgraded to a warning for compatibility with tools like Yosys.
+```
+module m(input a, output b,);
+endmodule
+```
+
+-Wqualifiers-on-out-of-block
+Out-of-block method definitions are not allowed to include qualifiers (such as the `static` keyword).
+This is an error by default but can be downgraded to a warning for compatibility with other tools.
+```
+module memMod();
+    class C;
+        extern static function int f();
+    endclass
+
+    static function int C::f();
+      f = 10;
+    endfunction
+endmodule
+```
+
+-Winitializer-required
+A variable declared in a `for` loop initializer does not have an initializer expression. SystemVerilog
+requires that such variables be initialized at the point of declaration.
+This is an error by default but can be downgraded to a warning for compatibility with other tools.
+```
+module m;
+    initial begin
+        for (int i; i < 4; i++) begin
+        end
+    end
+endmodule
+```
+
+-Wpackage-import-in-class
+A package import declaration was found inside a class body. This is not allowed by the SystemVerilog
+LRM but is supported by some tools. In VCS compatibility mode this is a warning; otherwise it is an
+error that can be downgraded to a warning.
+```
+package p;
+  int x;
+endpackage
+class c;
+  import p::*;
+endclass
+```
+
+-Wmember-impl-not-found
+A class has the declaration for a member method, but the implementation of that member method is not
+found either in the class or as an out of body definition.
+This is an error by default but can be downgraded to a warning for compatibility with other tools.
+```
+module m;
+class c;
+   extern function int f();
+endclass
+
+endmodule
+```
+
+-Wforeach-call-expr
+The array expression in a foreach loop must be a hierarchical name, not a
+function call or other arbitrary expression. This is not allowed by the
+SystemVerilog LRM but is supported by some tools. In VCS compatibility mode
+this is ignored; otherwise it is an error that can be downgraded to a warning.
+```
+module top;
+    typedef int Arr[4];
+    function automatic Arr get_arr(); endfunction
+    initial begin
+        foreach (get_arr()[i]) begin end
+    end
+endmodule
+```
+
+-Wnonstandard-inside
+Using 'inside' without braces around the value list is non-standard, but some tools
+allow it as an extension. Standard syntax requires braces around the range list.
+```
+module m;
+    int x;
+    int arr[3];
+    int result = x inside arr;
+endmodule
+```
+
+-Wnonstandard-hierarchical-cross
+Hierarchical (dotted) references in cover cross items are not part of the
+SystemVerilog standard but are supported by some commercial tools.
+The implicit coverpoint created from the reference will be named by replacing
+dots with underscores (e.g. `status.mpp` becomes `status_mpp`).
+```
+module m;
+    struct packed {
+        logic [1:0] mpp;
+        logic [1:0] mode;
+    } status;
+
+    covergroup cg;
+        cross status.mpp, status.mode;
+    endgroup
+endmodule
+```
+
+-Wnonstandard-bare-assoc-pattern
+The LRM requires associative array literals to use the apostrophe prefix before the
+opening brace, but some tools allow omitting it (like with normal concatenation syntax) as well.
+```
+module m;
+   string s[int];
+   function void f();
+       s = {0: "sv1", 1: "sv2"};
+   endfunction
+endmodule
+```
+
+-Wnonstandard-constraint-block
+The LRM only permits a braced constraint block (`constraint_set`) as the body of a
+`foreach`, `if`, or `else` constraint expression. Using one directly as a top-level
+`constraint_block_item` is non-standard. This pattern commonly arises when a macro passes
+a constraint block including its outer braces as an argument. Some tools accept it anyway,
+so the error can be downgraded for compatibility.
+```
+class my_vseq;
+    rand int x;
+    constraint c { { x inside {0, 1}; } }
+endclass
+```
+
+-Wliteral-leading-underscore
+Vector literals are not allowed to have leading underscores in their digits but some
+tools allow them anyway, so the error can be downgraded for compatibility.
+```
+module m;
+    logic [7:0] a = 8'h_ff;
+endmodule
+```
+
+-Wref-arg-automatic
+`ref` arguments are only allowed to be used in `automatic` subroutines, but some tools
+allow them with `static` subroutines anyway, so the error can be downgraded for compatibility.
+Note that tasks and functions are static by default if otherwise unmarked; it is preferable
+to mark them `automatic` rather than disable this error.
+```
+function void foo(ref int i);
+endfunction
+```
+
+-Wstring-int-concat
+String concatenations can only accept `string` typed operands and string literals.
+Some tools allow integer operands as well, implicitly converting them to strings,
+so this error can be downgraded for compatibility.
+```
+module m;
+    string s;
+    int i;
+    initial begin
+        s = {s, i};
+    end
+endmodule
+```
+
+-Wrange-select-reversed
+The ordering of a range select (ascending or descending) does not match the direction of
+the dimensions of the type being selected. Most tools error on this, but some allow it
+so the error can be downgraded for compatibility.
+```
+module m;
+    logic [63:0] a;
+    int b;
+    initial begin
+        b = a[3:7];
+    end
+endmodule
+```
+
+-Wformat-empty-arg
+An empty argument (produced by a trailing or stray comma) was passed to a string
+formatting function in a position where the format string expects a value. Some tools
+accept this and substitute a blank, so the diagnostic is a suppressible warning.
+```
+module m;
+    string s;
+    int x = 5;
+    initial s = $sformatf("value=%0d", );
+endmodule
+```
+
+-Wformat-too-many-args
+More arguments were provided to a string formatting function than the format string
+consumed. Some tools accept this and silently ignore the extra arguments, so the
+diagnostic is a suppressible warning.
+```
+module m;
+    string s;
+    int x = 5;
+    initial s = $sformatf("value=%0d", x, x);
+endmodule
+```
+
+-Wclockvar-target-assign
+The LRM explicitly prohibits writing to a variable with a continuous assignment when
+it is associated with an output clockvar. Some tools accept this construct with a warning,
+so the error can be downgraded for compatibility.
+```
+module m(input clk);
+    int j;
+    assign j = 1;
+    clocking cb @(posedge clk);
+        output j;
+    endclocking
+endmodule
+```
+
+-Wcross-ident-in-binsof
+The LRM defines `bins_expression` as either a `variable_identifier` or a
+`cover_point_identifier` with an optional `bin_identifier`; a cross identifier is not a
+valid `bins_expression` argument to `binsof()`. Some tools accept it anyway, so the error
+can be downgraded for compatibility.
+```
+module m;
+    logic clk, a, b;
+    covergroup cg @(posedge clk);
+        cp_a : coverpoint a { bins zero = {0}; bins one = {1}; }
+        cp_b : coverpoint b { bins zero = {0}; bins one = {1}; }
+        cp_cross : cross cp_a, cp_b;
+        cp_nested : cross cp_cross, cp_b {
+            bins c = binsof(cp_cross);
+        }
+    endgroup
+    cg cg_inst = new();
+endmodule
+```
+
+-Wref-arg-in-fork-join
+The LRM prohibits referencing a 'ref' argument inside a fork-join_any or
+fork-join_none block. Some tools allow this anyway, so the error can be
+downgraded for compatibility.
+```
+task automatic run(ref bit flag);
+  fork
+    begin
+      wait(flag == 1);
+    end
+  join_any
+endtask
+```
+
+-Wcannot-index-scalar
+The LRM does not define a bit-select on a scalar (single-bit) type. Some tools
+allow this as an extension, treating the result as the scalar's element type,
+so the error can be downgraded for compatibility.
+```
+module m;
+  bit flag;
+  int i = 0;
+  initial if (flag[i]) $display("set");
+endmodule
+```
+
+-Wundefined-param-override
+The LRM does not define the behavior when a named parameter override refers to a
+parameter that does not exist in the instantiated module. Some vendor tools
+issue only a warning and silently ignore the override, so the error can be
+downgraded for compatibility.
+```
+module bot(input clk);
+  parameter TYPE = 0;
+endmodule
+
+module top;
+  bot #(.TYPE(1), .WIDTH(1)) b(clk);  // WIDTH does not exist in bot
+endmodule
+```
+
+-Wvirtual-arg-name-mismatch
+The LRM requires virtual method overrides to use identical argument names to
+their superclass declaration. Some tools issue only a warning for this mismatch,
+so the error can be downgraded for compatibility.
+```
+class Base;
+  virtual task run(int count);
+  endtask
+endclass
+class Derived extends Base;
+  virtual task run(int n);  // 'n' != 'count'
+  endtask
+endclass
+```
+
+-Wredefinition
+The LRM requires every identifier in a scope to have a unique definition.
+Some tools issue only a warning when a name is declared more than once in the
+same scope, so the error can be downgraded for compatibility.
+```
+module m;
+  int i;
+  int i;  // duplicate declaration
+endmodule
+```
+
+-Wredefinition-different-type
+The LRM requires every identifier in a scope to have a unique definition.
+Some tools issue only a warning when a name is re-declared with a different type
+in the same scope, so the error can be downgraded for compatibility.
+```
+module m;
+  int i;
+  bit [3:0] i;  // redeclared with a different type
+endmodule
+```
+
+-Wstring-in-constraint
+The LRM does not permit string sub-expressions in constraint expressions.
+Some tools accept string equality comparisons inside constraint if-conditions as an extension.
+ The error can be downgraded for compatibility.
+```
+class RegField;
+  rand logic [7:0] value;
+  string name_str;
+  function string get_name(); return name_str; endfunction
+  constraint c_by_name {
+    if (get_name() == "special") value inside {[1:10]};
+  }
+endclass
+```
+
 @category Macros
 
 -Wignored-macro-paste
@@ -1267,6 +2154,17 @@ Issued for redefining a macro name with a different body.
 ```
 `define FOO 1
 `define FOO 2
+```
+
+-Wheader-guard
+Issued when a source file starts with an `ifndef that looks like a header guard
+but the immediately following `define uses a different macro name, possibly due
+to a typo or copy-paste error.
+```
+`ifndef MY_HEADER_H
+`define MY_OTHER_HEADER_H
+// ...
+`endif
 ```
 
 @category Pragmas
@@ -1463,13 +2361,30 @@ endclass
 ```
 
 -Wimplicit-net-port
-A net port that elides its net type occurs in a context where `default_nettype is set to 'none'.
+A net port that elides its net type occurs in a context where `` `default_nettype `` is set to 'none'.
 This technically should be an error but it makes the use of 'none' as a default nettype very
 annoying and most tools just default to a wire in this case.
 ```
 `default_nettype none
 
 module m(input i);
+endmodule
+```
+
+-Wimplicit-net
+An undeclared identifier was used in a context where `` `default_nettype `` is in effect,
+causing an implicit net to be created. This is legal, but the implicit net may be the
+result of a typo or a missing declaration. Unlike -Wunused-implicit-net, this warning
+fires regardless of whether the net is subsequently used, so it can catch typos that
+happen to be referenced more than once. Set `` `default_nettype none `` if you want such
+implicit nets to be an error instead.
+```
+module producer(output out); endmodule
+module consumer(input in); endmodule
+
+module top;
+    producer p (.out(sig));
+    consumer c (.in(sig));
 endmodule
 ```
 
@@ -1525,6 +2440,20 @@ function be a parameter name. This seems needlessly restrictive and conflicts wi
 wording in prior versions so this is implemented as a pedantic warning only.
 ```
 localparam p = $isunbounded(1 + 1);
+```
+
+-Wnonstandard-randomize
+An argument to a scoped randomize call (`std::randomize`) contains accesses rather than simple variables.
+```
+module m;
+    int x[2];
+    struct { int y; } s;
+
+    function automatic void test;
+        std::randomize(x[0]);
+        std::randomize(s.y);
+    endfunction
+endmodule
 ```
 
 @category Unused Items
@@ -1750,6 +2679,161 @@ module m;
 endmodule
 ```
 
+-Wunused-class-property
+A class property is declared but never used.
+```
+class C;
+    int i;
+endclass
+```
+
+-Wunused-but-set-property
+A class property has a value assigned but that value is never used.
+```
+class C;
+    int i;
+
+    function void foo;
+        i = 42;
+    endfunction
+endclass
+```
+
+-Wunassigned-property
+A class property is used but never has a value assigned.
+```
+class C;
+    int i;
+
+    function void foo;
+        int j = i;
+    endfunction
+endclass
+```
+
+-Wunused-local-class-property
+A 'local' (i.e. private) class property is declared but never used.
+```
+class C;
+    local int i;
+endclass
+```
+
+-Wunused-but-set-local-property
+A 'local' (i.e. private) class property has a value assigned but that value is never used.
+```
+class C;
+    local int i;
+
+    function void foo;
+        i = 42;
+    endfunction
+endclass
+```
+
+-Wunassigned-local-property
+A 'local' (i.e. private) class property is used but never has a value assigned.
+```
+class C;
+    local int i;
+
+    function void foo;
+        int j = i;
+    endfunction
+endclass
+```
+
+-Wunused-subroutine
+A task or function is declared but never called.
+```
+function foo;
+endfunction
+```
+
+-Wunused-dpi-import
+A DPI import is declared but never called.
+```
+import "DPI-C" function void dpi_func(int i);
+```
+
+-Wunused-class-method
+A class method is declared but never called.
+```
+class C;
+    function void foo;
+    endfunction
+endclass
+```
+
+-Wunused-local-class-method
+A 'local' (i.e. private) class method is declared but never called.
+```
+class C;
+    local function void foo;
+    endfunction
+endclass
+```
+
+-Wunused-constructor
+A class constructor is declared but never called.
+```
+class C;
+    function new;
+    endfunction
+endclass
+```
+
+-Wunused-package-var
+A variable declared in a package is never used.
+```
+package p;
+    int i;
+endpackage
+```
+
+-Wunused-package-typedef
+A typedef declared in a package is never used.
+```
+package p;
+    typedef int I;
+endpackage
+```
+
+-Wunused-package-parameter
+A parameter declared in a package is never used.
+```
+package p;
+    parameter p = 1;
+endpackage
+```
+
+-Wunused-package-type-parameter
+A type parameter declared in a package is never used.
+```
+package p;
+    parameter type p = int;
+endpackage
+```
+
+-Wunused-package-assertion-decl
+An assertion declaration (sequence, property, or let) declared in a package is never used.
+```
+package p;
+    sequence s;
+        1;
+    endsequence
+endpackage
+```
+
+-Wunused-package-subroutine
+A task or function declared in a package is never used.
+```
+package p;
+    function void foo;
+    endfunction
+endpackage
+```
+
 @category Libraries and Configurations
 
 -Wunknown-library
@@ -1760,6 +2844,9 @@ config cfg;
     design d;
     default liblist foo;
 endconfig
+
+module d;
+endmodule
 ```
 
 -Wdup-config-rule
@@ -1837,8 +2924,36 @@ module top;
 endmodule
 ```
 
+-Wnewline-eof
+A source file does not end with a newline character. Many coding standards and
+editors require files to end with a newline, and some tools may behave
+unexpectedly when processing files that do not.
+```
+module m; endmodule
+```
+
+-Wupward-name
+An upward hierarchical name reference was found. Upward name references traverse upward
+through the instance hierarchy to find the starting scope for the path, which can make
+code harder to understand and port since the name can resolve to different things depending
+on where its containing module is instantiated in the hierarchy.
+```
+module child;
+    // 'parent' is resolved by walking upward from child's scope
+    int x = parent.value;
+endmodule
+
+module parent;
+    int value = 42;
+    child c1();
+endmodule
+```
+
 -Wunknown-warning-option
 <ignored>
 
 -Winvalid-source-encoding
+<ignored>
+
+-Wcommand-line
 <ignored>

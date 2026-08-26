@@ -14,13 +14,16 @@ The script will parse a sample SystemVerilog module and print the names of
 all logic declarations found in the code.
 """
 
-from typing import Union
+from pyslang.ast import Compilation, PackedArrayType, ScalarType, VariableSymbol
+from pyslang.parsing import Token
+from pyslang.syntax import SyntaxNode, SyntaxTree
 
-import pyslang
+from pyslang import DiagnosticEngine, TextDiagnosticClient
 
 
 class LogicDeclarationExtractor:
-    """Visitor class to extract names of all logic declarations.
+    """
+    Visitor class to extract names of all logic declarations.
 
     This visitor traverses the AST and collects the names of all variables
     that are declared with the 'logic' type. It demonstrates how to:
@@ -34,7 +37,8 @@ class LogicDeclarationExtractor:
         self.logic_names = []
 
     def _is_logic_type(self, var_type) -> bool:
-        """Check if a type represents a logic type, including nested arrays.
+        """
+        Check if a type represents a logic type, including nested arrays.
 
         Args:
             var_type: The type to check (ScalarType or PackedArrayType)
@@ -43,26 +47,27 @@ class LogicDeclarationExtractor:
             True if the type is logic or an array of logic types
         """
         # Check if it's a scalar logic type
-        if isinstance(var_type, pyslang.ScalarType):
-            return var_type.scalarKind == pyslang.ScalarType.Kind.Logic
+        if isinstance(var_type, ScalarType):
+            return var_type.scalarKind == ScalarType.Kind.Logic
 
         # Check if it's a packed array type
-        elif isinstance(var_type, pyslang.PackedArrayType):
+        elif isinstance(var_type, PackedArrayType):
             # Recursively check the element type
             return self._is_logic_type(var_type.elementType)
 
         # Not a logic type
         return False
 
-    def __call__(self, obj: Union[pyslang.Token, pyslang.SyntaxNode]) -> None:
-        """Visit method called for each node in the AST.
+    def __call__(self, obj: Token | SyntaxNode) -> None:
+        """
+        Visit method called for each node in the AST.
 
         Args:
             obj: The current AST node being visited. Can be a Token or SyntaxNode.
                  We're specifically interested in VariableSymbol nodes.
         """
         # Check if this is a variable symbol (includes logic declarations)
-        if isinstance(obj, pyslang.VariableSymbol):
+        if isinstance(obj, VariableSymbol):
             # Get the type of the variable
             var_type = obj.type
 
@@ -72,49 +77,51 @@ class LogicDeclarationExtractor:
 
 
 def extract_logic_declaration_names(systemverilog_code: str) -> list[str]:
-    """Extract logic declaration names from SystemVerilog code.
+    """
+    Extract logic declaration names from SystemVerilog code.
 
     Args:
         systemverilog_code: A string containing SystemVerilog source code.
 
     Returns:
         A list of strings containing the names of all logic declarations.
-
-    Raises:
-        Exception: If there are parsing errors or compilation issues.
     """
-    try:
-        # Parse the SystemVerilog code into a syntax tree
-        tree = pyslang.SyntaxTree.fromText(systemverilog_code)
+    # Parse the SystemVerilog code into a syntax tree
+    tree = SyntaxTree.fromText(systemverilog_code)
 
-        # Create a compilation unit and add the syntax tree
-        compilation = pyslang.Compilation()
-        compilation.addSyntaxTree(tree)
+    # Create a compilation unit and add the syntax tree
+    compilation = Compilation()
+    compilation.addSyntaxTree(tree)
 
-        # Check for any diagnostics (errors/warnings) during compilation
-        diagnostics = compilation.getAllDiagnostics()
-        if diagnostics:
-            error_messages = []
-            for diag in diagnostics:
-                if diag.isError():
-                    error_messages.append(str(diag))
-            if error_messages:
-                raise Exception(f"Compilation errors: {'; '.join(error_messages)}")
+    # Handle diagnostics.
+    diagnostics = compilation.getAllDiagnostics()
 
-        # Create our visitor to extract logic declaration names
-        extractor = LogicDeclarationExtractor()
+    diagClient = TextDiagnosticClient()
+    diagEngine = DiagnosticEngine(compilation.sourceManager)
+    diagEngine.addClient(diagClient)
 
-        # Visit all nodes in the compilation root
-        compilation.getRoot().visit(extractor)
+    has_error = False
+    for diag in diagnostics:
+        diagEngine.issue(diag)
+        has_error = diag.isError() or has_error
 
-        return extractor.logic_names
+    print(diagClient.getString())
 
-    except Exception as e:
-        raise Exception(f"Failed to extract logic declarations: {e}")
+    if has_error:
+        raise RuntimeError("Compilation had errors")
+
+    # Create our visitor to extract logic declaration names
+    extractor = LogicDeclarationExtractor()
+
+    # Visit all nodes in the compilation root
+    compilation.getRoot().visit(extractor)
+
+    return extractor.logic_names
 
 
 def extract_logic_declarations_from_file(filepath: str) -> list[str]:
-    """Extract logic declaration names from a SystemVerilog file.
+    """
+    Extract logic declaration names from a SystemVerilog file.
 
     Args:
         filepath: Path to a SystemVerilog file.
@@ -122,14 +129,9 @@ def extract_logic_declarations_from_file(filepath: str) -> list[str]:
     Returns:
         A list of strings containing the names of all logic declarations.
     """
-    try:
-        with open(filepath, "r", encoding="utf-8") as file:
-            content = file.read()
-        return extract_logic_declaration_names(content)
-    except FileNotFoundError:
-        raise Exception(f"File not found: {filepath}")
-    except Exception as e:
-        raise Exception(f"Failed to process file {filepath}: {e}")
+    with open(filepath, "r", encoding="utf-8") as file:
+        content = file.read()
+    return extract_logic_declaration_names(content)
 
 
 def main():
@@ -172,7 +174,7 @@ def main():
                 else:
                     print("No logic declarations found.")
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - example keeps going on any per-file error
                 print(f"Error: {e}")
             print()
     else:
@@ -251,7 +253,7 @@ def main():
             print("Usage: python extract_logic_names.py [file1.sv file2.sv ...]")
             print("       python extract_logic_names.py --verbose  # Show sample code")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - top-level guard reports any failure
             print(f"Error processing SystemVerilog code: {e}")
             print("Make sure pyslang is properly installed.")
 

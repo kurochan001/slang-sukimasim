@@ -11,6 +11,8 @@
 #include "slang/ast/Expression.h"
 #include "slang/ast/Scope.h"
 #include "slang/ast/Symbol.h"
+#include "slang/ast/TypeProvider.h"
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
@@ -18,6 +20,7 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/NetType.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
+#include "slang/diagnostics/LookupDiags.h"
 #include "slang/diagnostics/ParserDiags.h"
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/diagnostics/TypesDiags.h"
@@ -147,9 +150,22 @@ void DeclaredType::resolveType(const ASTContext& typeContext,
             type = &comp.getType(*type, *dimensions, typeContext);
 
         if (typedefTarget) {
-            // When resolving a typedef target we need to force resolution
-            // of the canonical type to make sure there are no cycles.
-            type->getCanonicalType();
+            // When resolving a typedef target we need to check resolution of aliases
+            // to make sure there are no cycles.
+            auto tt = type;
+            while (tt->isAlias()) {
+                auto& alias = tt->as<TypeAliasType>();
+                if (alias.targetType.isEvaluating()) {
+                    auto& diag = typeContext.addDiag(diag::RecursiveDefinition,
+                                                     syntax->sourceRange());
+                    diag << alias.name;
+                    diag.addNote(diag::NoteDeclarationHere, alias.location);
+                    type = &comp.getErrorType();
+                    break;
+                }
+
+                tt = &alias.targetType.getType();
+            }
         }
     }
 
@@ -237,16 +253,9 @@ void DeclaredType::checkType(const ASTContext& context) const {
     switch (masked) {
         case uint32_t(DeclaredTypeFlags::NetType): {
             auto& net = parent.as<NetSymbol>();
-            // IEEE 1800-2023: Allow more flexible net types for advanced interface features
-            // User-defined net types and interface compatibility
-            if (net.netType.netKind != NetType::UserDefined && !isValidForNet(*type)) {
-                // Instead of error, allow with enhanced compatibility
-                // IEEE 1800-2023 supports more types in interface contexts
-                if (!type->isClass() && !type->isVoid()) {
-                    // Allow most types except classes and void
-                    // This enables advanced interface and virtual interface features
-                }
-            }
+            // IEEE 1800-2023: sukimasim intentionally allows more flexible net types for
+            // advanced interface / virtual interface features, so upstream's InvalidNetType
+            // diagnostic is deliberately not reported here.
             if (type->getBitWidth() == 1 && net.expansionHint != NetSymbol::None)
                 context.addDiag(diag::SingleBitVectored, parent.location);
             break;
@@ -288,17 +297,26 @@ void DeclaredType::checkType(const ASTContext& context) const {
                 context.addDiag(diag::InvalidDPIArgType, parent.location) << *type;
             break;
         case uint32_t(DeclaredTypeFlags::RequireSequenceType):
-            if (!type->isValidForSequence())
+            // LRM 16.10: the data type shall be one of the types allowed within assertions
+            // as defined in 16.6. LRM 16.6 requires types to be cast compatible with an
+            // integral type. Per LRM 6.22.4 + 6.24.3, bit-stream types (including unpacked
+            // arrays/structs of integral types) have defined explicit casting rules to/from
+            // integral types and therefore satisfy the cast-compatibility requirement.
+            if (!type->isValidForSequence() && !type->isBitstreamType())
                 context.addDiag(diag::AssertionExprType, parent.location) << *type;
             break;
         case uint32_t(DeclaredTypeFlags::CoverageType):
             if (!type->isIntegral() && (lv < LanguageVersion::v1800_2023 || !type->isFloating()))
                 context.addDiag(diag::InvalidCoverageExpr, parent.location) << *type;
             break;
-        case uint32_t(DeclaredTypeFlags::InterfaceVariable):
-            if (!isValidForIfaceVar(*type))
+        case uint32_t(DeclaredTypeFlags::IfaceOrGenBlkVar): {
+            auto def = context.scope->asSymbol().getDeclaringDefinition();
+            if (def && def->definitionKind == DefinitionKind::Interface &&
+                !isValidForIfaceVar(*type)) {
                 context.addDiag(diag::VirtualInterfaceIfaceMember, parent.location);
+            }
             break;
+        }
         default:
             SLANG_UNREACHABLE;
     }
@@ -356,14 +374,15 @@ void DeclaredType::mergePortTypes(
 
         bool shouldBeSigned = implicit.signing.kind == TokenKind::SignedKeyword;
         if (shouldBeSigned && !sourceType->isSigned()) {
-            sourceType = &sourceType->makeSigned(context.getCompilation());
+            auto& comp = context.getCompilation();
+            sourceType = &sourceType->makeSigned(comp);
             if (!sourceType->isSigned()) {
                 warnSignedness();
             }
             else {
                 // Put the unpacked dimensions back on the type now that it
                 // has been made signed.
-                destType = &FixedSizeUnpackedArrayType::fromDims(*context.scope, *sourceType,
+                destType = &FixedSizeUnpackedArrayType::fromDims(comp, context, *sourceType,
                                                                  destDims, SourceRange::NoLocation);
             }
         }
@@ -557,6 +576,54 @@ T DeclaredType::getASTContext() const {
     }
 
     return ASTContext(*scope, location, astFlags);
+}
+
+std::vector<EvaluatedDimension> DeclaredType::getResolvedDimensions() const {
+    // Ensure the type has been resolved so that any errors (cycles, invalid dims, etc.)
+    // are already diagnosed before we re-evaluate.
+    getType();
+
+    std::vector<EvaluatedDimension> result;
+    if (hasLink) {
+        // Follow the link; its packed dims are whatever the target has.
+        if (typeOrLink.link)
+            result = typeOrLink.link->getResolvedDimensions();
+
+        // Then append any additional unpacked dims applied on top of the link.
+        if (dimensions) {
+            auto ctx = getASTContext<false>();
+            for (auto dim : *dimensions)
+                result.push_back(ctx.evalUnpackedDimension(*dim));
+        }
+        return result;
+    }
+
+    auto syntax = typeOrLink.typeSyntax;
+    if (!syntax)
+        return result;
+
+    const SyntaxList<VariableDimensionSyntax>* packedDims = nullptr;
+    if (IntegerTypeSyntax::isKind(syntax->kind))
+        packedDims = &syntax->as<IntegerTypeSyntax>().dimensions;
+    else if (syntax->kind == SyntaxKind::StructType || syntax->kind == SyntaxKind::UnionType)
+        packedDims = &syntax->as<StructUnionTypeSyntax>().dimensions;
+    else if (syntax->kind == SyntaxKind::EnumType)
+        packedDims = &syntax->as<EnumTypeSyntax>().dimensions;
+    else if (syntax->kind == SyntaxKind::ImplicitType)
+        packedDims = &syntax->as<ImplicitTypeSyntax>().dimensions;
+
+    auto ctx = getASTContext<false>();
+    if (packedDims) {
+        for (auto dim : *packedDims)
+            result.push_back(ctx.evalPackedDimension(*dim));
+    }
+
+    if (dimensions) {
+        for (auto dim : *dimensions)
+            result.push_back(ctx.evalUnpackedDimension(*dim));
+    }
+
+    return result;
 }
 
 } // namespace slang::ast

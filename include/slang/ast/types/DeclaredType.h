@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include "slang/ast/EvaluatedDimension.h"
 #include "slang/syntax/SyntaxFwd.h"
 #include "slang/syntax/SyntaxNode.h"
 
@@ -81,15 +82,21 @@ enum class SLANG_EXPORT DeclaredTypeFlags {
     /// The type is for an interconnect net, which has special rules.
     InterconnectNet = 1 << 15,
 
-    /// The type is for a variable declaration inside an interface.
-    InterfaceVariable = 1 << 16,
+    /// The type is for a variable declaration inside an interface or generate block.
+    IfaceOrGenBlkVar = 1 << 16,
+
+    /// The net type was implicitly inferred for an ANSI `input` port that has an
+    /// explicit data type. Such a port is treated as a net per the LRM but the data type
+    /// is allowed to be one that wouldn't otherwise be valid for a net, so the usual net
+    /// type check is suppressed.
+    ImplicitInputNet = 1 << 17,
 
     /// A mask of flags that indicate additional type rules are needed to
     /// be checked after the type itself is resolved.
     NeedsTypeCheck = NetType | UserDefinedNetType | FormalArgMergeVar | Rand | DPIReturnType |
-                     DPIArg | RequireSequenceType | CoverageType | InterfaceVariable
+                     DPIArg | RequireSequenceType | CoverageType | IfaceOrGenBlkVar
 };
-SLANG_BITMASK(DeclaredTypeFlags, InterfaceVariable)
+SLANG_BITMASK(DeclaredTypeFlags, ImplicitInputNet)
 
 /// Ties together various syntax nodes that declare the type of some parent symbol
 /// along with the logic necessary to resolve that type. Optionally includes an
@@ -129,6 +136,19 @@ public:
         return hasLink ? nullptr : typeOrLink.typeSyntax;
     }
 
+    /// Like @a getTypeSyntax but follows the link chain, so for declared
+    /// types that link to a parameter's targetType this returns the syntax
+    /// of the parameter binding (e.g. `other_t` in `I #(.data_type(other_t))`).
+    const syntax::DataTypeSyntax* getResolvedTypeSyntax() const {
+        const DeclaredType* dt = this;
+        while (dt->hasLink) {
+            if (!dt->typeOrLink.link)
+                return nullptr;
+            dt = dt->typeOrLink.link;
+        }
+        return dt->typeOrLink.typeSyntax;
+    }
+
     /// Sets an additional set of dimensions that represent the unpacked portion of
     /// the type declaration.
     void setDimensionSyntax(
@@ -138,6 +158,14 @@ public:
     const syntax::SyntaxList<syntax::VariableDimensionSyntax>* getDimensionSyntax() const {
         return dimensions;
     }
+
+    /// Returns all declared dimensions for this type, in declaration order.
+    ///
+    /// Packed dimensions from the base type syntax come first, followed by any unpacked
+    /// dimensions set via @a setDimensionSyntax.
+    ///
+    /// @note The result is recomputed on each call and is not cached.
+    std::vector<EvaluatedDimension> getResolvedDimensions() const;
 
     /// Resolves and returns the initializer expression, if present. Otherwise returns nullptr.
     const Expression* getInitializer() const;

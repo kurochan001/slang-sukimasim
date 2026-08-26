@@ -7,8 +7,11 @@ add_executable(
   unittests
   analysis/AssertionAnalysisTests.cpp
   analysis/CaseAnalysisTests.cpp
+  analysis/ConstraintAnalysisTests.cpp
   analysis/DFATests.cpp
+  analysis/SensitivityTests.cpp
   analysis/MultiAssignTests.cpp
+  analysis/PortAnalysisTests.cpp
   analysis/UnusedTests.cpp
   ast/AssertionTests.cpp
   ast/CheckerTests.cpp
@@ -25,6 +28,7 @@ add_executable(
   ast/ParameterTests.cpp
   ast/PortTests.cpp
   ast/PrimitiveTests.cpp
+  ast/ValuePathTests.cpp
   ast/SerializerTests.cpp
   ast/StatementTests.cpp
   ast/SubroutineTests.cpp
@@ -45,13 +49,14 @@ add_executable(
   util/NumericTests.cpp
   util/SmallVectorTests.cpp
   util/UtilTests.cpp
+  diagnostics/WaiverTests.cpp
   DriverTests.cpp
   FileTests.cpp
   main.cpp
   Test.cpp)
 
 target_include_directories(unittests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(unittests PRIVATE slang::slang Catch2::Catch2)
+target_link_libraries(unittests PRIVATE slang::slang Catch2::Catch2 fmt::fmt)
 target_compile_definitions(unittests PRIVATE UNITTESTS)
 
 if(SLANG_CI_BUILD)
@@ -61,12 +66,6 @@ endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
   target_sources(unittests PRIVATE ${PROJECT_SOURCE_DIR}/scripts/win32.manifest)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Suppress annoying false positive Wstringop-overflow warnings
-  target_compile_options(unittests PUBLIC "-Wno-stringop-overflow")
-  target_link_options(unittests PUBLIC "-Wno-stringop-overflow")
 endif()
 
 # Copy the data directory for running tests from the build folder and build the

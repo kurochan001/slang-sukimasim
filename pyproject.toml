@@ -1,6 +1,11 @@
+# ~~~
+# SPDX-FileCopyrightText: Michael Popoloski
+# SPDX-License-Identifier: MIT
+# ~~~
+
 [project]
 name = "pyslang"
-version = "9.0.0"
+version = "11.0.0"
 description = "Python bindings for slang, a library for compiling SystemVerilog"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Mike Popoloski" }]
@@ -32,7 +37,7 @@ Changelog = "https://github.com/MikePopoloski/slang/blob/master/CHANGELOG.md"
 test = ["pytest"]
 
 [build-system]
-requires = ["pybind11 == 3.*", "scikit-build-core"]
+requires = ["nanobind >= 2.0.0,<3", "scikit-build-core"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
@@ -40,6 +45,8 @@ cmake.source-dir = "."
 install.components = ["pylib"]
 sdist.exclude = [".github", "./build", "./install", "./tests", "./tools"]
 wheel.packages = ["pyslang/pyslang"]
+wheel.install-dir = "pyslang"
+wheel.license-files = ["LICENSE"]
 
 [tool.scikit-build.cmake.define]
 SLANG_INCLUDE_TESTS = "OFF"
@@ -50,11 +57,17 @@ SLANG_INCLUDE_PYLIB = "ON"
 archs = ["auto64"]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-skip = ["pp*", "cp36-*", "cp37-*", "cp38-*", "*musllinux*"]
+skip = ["cp38-*", "cp39-*", "*musllinux*"]
 build-verbosity = 1
 test-command = "pytest {project}/pyslang/tests"
 test-extras = ["test"]
 test-skip = ["*universal2:arm64"]
 
+[tool.isort]
+profile = "black"
+
 [tool.pytest.ini_options]
 testpaths = ["pyslang/tests"]
+
+[dependency-groups]
+dev = ["pytest>=9.0.3"]

@@ -5,6 +5,229 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Language Compatibility
+* Added `--allow-cross-auto-bin-max` (included in 'vcs' compat mode) which enables the `cross_auto_bin_max` legacy coverage option, for compatibility with (pre-IEEE) SystemVerilog 3.1a (thanks to @hankhsu1996)
+* ANSI input ports without an explicit port kind (net or var) are specified by the LRM to be nets. slang instead used to default them to variables, so that cases like `input int p` wouldn't error (since 2-state types are not valid for nets). Now they are defaulted to nets to match the LRM, with a carve out for the 2-state net type check to suppress the error for these implicit cases only. This behavior better matches the LRM and several commercial tools. `--infer-input-ports-as-vars` (included by default in 'vcs' compat mode) can be used to get the old behavior. (thanks to @likeamahoney)
+* Embedded class covergroups are now allowed to reference class members declared later in textual order. The LRM is not clear about this but all commercial tools agree.
+* All integral types (not just packed arrays) are now allowed to be sliced across instance array port connections. The LRM is not clear about this but all commercial tools agree.
+
+### Notable Breaking Changes
+* The minimum required CMake version to build slang is now 3.28
+* fmtlib is now a fully private dependency of slang, to avoid introducing transitive dependencies to downstream users that otherwise have no need for it. In general it should be possible to build slang fully self-contained, so that relying on it does not balloon your dependency tree. See [the docs](https://sv-lang.com/building.html#dependencies) for more details.
+
+### New Features
+* Added support for external [diagnostic waivers](https://sv-lang.com/waivers.html) files for suppressing unwanted warnings (thanks to @sjalloq)
+* Added [-Wmissing-else-clause](https://sv-lang.com/warning-ref.html#missing-else-clause) which warns about `if` statements that look like they were meant to be `else if` based on being on the same line as a previous `end` keyword
+* Added [-Wimplicit-net](https://sv-lang.com/warning-ref.html#implicit-net) which warns for each implicit net that is created (thanks to @hankhsu1996)
+* Added [-Wreal-case-eq](https://sv-lang.com/warning-ref.html#real-case-eq) which warns about using case equality operators ('===' and '!==') on `real` operands (thanks to @hankhsu1996)
+
+### Improvements
+* Depfiles created by `--Mall` and `--Minclude` now include system-style included files (via angle brackets) in addition to user-style (via double quotes) (thanks to @AndrewNolte)
+* `$static_assert` with type reference comparisons now shows a detailed resolution chain for type aliases when the assert fails (thanks to @AndrewNolte)
+* Library search (with `--libdir`) can now parse files in parallel when threading is enabled (thanks to @ebrevdo)
+
+### Fixes
+* Fixed a potential crash when a single symbol has many (greater than 16) attributes declared (thanks to @AndrewNolte)
+* Fixed a bug where library search (with `--libdir`) could sometimes try to load and parse the same file more than once (thanks to @AndrewNolte)
+* Fixed spurious "unused" warnings on symbols that already have a previous error with their type resolution (thanks to @AndrewNolte)
+* Fixed `` `include `` files incorrectly being included in depfiles created by `--Mmodule` (thanks to @AndrewNolte)
+* Fixed a crash when using `$static_assert` to compare type references (thanks to @AndrewNolte)
+* Fixed false positives for `-Wunused-but-set-property` when accessing members via arrays of class handles
+* Fixed a crash when using `super` inside `randomize` calls on arrays of class handles
+* Fixed the ordering of element expressions in assignment patterns with explicit indices targeting arrays with descending indices
+* Fixed a parsing error where a labeled `restrict property` concurrent assertion was rejected
+* Fixed a bug that prevented `interconnect` nets from being used in alias directives
+* Fixed loop unrolling in data flow analysis to more conservatively handle loops that modify the iteration variable within their body
+* Fixed names explicitly imported into a package incorrectly being made visible to other units that import that package even when not re-exported
+* Fixed several internal assertions that could occur when recovering from invalid syntax
+* Fixed a malformed diagnostic for missing identifier tokens that go through the implicit net search logic
+* Fixed a crash when trying to analyze checkers with invalid port connections
+* Fixed output port initializers to count as drivers for multi-driver checking (thanks to @x-Aksara-x)
+
+### Tools & Bindings
+#### pyslang
+* Fixed binding of enum members named "and" and "or" (thanks to @slide)
+* Improved performance of visiting nodes when using the `lookup_table` dict of callbacks (thanks to @hankhsu1996)
+
+
+## [v11.0] - 2026-05-14
+### Language Compatibility
+* Added a `--allow-virtual-iface-with-override` flag to allow interface instances that are bind/defparam targets to be assigned to virtual interfaces (thanks to @thomasnormal)
+* The error for invalid arguments to std::randomize has been made downgradeable via `-Wnonstandard-randomize` (thanks to @AndrewNolte)
+* Added support for conatenating strings with operator '+' (which will now issue `-Wnonstandard-string-concat`) (thanks to @AndrewNolte)
+* The error for nested block comments is now a warning by default (`-Wnested-comment`), and turned off by default in VCS compat mode
+* `extern` and `pure` method prototypes are now allowed to have an implicit return type (thanks to @mampcs)
+* The error for qualifiers on out-of-block method definitions is now downgradeable via `-Wqualifiers-on-out-of-block` (thanks to @mampcs)
+* The error for missing implementations of `extern` methods is now downgradeable via `-Wmember-impl-not-found` (thanks to @mampcs)
+* Unqualified task and function calls will now perform upward name resolution up the hierarchy if there is no declaration visible locally. The LRM is not entirely clear here but all major tools allow this and now slang does as well. (thanks to @mampcs)
+* The error for missing `for` loop variable initializers is now downgradeable via `-Winitializer-required` (thanks to @mampcs)
+* The error for use of package imports within class scopes is now downgradeable via `-Wpackage-import-in-class` (thanks to @mampcs)
+* Made the diagnostics for multiple overlapping assignments downgradeable to warnings (via the new warnings [-Wmixed-var-assigns](https://sv-lang.com/warning-ref.html#mixed-var-assigns), [-Wmultiple-cont-assigns](https://sv-lang.com/warning-ref.html#multiple-cont-assigns), and [-Wmultiple-always-assigns](https://sv-lang.com/warning-ref.html#multiple-always-assigns))
+* The string formatting functions now allow passing class handles, chandles, and null literals as arguments to integer format specifiers (thanks to @thomasnormal)
+* Misplaced trailing separator errors are now downgradeable to a warning (via the new warning [-Wmisplaced-trailing-separator](https://sv-lang.com/warning-ref.html#misplaced-trailing-separator)) (thanks to @thomasnormal)
+* Coverage cross items can now specify another cross as a target (thanks to @mampcs)
+* Coverage cross items can now contain dotted / hierarchical names, flagged via `-Wnonstandard-hierarchical-cross` (thanks to @AndrewNolte)
+* `inside` expressions can now specify a single element without the usually required braces, flagged via `-Wnonstandard-inside` (thanks to @AndrewNolte)
+* `foreach` array references can now contain function call expressions, flagged via `-Wforeach-call-expr` (thanks to @mampcs)
+* Added support for the `$deposit` system task, which is non-standard but very common in older codebases (thanks to @mampcs)
+* `--relax-string-conversions` now also allows implicit conversions from integers to strings (thanks to @mampcs)
+* Structured assignment patterns can now be written without the leading apostrophe, flagged by `-Wnonstandard-bare-assoc-pattern` (an error by default) (thanks to @mampcs)
+* Added `--allow-array-concat-assign-pattern` which allows assignment patterns (which usually require an assignment-like context) to be used in an unpacked array concatenation (thanks to @mampcs)
+* The error for leading underscores in vector literals is now downgradeable via `-Wliteral-leading-underscore`
+* The error for use of ref args in static functions is now downgradeable via `-Wref-arg-automatic`
+* The error for concats between strings and ints is now downgradeable via `-Wstring-int-concat`
+* The error for reversed range select ordering is now downgradeable via `-Wrange-select-reversed`
+* Default expressions in structured assignment patterns can now themselves be nested assignment patterns
+* Dynamic array `new` expressions can now have a structured assignment pattern initializer expression
+* Immediate assertions are now correctly disallowed in non-procedural contexts
+* Streaming operators are now allowed as branches of conditional (ternary) expressions (thanks to @likeamahoney)
+* In single-unit mode, named library files still result in their own compilation units (each one a single unit), to better match how other tools partition compilation units when libraries are involved
+* Assertion local variables can now be declared with any bitstream type, not just the types allowed in sequences
+* Invalid nested constraint blocks can now be allowed via `-Wnonstandard-constraint-block`
+* String format functions can now allow empty arguments and unused trailing arguments via `-Wformat-empty-arg` and `-Wformat-too-many-args`
+* The error for trying to override a parameter that doesn't exist is now downgradeable via `-Wundefined-param-override`
+* The error for mismatching virtual method argument names is now downgradeable via `-Wvirtual-arg-name-mismatch`
+* The error for indexing a single bit type is now downgradeable via `-Wcannot-index-scalar`
+* The error for using a ref arg in a fork-join block is now downgradeable via `-Wref-arg-in-fork-join`
+* The error for referencing a cover cross in a `binsof` expression is now downgradeable via `-Wcross-ident-in-binsof`
+* The error for using a `string` type in constraint expressions is now downgradeable via `-Wstring-in-constraint`
+* The error for redefining a symbol with the same name in the same scope is now downgradeable via `-Wredefinition` and `-Wredefinition-different-type`
+* The error for assigning to the target of a clocking variable is now downgradeable via `-Wclockvar-target-assign`
+
+### Notable Breaking Changes
+* pyslang bindings are now separated into submodules matching the C++ API namespaces, which will require adding imports to your existing scripts to make them continue to run
+* The ASTVisitor template now takes a [VisitFlags](https://sv-lang.com/namespaceslang_1_1ast.html#a05ed6af040f87ae0471344a55009ca99) enum instead of a bunch of bool parameters
+* `-Wimplicit-conv` has been moved from the default warning set to the `-Wextra` group due to being a little too noisy for a default. If you want it on and aren't using -Wextra you'll need to readd it to your command line.
+* The LSPUtilities class has been replaced by the more capable [ValuePath](https://sv-lang.com/classslang_1_1ast_1_1_value_path.html) class. Users of the old API will need to migrate to the new one.
+
+### New Features
+* Instantiations of unknown modules can now be ignored by putting a `(* maybe_unknown *)` attribute on the instantiation itself (thanks to @AndrewNolte)
+* Added [-Wread-write](https://sv-lang.com/warning-ref.html#read-write) and [-Wmulti-write](https://sv-lang.com/warning-ref.html#multi-write) for detecting undefined sequencing of operations involving a single variable (both on by default)
+* Added `-Wunused-subroutine`, `-Wunused-dpi-import`, `-Wunused-class-method`, `-Wunused-local-class-method`, and `-Wunused-constructor` for detecting various kinds of unused tasks and functions
+* Added `-Wunused-class-property`, `-Wunused-but-set-property`, `-Wunassigned-property`, `-Wunused-local-class-property`, `-Wunused-but-set-local-property`, and `-Wunassigned-local-property` for detecting various forms of unused class properties
+* Added `-Wunused-package-var`, `-Wunused-package-typedef`, `-Wunused-package-parameter`, `-Wunused-package-type-parameter`, `-Wunused-package-assertion-decl`, and `-Wunused-package-subroutine` for detecting unused items declared inside packages
+* `-Wunconnected-port` has been split into three separate warnings: `-Wunconnected-input-port`, `-Wunconnected-output-port`, and `-Wunconnected-inout-port`, for more precise control over which warnings you want to see. The original `-Wunconnected-port` is now a group that controls all three at once, so existing command lines should continue to function the same way.
+* Added `-Wempty-input-connection`, `-Wempty-output-connection`, and `-Wempty-inout-connection` (grouped under `-Wempty-connection`) which warn about port connections that are explicitly connected to nothing
+* Added [-Wrandomize-var-shadow](https://sv-lang.com/warning-ref.html#randomize-var-shadow) which detects inline randomize constraint blocks that use class members which shadow local variable declarations
+* Added [-Wshadow-value](https://sv-lang.com/warning-ref.html#shadow-value) and [-Wshadow-hierarchy](https://sv-lang.com/warning-ref.html#shadow-hierarchy) which detect declarations that shadow others with the same name from outer scopes
+* Added [-Wshadow-property](https://sv-lang.com/warning-ref.html#shadow-property) which warns about class properties that shadow members of a base class
+* Added [-Winc-dec-bit](https://sv-lang.com/warning-ref.html#inc-dec-bit) which detects increment and decrement of single-bit operands
+* Added [-Wdangling-else](https://sv-lang.com/warning-ref.html#dangling-else) which detects confusingly nested if/else blocks that are missing begin/end delimiters
+* Added [-Wshift-count-overflow](https://sv-lang.com/warning-ref.html#shift-count-overflow) and [-Wshift-count-negative](https://sv-lang.com/warning-ref.html#shift-count-negative) which warn about potentially invalid constant shift values
+* Added [-Wconstraint-func-cycle](https://sv-lang.com/warning-ref.html#constraint-func-cycle) and [-Wonstraint-solve-cycle](https://sv-lang.com/warning-ref.html#constraint-solve-cycle) which warn about potential cycles in constraint function calls and solve-before directives
+* Added [-misleading-indentation](https://sv-lang.com/warning-ref.html#misleading-indentation) which warns about statements that are indented in a way that makes them look like they belong to a preceding loop or condition when they actually don't
+* Added [-Wnewline-eof](https://sv-lang.com/warning-ref.html#newline-eof) which warns for files that do not end in a newline character
+* Added [-Wdynamic-cast-const](https://sv-lang.com/warning-ref.html#dynamic-cast-const) which warns for uses of `$cast` that are statically known to always succeed or always fail
+* Added [-Wupward-name](https://sv-lang.com/warning-ref.html#upward-name) which warns for uses of upward hierarchical names
+* Added [-Wfork-loop-var](https://sv-lang.com/warning-ref.html#fork-loop-var) which warns for suspicious uses of `for` or `foreach` loop variables inside nested fork-join blocks
+* Added [-Wloop-var-modify](https://sv-lang.com/warning-ref.html#loop-var-modify) which warns for suspicious modifications of `for` loop variables inside the loop body
+* Added [-Wloop-cond-not-modified](https://sv-lang.com/warning-ref.html#loop-cond-not-modified) which warns when none of the variables in a `for` loop condition are modified by the loop itself
+* Added [-Wnull-port](https://sv-lang.com/warning-ref.html#null-port) which warns for declarations of non-ANSI "null" ports
+* Added [-Wdivide-by-zero](https://sv-lang.com/warning-ref.html#divide-by-zero) which warns when the right hand side of a division or modulo operator is a constant zero
+* Added [-Wcolon-plus](https://sv-lang.com/warning-ref.html#colon-plus) which warns about the sequence `:+` inside a range select expression, where probably the intent was to use `+:` for ascending selection
+* Added [-Winit-self](https://sv-lang.com/warning-ref.html#init-self) when a variable's initializer refers to itself
+* Added [-Wbits-of-integer-constant](https://sv-lang.com/warning-ref.html#bits-of-integer-constant) which warns about bugprone use of $bits on integer constants (thanks to @AndrewNolte)
+* Added a `--dir-prefix` option to specify directory prefixes to try when resolving relative source file paths
+* Added a `--max-enum-values` option that limits the maximum number of enum elements in a single declaration, to prevent typos in enum range members from causing the compiler to run out of memory
+* Added `--max-constant-size` which allows controlling the maximum size of constant values allocated during elaboration, to avoid runaway compiler memory usage
+* The `--cst-json-mode` flag takes a new option `no-whitespace` which includes trivia but filters out whitespace and newlines (thanks to @AndrewNolte)
+* The preprocessor now detects the common `` `ifndef / `define `` header guard pattern and avoids opening the include file entirely if it sees an include directive for it again. Also added [-Wheader-guard](https://sv-lang.com/warning-ref.html#header-guard) which detects potential mistakes in the header guard names.
+* Added a new flag `--allow-macro-trailing-space` which allows trailing whitespace after line continuations in macro definitions (thanks to @mampcs)
+* [Compilation unit listings](https://sv-lang.com/user-manual.html#unit-listing) now accept local `-W` settings to control warnings issued for just that compilation unit
+* Added `--preprocess-source` which includes source file and line info in the output when running the preprocessor standalone, with e.g. `--preprocess` (thanks to @mampcs)
+* Added `--group-macros-by-file` which groups macros by file when outputting them via `--macros-only` (thanks to @mampcs)
+* Added `--show-parsed-files` which prints debug information about which files are parsed and what kind of file they are (thanks to @mampcs)
+* Added `--incdir-first` which reverses the include file search order so user-specified directories (+incdir/-I) are checked before the local directory of the including file (thanks to @mampcs)
+* Added `--allow-missing-protected-scope-end` which allows slang to work around encrypted code blocks in third party headers that mistakenly hide the scope end keyword of their containing module/interface/program (thanks to @mampcs)
+* Added `--allow-lib-module-redef` which allows redefining a module, interface, program, or primitive with the same name in the same library (thanks to @mampcs)
+* Added `--time-stats` which prints high-level time profiling stats and peak memory usage when running the slang frontend
+* Added `--memory-stats` which prints a detailed report of compiler memory usage
+* Added `--define-system-task` which allows defining custom system tasks and functions via the command line
+
+### Improvements
+* Made several improvements to data flow modeling in the analysis pass to better represent SystemVerilog control flow
+  * Loop unrolling works in more cases; `for` loops that did not declare their loop variable but refer to an automatic local variable now work as expected
+  * Improved determination of whether a `for` loop is guaranteed to execute at least once, in cases where step or stop condition expressions are omitted
+  * Conditional expressions that have a known ambiguous `x` condition are now modeled correctly
+* Added AST serialization for default disable directives and default / global clocking block modifiers
+* The error issued for incorrect range select ordering is now suppressed inside conditional blocks that are statically known to be untaken
+* Tweaked the behavior of how `--allow-use-before-declare` works when there are matching declarations in outer scopes, to better match other tools (thanks to @mampcs)
+* The parser will now perform typo correction when looking for a keyword and finding a closely named identifier instead
+* Dotted lookups will now perform typo correction and provide a note when a closely named member is found
+* The SyntaxRewriter API has gained support for rewriting individual tokens (thanks to @ilthraim)
+* Source location and context are now included when reporting errors in command files and compilation unit listings
+* Made many changes to optimize memory usage -- syntax trees are now significantly more compact, leading to a 20-30% decrease in memory usage for large designs
+* Renamed ConstantRange::isLittleEndian -> isDescending, cleaned up a few other uses of the term 'endian' when refering to bit range ordering
+* slang now properly reports an error if a source file maps to more than one source library with equal priority
+* Made several improvements to how type names are rendered in diagnostic output
+* Improved how large bit vectors that are all Xs or Zs are rendered in diagnostic output
+* defparam and bind resolution now has a prepass that helps filter out irrelevant portions of the design, to optimize performance and memory usage
+* Ports on interfaces that were only referenced by unused modports will now trigger `-Wunused-port` warnings (thanks to @hankhsu1996)
+
+### Fixes
+* Fixed an issue where comments immediately preceeding a disabled `` `endif `` directive could erroneously show up in preprocessed output
+* Fixed a preprocessor crash with invalid macro usage syntax when the macro contains a stringify operator
+* Fixed a preprocessor bug where nested macros containing ifdef directives could be expanded improperly
+* Fixed a preprocessor bug during macro expansion when a macro argument immediately follows a line continuation character on a separate line
+* Fixed a bug in macro token concatenation where the second token needs to be split and re-lexed to function properly
+* Fixed a bug where multiple layers of include files originating from within a macro expansion would not expand in the correct order (thanks to @mampcs)
+* Fixed parsing of 1800-2023 preprocessor conditional expressions; precedence and associativity of operators was not handled correctly
+* Fixed macro argument expansion to apply macro ops (such as concatenation) before expanding nested macros
+* Unary increment and decrement operators now properly count as a driver for their operand, for purposes of multi-driver checking
+* Fixed miscompilation when a generic class with a virtual interface type parameter declared within a package triggers an import lookup within that package
+* Fixed a crash when a class declares an `extern` pre/post_randomize method but doesn't provide a body
+* Fixed a bug where instances of the same generic class were always considered matching even if they had different parameter values
+* Fixed a bug where type parameters of generic base classes could fail to resolve in certain rare cases
+* Fixed a bug where various operations on class types (such as computing their bitstream width) would not take into account base class properties
+* Fixed a bug with looking up the return type of implicit function return value variables when `--allow-use-before-declare` is used
+* Fixed `-Wcomparison-mismatch` to not warn when comparing unpacked array types with the same width but differing range indices
+* Fixed data flow analysis to work correctly with locally declared static variables in procedural blocks
+* Fixed string format diagnostic locations when the format string contains escape characters
+* Fixed constant evaluated string formatting when the format string is triple quoted or contains escape characters
+* Fixed the handling of command line provided parameter overrides involving assignment patterns and unpacked array concatenations
+* Fixed constant evaluation of unpacked array parameters set via defparam
+* Fixed a bug in how packed arrays are split across instance array port connections (thanks to @CheeksTheGeek)
+* Fixed ICE from formal argument declarations that have a missing direction due to invalid syntax
+* Fixed a malformed diagnostic when parsing duplicate empty function specifiers
+* Fixed ASTVisitor to visit out-of-block method definitions
+* Fixed a bug where HierarchicalValueExpressions representing virtual interface accesses did not have a valid source range (thanks to @Lauriethefish)
+* Fixed a bug that disallowed non-blocking assignments to `ref static` variables (thanks to @x-Aksara-x)
+* Fixed a spurious error issued when waiting on a clocking block event and using the `iff` operator
+* Fixed a bug where calling void-returning system functions during constant evaluation would skip further constant evaluation in that function
+* Fixed a spurious error when ignoring duplicate definitions (with -Wno-duplicate-definition) that are detected and instantiated as valid top modules
+* Fixed a bug where `super.new()` calls were not allowed as the first item in a sequential block within a class constructor (thanks to @mampcs)
+* Fixed a bug where lvalue concatenation assignments would lose their signedness flag in constant evaluation
+* Correctly disallow the `integer` and `time` types as DPI return types
+* Function AST nodes no longer create a return value variable when the function returns void
+* Fixed a bug that disallowed use of the class `this` handle in extern method default value expressions
+* Fixed a spurious error with assignment pattern port connections in uninstantiated contexts
+* Fixed a spurious error when assigning interface instances to virtual interface variables in uninstantiated contexts
+* The AST representation of virtual interface accesses has been reworked to correctly indicate their runtime semantics
+* Fixed `/*` in libmap file paths being treated as block comments (thanks to @mampcs)
+* Fixed a crash when ClassType::getBaseConstructorCall was called on a built-in std class type
+* Fixed a spurious error issued for range selects of single-bit packed arrays
+* Fixed AST JSON serialization with `--ast-json-detailed-types` to not recursively serialize the same class definition (thanks to @usfkotb)
+* Fixed a bug in type compatibility checking for classes that implement interfaces indirectly via a base class
+* Fixed a bug in type compatibility checking for unbound / uninstantiated instances of generic classes
+* Fixed a bug in enum member overflow checking when the enum base type is signed
+
+### Tools & Bindings
+#### pyslang
+* Added FlowAnalysis and LSPUtilities bindings (thanks to @CheeksTheGeek)
+* Added SyntaxFactory bindings (thanks to @CheeksTheGeek)
+* Organized pyslang bindings into submodules (thanks to @CheeksTheGeek)
+* Fixed stub generation for the pyslang bindings (thanks to @ilthraim)
+* Added a new `lookup_table` parameter to AST and syntax node visitors that allow providing a dict of handlers for much faster visitation callbacks (thanks to @jacbro2021)
+* Fixed a lifetime annotation issue with Driver::createCompilation (thanks to @hankhsu1996)
+* Added bindings for DriverSource and DriverFlags (thanks to @sai-cogni)
+* Exposed the `thisVar` property in SubroutineSymbol and ClassType bindings (thanks to @CheeksTheGeek)
+
+#### slang-tidy
+* Added a new LoopBeforeReset check (thanks to @spomata)
+* Fixed the diagnostic issued for the AlwaysFFAssignmentOutsideConditional check (thanks to @spomata)
+
+
+## [v10.0] - 2026-01-15
 ### Language Support
 * Implemented all of the rules related to assertion local variable definite assignment flow. slang will now diagnose use of assertion locals before they have been assigned, according to the rules in the LRM.
 * Explicit package export directives now correctly require a corresponding import (wildcard or explicit)
@@ -13,6 +236,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Covergroup formal arguments are now correctly always considered `const`
 * Checker arguments that reference automatic variables or have const casts are now correctly disallowed from being used in procedural code
 * Checker procedures are now correctly disallowed from referencing covergroup types
+* Removed the restriction that covergroup expressions must be constant expressions -- the implementation was buggy, other tools don't implement it, and the details in the LRM are not well defined
+* Modport ports now correctly require that their target references are members of their parent interface
+* Explicit port expressions now correctly require that their target references are members of their parent module
+* Tasks that contain blocking timing controls are now correctly disallowed from being called from always_comb/latch/ff blocks
 
 ### Notable Breaking Changes
 * AST serialization: typedefs and enum type references are now printed as links to the original definition instead of repeating the type for each usage
@@ -29,24 +256,65 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Added a `--depfile-trim` option to remove dependencies from the written depfile that aren't actually used in the design (thanks to @AndrewNolte)
 * The `--compat` flag now accepts `all` to enable all compatibility flags at once, to maximize the chances that slang will accept your code that works with other tools but may not comply with the LRM
 * Added a `--disable-local-includes` flag to mimic the behavior of VCS where `` `include `` directives don't search relative to the including file
+* The `--std` argument now accepts `1364-2005` as a value, which disables all SystemVerilog keywords during parsing for Verilog compatibility (thanks to @povik)
+* Added a `--map-keyword-version` option to allow overriding language keyword versions for specified groups of files (thanks to @likeamahoney)
 
 ### Improvements
 * -Wcase-dup no longer warns if the duplicate items are all constant case items that don't match a known constant case expression
 * Performing concatenation of two slashes in a macro expansion now expands to a line comment, matching the behavior of other tools
 * The preprocessor will now implicitly concatenate tokens that result from back-to-back macro expansions even if there is no explicit macro concatenation operator used, to increase compatibility with other tools
+* Instances that have type parameters set to identical but not technically "matching" struct types are now eligible for instance caching, which can speed up elaboration of certain designs
+* -Wpacked-array-conv now also applies to cases where one side of the assignment has a multi-dimensional array type and the other does not (previously both sides had to be multi-dimensional arrays)
+* The AnalysisManager API has been reworked to allow providing listener callbacks for various analysis events, to retrieve the results of assertion analysis, and to allow substituting custom data flow analysis passes in place of the default
+* Duplicate packages are now diagnosed with -Wduplicate-definition, allowing them to be downgraded to a warning just like duplicate modules (thanks to @sjalloq)
+* Improved the diagnostic message and source ranges reported for duplicate drivers involving modport ports to be more clear about where the connections are going
+* The preprocessor now supports processing `` `include `` directives inside of macro expansions
+* Drivers through ref ports are now correctly applied to their connections hierarchically
+* Warnings related to wildcard port connections now contain additional context showing which port triggered the warning
+* Made several tweaks to slightly improve defparam and bind evaluation performance
+* The AST for multi-ports has been reworked to represent each sub port connection expression separately
+* Selection of elements of dynamic types is now a downgradeable warning (`-Wdynamic-non-procedural`) for compatibility with other tools
+* AST JSON serialization for scalar types now contains an isSigned field (thanks to @dinoruic)
 
 ### Fixes
 * Unnamed covergroup types now print with a placeholder name in diagnostics and AST dumping instead of just an empty string
 * Fixed a bug where sequences and properties with local variable formal arguments would rewrite their formal args when expanding, potentially resulting in spurious errors
 * Fixed source ranges written by AST serialization for AST nodes that don't have syntax pointers
 * Fixed lint-only mode to not run the analysis pass
+* Fixed a crash in analysis that could occur after exiting elaboration early due to hitting the configured error limit
+* Fixed the source ranges of chained select expression AST nodes
+* Fixed a preprocessor crash when encountering certain specially crafted malformed pragma directives
+* Fixed expansion of `__FILE__` and `__LINE__` macros to use proper source locations (thanks to @g4rry1)
+* Fixed a spurious error when referring to a generic class declared within a package using an explicit package scope qualifier
+* Fixed a spurious error when an uninstantiated module's parameter values are set using an assignment pattern expression
+* Fixed a spurious error when an uninstantiated module references an unknown instance hierarchically and `--disallow-refs-to-unknown-instances` is in use
+* Fixed several issues where driver analysis did not correctly apply through non-trivial modport port expressions
+* Fixed a parser bug that misparsed delay controls followed by an assignment pattern expression (thanks to @sjalloq)
+* Fixed the AST representation of implicit named port connections for output (and inout) ports to always use an AssignmentExpression
+* Fixed several bugs with direction checking of explicit ANSI port connections
+* Fixed a bug where multi-driven diagnostics could print an expression path with "<unset>" as index values instead of the correct constant value
+* Fixed ICE when sequence and property arguments refer to themselves in their default expressions
+* Fixed ICE when pattern case items have a statement label
+* Fixed ICE when recursive module instances contain certain kinds of variable name conflicts
+* Fixed ICE involving unnamed recursive module instances
+* Fixed a case where the max instance hierarchy depth wasn't being enforced, leading to infinite recursion
+* Fixed ICE when a modport export's method name is empty
+* Fixed ICE involving virtual interface types where the interface instance contains a self-referential virtual interface member
+* Fixed ICE involving analysis of hierarchical calls to subroutines inside cached instance symbols
+* Fixed handling of file patterns starting with recursive wildcards -- they were canonicalized incorrectly on some platforms
+* Fixed infinite loop caused by recursive typedef references across packages
+* Fixed --allow-use-before-declare to also apply for references to parameters
+* Fixed a crash when querying bitstream width of classes containing properties with unpacked arrays of their containing class type
 
 ### Tools & Bindings
 #### pyslang
 * Upgraded to pybind11 3.0, which brings improved performance, smart_holder and native_enum features
+* The `Lexer` class is now exposed to the Python bindings (thanks to @paulgrahek)
+* Fixed binding of Diagnostic arguments, exposed DiagnosticEngine::formatArg
 
 #### slang-tidy
 * The `--skip-file` and `--skip-path` slang-tidy options now also imply `--suppress-warnings` for those same paths
+* Fixed the undriven range checker to handle variables with non-zero lower bounds in their range (thanks to @jameshanlon)
 
 #### rewriter
 * Added a `--squash-blanklines` option to remove extra blank lines in the rewritten output (thanks to @AndrewNolte)

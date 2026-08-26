@@ -5,7 +5,7 @@
 #include "TidyDiags.h"
 #include "fmt/color.h"
 #include <algorithm>
-#include <regex>
+#include <boost_regex.hpp>
 
 #include "slang/syntax/AllSyntax.h"
 
@@ -14,13 +14,13 @@ using namespace slang::ast;
 
 namespace unused_sensitive_signal {
 
-struct MainVisitor : public TidyVisitor, ASTVisitor<MainVisitor, true, true, false, true> {
+struct MainVisitor : public TidyVisitor, ASTVisitor<MainVisitor, VisitFlags::AllCanonical> {
     explicit MainVisitor(Diagnostics& diagnostics) : TidyVisitor(diagnostics) {}
 
     struct CollectAllIdentifiers
-        : public slang::ast::ASTVisitor<CollectAllIdentifiers, true, true, false, true> {
+        : public slang::ast::ASTVisitor<CollectAllIdentifiers, VisitFlags::AllCanonical> {
         void handle(const slang::ast::NamedValueExpression& expression) {
-            if (auto* symbol = expression.getSymbolReference(); symbol && expression.syntax) {
+            if (auto symbol = expression.getSymbolReference(); symbol && expression.syntax) {
                 identifiers.push_back(
                     std::make_pair(symbol->name, getExpressionSourceLocation(expression).value()));
             }
@@ -57,8 +57,8 @@ struct MainVisitor : public TidyVisitor, ASTVisitor<MainVisitor, true, true, fal
         for (auto signal : unusedSignals) {
             // either match against clkName or against the regex pattern
             if (signal.first != config.getCheckConfigs().clkName &&
-                !(std::regex_match(std::string(signal.first),
-                                   config.getCheckConfigs().clkNameRegexPattern)))
+                !(boost::regex_match(std::string(signal.first),
+                                     config.getCheckConfigs().clkNameRegexPattern)))
                 diags.add(diag::UnusedSensitiveSignal, signal.second) << signal.first;
         }
     }

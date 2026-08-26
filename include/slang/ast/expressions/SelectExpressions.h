@@ -12,6 +12,8 @@
 
 namespace slang::ast {
 
+class TypeProvider;
+
 /// Represents a single element selection expression.
 class SLANG_EXPORT ElementSelectExpression final : public Expression {
 public:
@@ -36,9 +38,11 @@ public:
     LValue evalLValueImpl(EvalContext& context) const;
     bool requireLValueImpl(const ASTContext& context, SourceLocation location,
                            bitmask<AssignFlags> flags) const;
+    bool isEquivalentImpl(const ElementSelectExpression& rhs) const;
 
     std::optional<ConstantRange> evalIndex(EvalContext& context, const ConstantValue& val,
-                                           ConstantValue& associativeIndex, bool& softFail) const;
+                                           ConstantValue& associativeIndex, bool& softFail,
+                                           bool allowQueueAppend = false) const;
 
     void serializeTo(ASTSerializer& serializer) const;
 
@@ -46,8 +50,8 @@ public:
                                   const syntax::ExpressionSyntax& syntax, SourceRange fullRange,
                                   const ASTContext& context);
 
-    static Expression& fromConstant(Compilation& compilation, Expression& value, int32_t index,
-                                    const ASTContext& context);
+    static Expression& fromConstant(const TypeProvider& typeProvider, Expression& value,
+                                    int32_t index, const ASTContext& context);
 
     static bool isKind(ExpressionKind kind) { return kind == ExpressionKind::ElementSelect; }
 
@@ -94,6 +98,7 @@ public:
     LValue evalLValueImpl(EvalContext& context) const;
     bool requireLValueImpl(const ASTContext& context, SourceLocation location,
                            bitmask<AssignFlags> flags) const;
+    bool isEquivalentImpl(const RangeSelectExpression& rhs) const;
 
     std::optional<ConstantRange> evalRange(EvalContext& context, const ConstantValue& val,
                                            bool enforceBounds) const;
@@ -104,8 +109,9 @@ public:
                                   const syntax::RangeSelectSyntax& syntax, SourceRange fullRange,
                                   const ASTContext& context);
 
-    static Expression& fromConstant(Compilation& compilation, Expression& value,
-                                    ConstantRange range, const ASTContext& context);
+    static Expression& fromConstant(const TypeProvider& typeProvider, Expression& value,
+                                    ConstantRange range, const ASTContext& context,
+                                    RangeSelectionKind selectionKind = RangeSelectionKind::Simple);
 
     static bool isKind(ExpressionKind kind) { return kind == ExpressionKind::RangeSelect; }
 
@@ -145,6 +151,7 @@ public:
     LValue evalLValueImpl(EvalContext& context) const;
     bool requireLValueImpl(const ASTContext& context, SourceLocation location,
                            bitmask<AssignFlags> flags) const;
+    bool isEquivalentImpl(const MemberAccessExpression& rhs) const;
 
     void serializeTo(ASTSerializer& serializer) const;
 
@@ -152,7 +159,7 @@ public:
         Compilation& compilation, Expression& expr, const LookupResult::MemberSelector& selector,
         const syntax::InvocationExpressionSyntax* invocation,
         const syntax::ArrayOrRandomizeMethodExpressionSyntax* withClause, const ASTContext& context,
-        bool isFromLookupChain);
+        bool isFromLookupChain, bool isDottedAccess);
 
     static Expression& fromSyntax(Compilation& compilation,
                                   const syntax::MemberAccessExpressionSyntax& syntax,

@@ -114,7 +114,7 @@ public:
     SVInt& integer() & { return std::get<SVInt>(value); }
     const SVInt& integer() const& { return std::get<SVInt>(value); }
     SVInt integer() && { return std::get<SVInt>(std::move(value)); }
-    SVInt integer() const&& { return std::get<SVInt>(std::move(value)); }
+    SVInt integer() const&& { return std::get<SVInt>(value); }
 
     real_t real() const { return std::get<real_t>(value); }
     shortreal_t shortReal() const { return std::get<shortreal_t>(value); }
@@ -125,22 +125,22 @@ public:
     std::string& str() & { return std::get<std::string>(value); }
     const std::string& str() const& { return std::get<std::string>(value); }
     std::string str() && { return std::get<std::string>(std::move(value)); }
-    std::string str() const&& { return std::get<std::string>(std::move(value)); }
+    std::string str() const&& { return std::get<std::string>(value); }
 
     Map& map() & { return std::get<Map>(value); }
     const Map& map() const& { return std::get<Map>(value); }
     Map map() && { return std::get<Map>(std::move(value)); }
-    Map map() const&& { return std::get<Map>(std::move(value)); }
+    Map map() const&& { return std::get<Map>(value); }
 
     Queue& queue() & { return std::get<Queue>(value); }
     const Queue& queue() const& { return std::get<Queue>(value); }
     Queue queue() && { return std::get<Queue>(std::move(value)); }
-    Queue queue() const&& { return std::get<Queue>(std::move(value)); }
+    Queue queue() const&& { return std::get<Queue>(value); }
 
     Union& unionVal() & { return std::get<Union>(value); }
     const Union& unionVal() const& { return std::get<Union>(value); }
     Union unionVal() && { return std::get<Union>(std::move(value)); }
-    Union unionVal() const&& { return std::get<Union>(std::move(value)); }
+    Union unionVal() const&& { return std::get<Union>(value); }
 
     ConstantValue getSlice(int32_t upper, int32_t lower, const ConstantValue& defaultValue) const;
 
@@ -185,6 +185,8 @@ public:
 private:
     Variant value;
 };
+
+extern const ConstantValue NullConstant;
 
 /// Represents a SystemVerilog associative array, for use during constant evaluation.
 struct SLANG_EXPORT AssociativeArray : public std::map<ConstantValue, ConstantValue> {
@@ -340,14 +342,15 @@ struct SLANG_EXPORT ConstantRange {
     /// the bounds are specified.
     int32_t upper() const { return std::max(left, right); }
 
-    /// "Little endian" bit order is when the msb is >= the lsb.
-    bool isLittleEndian() const { return left >= right; }
+    /// Descending bit order is when the msb is >= the lsb (sometimes referred
+    /// to as "little endian" bit range).
+    bool isDescending() const { return left >= right; }
 
     /// Reverses the bit ordering of the range.
     [[nodiscard]] ConstantRange reverse() const { return {right, left}; }
 
     /// Selects a subrange of this range, correctly handling both forms of
-    /// bit endianness. This will assert that the given subrange is not wider.
+    /// range ordering. This will assert that the given subrange is not wider.
     [[nodiscard]] ConstantRange subrange(ConstantRange select) const;
 
     /// Return the intersection range with other.
@@ -370,7 +373,7 @@ struct SLANG_EXPORT ConstantRange {
 
     /// Creates a constant range based on a left / right value that is either indexed up
     /// or indexed down. This implements the SystemVerilog range operators of '+:' and '-:'
-    static std::optional<ConstantRange> getIndexedRange(int32_t l, int32_t r, bool littleEndian,
+    static std::optional<ConstantRange> getIndexedRange(int32_t l, int32_t r, bool descending,
                                                         bool indexedUp);
 
     std::string toString() const;

@@ -7,12 +7,15 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/Symbol.h"
 
+#include "../text/FormatBuffer.h"
+
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/types/Type.h"
+#include "slang/ast/types/TypePrinter.h"
 #include "slang/text/CharInfo.h"
-#include "slang/text/FormatBuffer.h"
+#include "slang/util/SmallMap.h"
 
 namespace {
 
@@ -87,7 +90,8 @@ const DeclaredType* Symbol::getDeclaredType() const {
     }
 }
 
-static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) {
+static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer,
+                                    SmallSet<const Symbol*, 4>& visited) {
     auto scope = symbol.getParentScope();
     auto current = &symbol;
     if (scope && symbol.kind == SymbolKind::InstanceBody) {
@@ -97,10 +101,15 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
         // on-the-fly module recovery may lack a parent instance. Fall back to the body
         // itself so the path ends with the module definition name rather
         // than dereferencing a null pointer.
-        if (parentInst) {
+        if (parentInst)
             current = parentInst;
-            scope = current->getParentScope();
+
+        if (!visited.emplace(current).second) {
+            buffer.append("<recursive>");
+            return;
         }
+
+        scope = current->getParentScope();
     }
     else if (scope && symbol.kind == SymbolKind::CheckerInstanceBody) {
         auto* parentInst = symbol.as<CheckerInstanceBodySymbol>().parentInstance;
@@ -115,7 +124,7 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
     if (scope) {
         auto& parent = scope->asSymbol();
         if (parent.kind != SymbolKind::Root && parent.kind != SymbolKind::CompilationUnit) {
-            getHierarchicalPathImpl(parent, buffer);
+            getHierarchicalPathImpl(parent, buffer, visited);
             if (parent.kind == SymbolKind::Package || parent.kind == SymbolKind::ClassType ||
                 parent.kind == SymbolKind::CovergroupType) {
                 separator = "::"sv;
@@ -160,7 +169,7 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
     }
     else if (current->kind == SymbolKind::GenerateBlock) {
         auto& block = current->as<GenerateBlockSymbol>();
-        if (auto index = block.arrayIndex) {
+        if (auto index = block.getArrayIndex()) {
             buffer.append("[");
             buffer.append(index->toString(LiteralBase::Decimal, false));
             buffer.append("]");
@@ -186,19 +195,10 @@ static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) 
     }
     else if (current->kind == SymbolKind::ClassType) {
         auto& classType = current->as<ClassType>();
-        if (!classType.genericParameters.empty()) {
-            buffer.append("#(");
-            for (size_t i = 0; i < classType.genericParameters.size(); i++) {
-                if (i > 0)
-                    buffer.append(",");
-
-                auto& param = *classType.genericParameters[i];
-                if (param.kind == SymbolKind::TypeParameter)
-                    buffer.append(param.as<TypeParameterSymbol>().targetType.getType().toString());
-                else
-                    buffer.append(param.as<ParameterSymbol>().getValue().toString());
-            }
-            buffer.append(")");
+        if (classType.genericClass) {
+            TypePrinter printer;
+            printer.appendParameters(classType.genericParameters, false);
+            buffer.append(printer.toString());
         }
     }
 }
@@ -211,7 +211,8 @@ std::string Symbol::getHierarchicalPath() const {
 
 void Symbol::appendHierarchicalPath(std::string& result) const {
     FormatBuffer buffer;
-    getHierarchicalPathImpl(*this, buffer);
+    SmallSet<const Symbol*, 4> visited;
+    getHierarchicalPathImpl(*this, buffer, visited);
     if (buffer.empty())
         buffer.append("$unit");
 

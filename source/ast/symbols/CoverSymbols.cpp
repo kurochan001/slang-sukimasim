@@ -10,6 +10,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/TimingControl.h"
+#include "slang/ast/TypeProvider.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
@@ -24,6 +25,7 @@
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/numeric/SVInt.h"
 #include "slang/syntax/AllSyntax.h"
+#include "slang/util/String.h"
 
 namespace {
 
@@ -169,6 +171,7 @@ static void addProperty(Scope& scope, std::string_view name, VariableLifetime li
     auto& prop = *comp.emplace<ClassPropertySymbol>(name, SourceLocation::NoLocation, lifetime,
                                                     Visibility::Public);
     prop.setType(structBuilder.type);
+    prop.flags |= VariableFlags::CompilerGenerated;
     scope.addMember(prop);
 }
 
@@ -220,6 +223,8 @@ CovergroupBodySymbol::CovergroupBodySymbol(Compilation& comp, SourceLocation loc
     option.addField("comment"sv, string_t);
     option.addField("at_least"sv, int_t);
     option.addField("auto_bin_max"sv, int_t, VariableFlags::ImmutableCoverageOption);
+    if (comp.hasFlag(CompilationFlags::AllowCrossAutoBinMax))
+        option.addField("cross_auto_bin_max"sv, int_t, VariableFlags::ImmutableCoverageOption);
     option.addField("cross_num_print_missing"sv, int_t);
     option.addField("cross_auto_delete"sv, bit_t);
     option.addField("get_cov_cnt"sv, bit_t);
@@ -411,7 +416,7 @@ void CovergroupType::inheritMembers(function_ref<void(const Symbol&)> insertCB) 
         // provided insertion callback. We insert them as TransparentMemberSymbols
         // so that we can trace a path back to the actual location they are declared.
         auto wrapper = comp.emplace<TransparentMemberSymbol>(*toWrap);
-        body.insertMember(wrapper, body.lastBuiltinMember, true, false);
+        body.insertMember(wrapper, body.lastBuiltinMember, false);
     }
 
     // Also inherit any argument symbols are in the base covergroup type itself,
@@ -460,7 +465,7 @@ const TimingControl* CovergroupType::getCoverageEvent() const {
 }
 
 ConstantValue CovergroupType::getDefaultValueImpl() const {
-    return ConstantValue::NullPlaceholder{};
+    return NullConstant;
 }
 
 void CovergroupType::serializeTo(ASTSerializer& serializer) const {
@@ -990,26 +995,22 @@ CoverpointSymbol& CoverpointSymbol::fromSyntax(const Scope& scope, const Coverpo
     return *result;
 }
 
-CoverpointSymbol& CoverpointSymbol::fromImplicit(const Scope& scope,
-                                                 const NameSyntax& syntax) {
-    // Derive a human-friendly name for the implicit coverpoint. For plain
-    // identifiers we use the identifier text; for hierarchical / scoped
-    // references we fall back to the leading token so the symbol still has
-    // a stable, non-empty name even when the parse tree is deeper.
-    std::string_view name;
-    SourceLocation loc = syntax.getFirstToken().location();
+CoverpointSymbol& CoverpointSymbol::fromImplicit(const Scope& scope, const NameSyntax& syntax) {
+    auto loc = syntax.getFirstToken().location();
+    auto& comp = scope.getCompilation();
 
-    if (auto* idName = syntax.as_if<IdentifierNameSyntax>()) {
-        name = idName->identifier.valueText();
-        loc = idName->identifier.location();
+    std::string_view name;
+    if (syntax.kind == SyntaxKind::IdentifierName) {
+        name = syntax.as<IdentifierNameSyntax>().identifier.valueText();
     }
     else {
-        name = syntax.getFirstToken().valueText();
+        // '.' is replaced with '_' when naming the implicit coverpoint
+        auto str = syntax.toString();
+        std::ranges::replace(str, '.', '_');
+        name = toStringView(comp.copyFrom(std::span<const char>(str.data(), str.size())));
     }
 
-    auto& comp = scope.getCompilation();
     auto result = comp.emplace<CoverpointSymbol>(comp, name, loc);
-
     result->isImplicit = true;
     result->declaredType.setTypeSyntax(comp.createEmptyTypeSyntax(loc));
     result->declaredType.setInitializerSyntax(syntax, loc);
@@ -1077,6 +1078,8 @@ CoverCrossSymbol::CoverCrossSymbol(Compilation& comp, std::string_view name, Sou
     option.addField("goal"sv, int_t);
     option.addField("comment"sv, string_t);
     option.addField("at_least"sv, int_t);
+    if (comp.hasFlag(CompilationFlags::AllowCrossAutoBinMax))
+        option.addField("cross_auto_bin_max"sv, int_t, VariableFlags::ImmutableCoverageOption);
     option.addField("cross_num_print_missing"sv, int_t);
     option.addField("cross_auto_delete"sv, bit_t);
     option.addField("get_cov_cnt"sv, bit_t);
@@ -1115,12 +1118,17 @@ CoverCrossSymbol& CoverCrossSymbol::fromSyntax(const Scope& scope, const CoverCr
         // the implicit coverpoint path so the lookup is consistent with
         // IEEE 1800-2023 §19.6.1.
         const Symbol* symbol = nullptr;
-        if (auto* idItem = item->as_if<IdentifierNameSyntax>()) {
-            symbol = scope.find(idItem->identifier.valueText());
-        }
+        if (item->kind == SyntaxKind::IdentifierName)
+            symbol = scope.find(item->as<IdentifierNameSyntax>().identifier.valueText());
 
         if (symbol && symbol->kind == SymbolKind::Coverpoint) {
             targets.push_back(&symbol->as<CoverpointSymbol>());
+        }
+        else if (symbol && symbol->kind == SymbolKind::CoverCross) {
+            // If it's a cross, then we'll add all the targets of the cross.
+            auto& cross = symbol->as<CoverCrossSymbol>();
+            for (auto cp : cross.targets)
+                targets.push_back(cp);
         }
         else {
             // If we didn't find a coverpoint, create one implicitly
@@ -1259,6 +1267,12 @@ BinsSelectExpr& ConditionBinsSelectExpr::fromSyntax(const BinsSelectConditionExp
         return badExpr(comp, nullptr);
 
     auto sym = nameExpr.getSymbolReference();
+    if (sym && sym->kind == SymbolKind::CoverCross) {
+        auto& diag = context.addDiag(diag::CrossIdentInBinsof, syntax.name->sourceRange());
+        diag << sym->name;
+        diag.addNote(diag::NoteDeclarationHere, sym->location);
+        return *comp.emplace<ConditionBinsSelectExpr>(*sym);
+    }
     if (!sym || (sym->kind != SymbolKind::Coverpoint &&
                  (sym->kind != SymbolKind::CoverageBin ||
                   sym->getParentScope()->asSymbol().kind != SymbolKind::Coverpoint))) {

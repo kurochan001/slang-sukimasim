@@ -7,14 +7,16 @@
 //------------------------------------------------------------------------------
 #include "slang/driver/SourceLoader.h"
 
-#include <BS_thread_pool.hpp>
-#include <fmt/core.h>
+#include <fmt/format.h>
+#include <iterator>
 
 #include "slang/parsing/Preprocessor.h"
 #include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/SourceManager.h"
+#include "slang/util/SmallVector.h"
 #include "slang/util/String.h"
+#include "slang/util/ThreadPool.h"
 
 namespace fs = std::filesystem;
 
@@ -72,6 +74,10 @@ void SourceLoader::addSearchExtension(std::string_view extension) {
         searchExtensions.emplace_back(extension);
 }
 
+void SourceLoader::addDirPrefix(std::string_view prefix) {
+    dirPrefixes.emplace_back(prefix);
+}
+
 static std::string_view getPathFromSpec(const FilePathSpecSyntax& syntax) {
     auto path = syntax.path.valueText();
     if (path.length() < 3)
@@ -88,8 +94,8 @@ void SourceLoader::addLibraryMaps(std::string_view pattern, const fs::path& base
 
 void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
                                    const std::vector<std::string>& includePaths,
-                                   std::vector<std::string> defines,
-                                   const std::string& libraryName) {
+                                   std::vector<std::string> defines, const std::string& libraryName,
+                                   std::vector<std::string> warningOptions) {
     std::error_code ec;
     SmallVector<fs::path> includeDirs;
     for (auto& str : includePaths)
@@ -97,6 +103,7 @@ void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
 
     auto& unit = unitEntries.emplace_back();
     unit.defines = std::move(defines);
+    unit.warningOptions = std::move(warningOptions);
     unit.library = getOrAddLibrary(libraryName);
 
     for (auto&& path : includeDirs)
@@ -122,7 +129,7 @@ void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::pa
     }
 
     for (auto& path : files) {
-        auto buffer = sourceManager.readSource(path, /* library */ nullptr);
+        auto buffer = sourceManager.readSource(path);
         if (!buffer) {
             addError(path, buffer.error());
             continue;
@@ -184,12 +191,34 @@ std::vector<SourceBuffer> SourceLoader::loadSources() {
     return results;
 }
 
-SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& optionBag) {
+SourceBuffer SourceLoader::findBuffer(std::string_view name) const {
+    for (auto& dir : searchDirectories) {
+        fs::path path(dir);
+        path /= name;
+
+        for (auto& ext : searchExtensions) {
+            path.replace_extension(ext);
+            if (!sourceManager.isCached(path)) {
+                // This file is never part of a library because if
+                // it was we would have already loaded it earlier.
+                auto readResult = sourceManager.readSource(path);
+                if (readResult) {
+                    return *readResult;
+                }
+            }
+        }
+    }
+    return {};
+}
+
+SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& optionBag,
+                                                               ThreadPool* pool) {
     SyntaxTreeList syntaxTrees;
     std::vector<SourceBuffer> singleUnitBuffers;
     std::vector<SourceBuffer> deferredLibBuffers;
     std::span<const DefineDirectiveSyntax* const> inheritedMacros;
     flat_hash_map<const UnitEntry*, std::vector<SourceBuffer>> unitToBufferMap;
+    flat_hash_map<const SourceLibrary*, std::vector<SourceBuffer>> singleUnitLibBuffers;
 
     const size_t fileEntryCount = fileEntries.size();
     syntaxTrees.reserve(fileEntryCount);
@@ -210,6 +239,8 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
                 auto [buffer, isDeferredLib] = std::get<1>(result);
                 if (isDeferredLib)
                     deferredLibBuffers.push_back(buffer);
+                else if (buffer.library)
+                    singleUnitLibBuffers[buffer.library].push_back(buffer);
                 else
                     singleUnitBuffers.push_back(buffer);
                 break;
@@ -230,15 +261,23 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
         }
     };
 
-    auto parseSingleUnit = [&](std::span<const SourceBuffer> buffers) {
+    auto parseSingleUnit = [&] {
         // If we waited to parse direct buffers due to wanting a single unit, parse that unit now.
-        if (!buffers.empty()) {
-            auto tree = SyntaxTree::fromBuffers(buffers, sourceManager, optionBag);
+        if (!singleUnitBuffers.empty()) {
+            auto tree = SyntaxTree::fromBuffers(singleUnitBuffers, sourceManager, optionBag);
             if (srcOptions.onlyLint)
                 tree->isLibraryUnit = true;
 
             syntaxTrees.emplace_back(std::move(tree));
             inheritedMacros = syntaxTrees.back()->getDefinedMacros();
+        }
+
+        // Parse each named-library group that was deferred due to single-unit mode
+        // into its own tree, preserving the per-library boundary.
+        for (auto& [lib, buffers] : singleUnitLibBuffers) {
+            auto tree = SyntaxTree::fromBuffers(buffers, sourceManager, optionBag, inheritedMacros);
+            tree->isLibraryUnit = true;
+            syntaxTrees.emplace_back(std::move(tree));
         }
     };
 
@@ -255,25 +294,23 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
         return tree;
     };
 
-    if (fileEntries.size() >= MinFilesForThreading && srcOptions.numThreads != 1u) {
-        // If there are enough files to parse and the user hasn't disabled
-        // the use of threads, do the parsing via a thread pool.
-        BS::thread_pool<> threadPool(srcOptions.numThreads.value_or(0u));
-
+    if (pool && fileEntries.size() >= MinFilesForThreading) {
+        // If there are enough files to parse and a thread pool has been
+        // provided, do the parsing in parallel.
         std::vector<LoadResult> loadResults;
         loadResults.resize(fileEntries.size());
 
         // Load all source files that were specified on the command line
         // or via library maps.
-        threadPool.detach_loop(size_t(0), fileEntries.size(), [&](size_t i) {
+        pool->detach_loop(size_t(0), fileEntries.size(), [&](size_t i) {
             loadResults[i] = loadAndParse(fileEntries[i], optionBag, srcOptions, i);
         });
-        threadPool.wait();
+        pool->wait();
 
         for (auto&& result : loadResults)
             handleLoadResult(std::move(result));
 
-        parseSingleUnit(singleUnitBuffers);
+        parseSingleUnit();
 
         // Parse separate unit groups into their own syntax trees.
         if (!unitToBufferMap.empty()) {
@@ -285,11 +322,11 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
             const size_t numTrees = syntaxTrees.size();
             syntaxTrees.resize(numTrees + unitList.size());
 
-            threadPool.detach_loop(size_t(0), unitList.size(), [&](size_t i) {
+            pool->detach_loop(size_t(0), unitList.size(), [&](size_t i) {
                 syntaxTrees[i + numTrees] = parseSeparateUnit(*unitList[i]->first,
                                                               unitList[i]->second);
             });
-            threadPool.wait();
+            pool->wait();
         }
 
         // If we deferred libraries due to wanting to inherit macros, parse them now.
@@ -297,13 +334,13 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
             const size_t numTrees = syntaxTrees.size();
             syntaxTrees.resize(numTrees + deferredLibBuffers.size());
 
-            threadPool.detach_loop(size_t(0), deferredLibBuffers.size(), [&](size_t i) {
+            pool->detach_loop(size_t(0), deferredLibBuffers.size(), [&](size_t i) {
                 auto tree = SyntaxTree::fromBuffer(deferredLibBuffers[i], sourceManager, optionBag,
                                                    inheritedMacros);
                 tree->isLibraryUnit = true;
                 syntaxTrees[i + numTrees] = std::move(tree);
             });
-            threadPool.wait();
+            pool->wait();
         }
     }
     else {
@@ -312,7 +349,7 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
         for (auto& entry : fileEntries)
             handleLoadResult(loadAndParse(entry, optionBag, srcOptions));
 
-        parseSingleUnit(singleUnitBuffers);
+        parseSingleUnit();
 
         // Parse separate unit groups into their own syntax trees.
         if (!unitToBufferMap.empty()) {
@@ -332,76 +369,125 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
     }
 
     if (!searchDirectories.empty()) {
-        // If library directories are specified, see if we have any unknown instantiations
-        // or package names for which we should search for additional source files to load.
-        flat_hash_set<std::string_view> knownNames;
-        auto addKnownNames = [&](const std::shared_ptr<SyntaxTree>& tree) {
-            auto& meta = tree->getMetadata();
-            meta.visitDeclaredSymbols([&](std::string_view name) { knownNames.emplace(name); });
-        };
+        loadTrees(
+            syntaxTrees, [this](std::string_view name) { return findBuffer(name); }, sourceManager,
+            optionBag, inheritedMacros, pool);
+    }
 
-        auto findMissingNames = [&](const std::shared_ptr<SyntaxTree>& tree,
-                                    flat_hash_set<std::string_view>& missing) {
-            auto& meta = tree->getMetadata();
-            meta.visitReferencedSymbols([&](std::string_view name) {
-                if (knownNames.find(name) == knownNames.end())
-                    missing.emplace(name);
-            });
-        };
-
-        for (auto& tree : syntaxTrees)
-            addKnownNames(tree);
-
-        flat_hash_set<std::string_view> missingNames;
-        for (auto& tree : syntaxTrees)
-            findMissingNames(tree, missingNames);
-
-        // Keep loading new files as long as we are making forward progress.
-        flat_hash_set<std::string_view> nextMissingNames;
-        while (true) {
-            for (auto name : missingNames) {
-                SourceBuffer buffer;
-                for (auto& dir : searchDirectories) {
-                    fs::path path(dir);
-                    path /= name;
-
-                    for (auto& ext : searchExtensions) {
-                        path.replace_extension(ext);
-                        if (!sourceManager.isCached(path)) {
-                            // This file is never part of a library because if
-                            // it was we would have already loaded it earlier.
-                            auto readResult = sourceManager.readSource(path, /* library */ nullptr);
-                            if (readResult) {
-                                buffer = *readResult;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (buffer)
-                        break;
-                }
-
-                if (buffer) {
-                    auto tree = SyntaxTree::fromBuffer(buffer, sourceManager, optionBag,
-                                                       inheritedMacros);
-                    tree->isLibraryUnit = true;
-                    syntaxTrees.emplace_back(tree);
-
-                    addKnownNames(tree);
-                    findMissingNames(tree, nextMissingNames);
-                }
-            }
-
-            if (nextMissingNames.empty())
-                break;
-
-            missingNames = std::move(nextMissingNames);
-            nextMissingNames = {};
+    // Collect per-buffer warning options from all separate compilation units.
+    bufferWarningOptions.clear();
+    for (auto& [unit, buffers] : unitToBufferMap) {
+        if (!unit->warningOptions.empty()) {
+            for (const auto& buf : buffers)
+                bufferWarningOptions.emplace(buf.id, unit->warningOptions);
         }
     }
 
     return syntaxTrees;
+}
+
+void SourceLoader::loadTrees(SyntaxTreeList& syntaxTrees,
+                             function_ref<SourceBuffer(std::string_view)> findBufferFunc,
+                             SourceManager& sourceManager, const Bag& optionBag,
+                             std::span<const DefineDirectiveSyntax* const> inheritedMacros,
+                             ThreadPool* pool) {
+    flat_hash_set<std::string_view> knownNames;
+    flat_hash_set<std::string_view> missingNames;
+    struct PendingLoad {
+        std::string_view name;
+        std::shared_ptr<SyntaxTree> tree;
+    };
+
+    std::vector<PendingLoad> worklist;
+
+    auto addKnownNames = [&](const std::shared_ptr<SyntaxTree>& tree) {
+        auto& meta = tree->getMetadata();
+        meta.visitDeclaredSymbols([&](std::string_view name) {
+            knownNames.emplace(name);
+            missingNames.erase(name);
+        });
+    };
+
+    auto findMissingNames = [&](const std::shared_ptr<SyntaxTree>& tree) {
+        auto& meta = tree->getMetadata();
+        meta.visitReferencedSymbols([&](std::string_view name) {
+            if (!knownNames.contains(name) && missingNames.emplace(name).second)
+                worklist.push_back({name, nullptr});
+        });
+    };
+
+    // Initial pass: index existing trees and find what's missing
+    for (auto& tree : syntaxTrees)
+        addKnownNames(tree);
+    for (auto& tree : syntaxTrees)
+        findMissingNames(tree);
+
+    auto parseBuffer = [&](const SourceBuffer& buffer) {
+        auto tree = SyntaxTree::fromBuffer(buffer, sourceManager, optionBag, inheritedMacros);
+        tree->isLibraryUnit = true;
+        return tree;
+    };
+
+    auto addTree = [&](std::shared_ptr<SyntaxTree> tree) {
+        auto& addedTree = syntaxTrees.emplace_back(std::move(tree));
+        addKnownNames(addedTree);
+        findMissingNames(addedTree);
+    };
+
+    // The worklist is a LIFO stack. Parsed batches are committed one tree at a time so
+    // newly discovered names can take precedence over older pending loads.
+    while (!worklist.empty()) {
+        if (!pool || worklist.size() < MinFilesForThreading) {
+            auto load = std::move(worklist.back());
+            worklist.pop_back();
+
+            if (knownNames.contains(load.name))
+                continue;
+
+            if (load.tree)
+                addTree(std::move(load.tree));
+            else if (auto buffer = findBufferFunc(load.name))
+                addTree(parseBuffer(buffer));
+            continue;
+        }
+
+        std::vector<PendingLoad> batch;
+        batch.swap(worklist);
+
+        // Fill buffers before launching workers so findBufferFunc is only called here.
+        std::vector<SourceBuffer> buffers(batch.size());
+        for (size_t i = 0; i < batch.size(); i++) {
+            if (!batch[i].tree && !knownNames.contains(batch[i].name))
+                buffers[i] = findBufferFunc(batch[i].name);
+        }
+
+        pool->detach_loop(size_t(0), batch.size(), [&](size_t i) {
+            if (buffers[i])
+                batch[i].tree = parseBuffer(buffers[i]);
+        });
+        pool->wait();
+
+        for (size_t i = batch.size(); i-- > 0;) {
+            if (!batch[i].tree || knownNames.contains(batch[i].name))
+                continue;
+
+            addTree(std::move(batch[i].tree));
+            if (!worklist.empty()) {
+                std::vector<PendingLoad> newLoads;
+                newLoads.swap(worklist);
+
+                // Keep the new work above older parsed loads on the stack.
+                for (size_t j = 0; j < i; j++) {
+                    if (batch[j].tree && !knownNames.contains(batch[j].name))
+                        worklist.push_back(std::move(batch[j]));
+                }
+
+                worklist.insert(worklist.end(), std::make_move_iterator(newLoads.begin()),
+                                std::make_move_iterator(newLoads.end()));
+                break;
+            }
+        }
+    }
 }
 
 SourceLibrary* SourceLoader::getOrAddLibrary(std::string_view name) {
@@ -422,6 +508,25 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
     SmallVector<fs::path> files;
     std::error_code ec;
     auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
+
+    if (ec && !dirPrefixes.empty()) {
+        // The file was not found at the given path; try prepending each
+        // registered directory prefix in the order they were added.
+        auto patternStr = "/"s + std::string(pattern);
+        for (auto& prefix : dirPrefixes) {
+            SmallVector<fs::path> prefixed;
+            std::error_code prefixEc;
+            auto prefixRank = svGlob(basePath, prefix + patternStr, GlobMode::Files, prefixed,
+                                     expandEnvVars, prefixEc);
+            if (!prefixEc) {
+                files = std::move(prefixed);
+                rank = prefixRank;
+                ec.clear();
+                break;
+            }
+        }
+    }
+
     if (ec) {
         addError(pattern, ec);
         return;
@@ -504,7 +609,11 @@ void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const f
 SourceLoader::LoadResult SourceLoader::loadAndParse(const FileEntry& entry, const Bag& optionBag,
                                                     const SourceOptions& srcOptions,
                                                     uint64_t fileSortKey) {
-    // TODO: error if secondLib is set
+    if (entry.secondLib) {
+        errors.emplace_back(fmt::format("'{}': file matches multiple libraries ('{}' and '{}')",
+                                        getU8Str(entry.path), entry.library->name,
+                                        entry.secondLib->name));
+    }
 
     SourceManager::BufferOrError buffer;
     if (entry.preloadedBuffer)
@@ -514,6 +623,9 @@ SourceLoader::LoadResult SourceLoader::loadAndParse(const FileEntry& entry, cons
 
     if (!buffer)
         return std::pair{&entry, buffer.error()};
+
+    if (entry.isLibraryFile)
+        sourceManager.setBufferKind(buffer->id, SourceManager::BufferKind::LibraryFile);
 
     if (entry.unit) {
         return std::pair{*buffer, entry.unit};

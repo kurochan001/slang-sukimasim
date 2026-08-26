@@ -17,12 +17,15 @@ Display slang version information and exit.
 
 Don't print non-essential output status.
 
-`--std (1800-2017 | 1800-2023 | latest)`
+`--std (1364-2005 | 1800-2017 | 1800-2023 | latest)`
 
-Sets the version of the SystemVerilog language to use. This changes how the code is parsed
+Sets the version of the Verilog or SystemVerilog language to use. This changes how the code is parsed
 and elaborated and which language features are available to use. The current default is
 1800-2017, though this may change in the future. Using "latest" will use the latest available
 version, currently 1800-2023.
+
+The 1364-2005 option is provided for compatibility with Verilog. Setting it does not disable all
+SystemVerilog features and as such the option isn't suitable for linting.
 
 `positional arguments`
 
@@ -101,6 +104,20 @@ If errors occur during preprocessing, they will be printed instead of the prepro
 Run the preprocessor on all input files, print out any macros that are discovered, and exit.
 No diagnostics will be printed.
 
+`--group-macros-by-file`
+
+When used together with `--macros-only`, groups the macro output by source file instead of
+printing all macros in a single flat sorted list. Each group is preceded by a comment header
+of the form `//<filename>:` so the originating file is clearly visible. Has no effect when
+used without `--macros-only`.
+
+`--show-parsed-files`
+
+Print the name and kind of each file as it is parsed. For each file, the output includes
+whether it is a design, library, library map, or include file, and indicates when the preprocessor
+returns to a previously active file after finishing an include. This is useful for tracing which
+files are parsed and in what order.
+
 `--parse-only`
 
 Perform parsing of all input files but don't perform type checking and elaboration.
@@ -153,6 +170,14 @@ Undefine the given macro at the start of all source files.
 Disables "local" include path lookup, where include directives search relative to the file
 containing the directive first.
 
+`--incdir-first`
+
+Search user-specified include directories (set via `-I`, `--include-directory`, or `+incdir`)
+before the local directory of the file containing the include directive. By default, slang
+searches the local directory first and falls back to the user-specified directories.
+
+This option is enabled automatically when `--compat=vcs` is used.
+
 @section clr-preprocessor Preprocessor
 
 `--comments`
@@ -177,6 +202,18 @@ By default library files are independent and will not inherit macros from the ma
 `--enable-legacy-protect`
 
 Enables use of legacy source protection directives for compatibility with older tools.
+
+`--allow-macro-trailing-space`
+
+If true, the preprocessor will allow trailing whitespaces after the continuation character
+in a macro definition. The trailing whitespaces are only allowed after the first line of the
+macro definition.
+
+`--allow-missing-protected-scope-end`
+If true, the preprocessor will assume that a missing end of scope keyword for a
+module/program/package/class inside an include file with protected code has the end of scope
+keyword inside the protected code. This only works if the include file with protected code
+does not include any other files.
 
 `--translate-off-format <common>,<start>,<end>`
 
@@ -207,10 +244,28 @@ module m;
 endmodule
 @endcode
 
+`--map-keyword-version <keyword-version>+<file-pattern>[,...]`
+
+Indicates that any files used during parsing which match the given patterns should
+be parsed using the provided language keywords version, as if they contained a
+`` `begin_keywords `` directive.
+
+For example `` --map-keyword-version=1364-2005+...*.v,...*.vh ``
+or `--map-keyword-version=1364-2005+/path/to/verilog.v`.
+
+Available keyword versions are:
+`1364-1995`, `1364-2001-noconfig`, `1364-2001`, `1364-2005`, `1800-2005`,
+`1800-2009`, `1800-2012`, `1800-2017`, `1800-2023`.
+
 `--obfuscate-ids`
 
 Causes all identifiers in the preprocessed output to be replaced with obfuscated
 alphanumeric strings.
+
+`--preprocess-source`
+
+Prints the source file name and line number in the preprocessor output stream with --preprocess.
+Only prints the source file name and line number when there is a change in source file name.
 
 @section clr-parsing Parsing
 
@@ -237,6 +292,20 @@ directories, trying all specified library extensions. If a matching file is foun
 parsed in its entirety, and the algorithm will be triggered again on any new names found.
 
 See @ref library-search for more details.
+
+`--dir-prefix <prefix>`
+
+Adds a directory prefix that is prepended to source file paths when the original path cannot be
+found. This is useful when the paths written into a command file (or specified on the command line)
+are relative paths that need a root prepended depending on where the tools are invoked from.
+
+For example, if a file list contains the relative path `dir_a/mod_b.sv` and that path does not
+exist in the current working directory, slang will retry the lookup as `<prefix>/dir_a/mod_b.sv`.
+The prefix fallback is only attempted when the original path is not found - if the file exists
+at the listed path, the prefix is never consulted.
+
+Multiple `--dir-prefix` options may be specified; they are tried in the order they appear on the
+command line and the first one whose combined path resolves to an existing file is used.
 
 `-Y,--libext <ext>`
 `+libext+<ext>[+<ext>...]`
@@ -277,7 +346,8 @@ Controls the level of detail included in the CST JSON output. The available mode
 
 | Mode | Description |
 |------|-------------|
-| `full` | Full token objects with complete trivia information including whitespace, comments, and formatting details |
+| `full` | Full token objects with complete trivia information including whitespace, comments, directives, and skipped tokens from ifdef branches |
+| `no-whitespace` | Full token objects with trivia information, but whitespace and end-of-line trivia filtered out, retaining only comments and directives |
 | `simple-trivia` | Full token objects with trivia simplified to concatenated strings instead of detailed arrays and kinds |
 | `no-trivia` | Full token objects but with all trivia objects excluded from the output |
 | `simple-tokens` | Tokens represented as simple strings with no trivia or token kind information |
@@ -374,6 +444,12 @@ Set the maximum number of steps that can occur during constant evaluation
 before giving up. Used to detect infinite constant evaluation loops.
 The default is 1000000.
 
+`--max-constant-size <bits>`
+
+Set the maximum number of bits that a single constant value can occupy during
+constant evaluation. Used to prevent out-of-memory crashes from trivially
+constructing huge arrays in constant functions. The default is 8Mbits.
+
 `--constexpr-backtrace-limit <limit>`
 
 Set the maximum number of frames to show when printing a constant evaluation
@@ -384,6 +460,13 @@ The default is 10.
 
 Set the maximum number of instances allowed in a single instance array.
 The limit exists to prevent runaway compilation times on invalid input.
+The default is 65535.
+
+`--max-enum-values <limit>`
+
+Set the maximum number of members allowed in a single enum declaration.
+The limit exists to prevent runaway compilation times on invalid input, particularly
+when using the array range syntax (e.g. `enum { A[0:N] }`) with a very large N.
 The default is 65535.
 
 `--max-udp-coverage-notes <limit>`
@@ -488,7 +571,7 @@ but some tools allow it anyway so this flag can be used for compatibility purpos
 
 `--relax-enum-conversions`
 
-Allow all integral types to convert implicitly to enum types in assignments. SystemVerilog doesn't
+Allow all integral types to convert implicitly to and from enum types in assignments. SystemVerilog doesn't
 permit this, but some tools allow it anyway so this flag can be used for compatibility purposes.
 
 `--relax-string-conversions`
@@ -552,6 +635,62 @@ endmodule
 Unnamed generate blocks are not allowed to be referenced from within the language,
 but they do have externally visible names (following a 'genblk###' pattern). This flag
 allows hierarchical references to unnamed generate blocks via those external names.
+
+`--allow-virtual-iface-with-override`
+
+Allow interface instances that are bind/defparam targets to be assigned to virtual interfaces.
+SystemVerilog doesn't permit this, but some tools allow it anyway so this flag can be used
+for compatibility purposes.
+
+`--allow-array-concat-assign-pattern`
+
+Allow assignment pattern expressions to be used in unpacked array concatenations.
+The LRM states that these are not assignment-like contexts but some tools allow it anyway.
+
+`--allow-lib-module-redef`
+
+Allow multiple definitions of the same module, interface, program, or primitive at the root
+scope within the same library, provided the conflicting definition comes from a library file
+specified with `-v` / `--libfile`. The first definition encountered is kept and all subsequent
+redefinitions from library files are silently discarded, regardless of whether the kind
+(module vs primitive etc.) matches. This matches the behavior of VCS and similar simulators,
+which resolve such conflicts by picking the first definition found in compilation order.
+
+Without this option (or when the conflicting definition is not a library file), a same-kind
+redefinition produces a `duplicate-definition` warning and a different-kind redefinition
+(e.g. a `module` and a `primitive` sharing the same name) is a hard error.
+
+This option is enabled automatically when `--compat=vcs` or `--compat=all` is used.
+
+`--allow-cross-auto-bin-max`
+
+Allow the legacy `cross_auto_bin_max` coverage option to be set on covergroups and crosses.
+This option was part of the SystemVerilog 3.1a coverage option set but was removed from
+IEEE 1800; some tools still accept it for compatibility with older code. When this flag is
+set, the option is accepted and parsed but has no effect (slang does not compute coverage
+bins at elaboration).
+
+This option is enabled automatically when `--compat=vcs` or `--compat=all` is used.
+
+`--infer-input-ports-as-vars`
+
+Infer ANSI `input` ports that have an explicit data type as variables instead of nets.
+By default slang follows the LRM and treats such ports as nets, which for example allows them
+to be connected to `inout` ports. Some tools treat them as variables instead, which rejects
+such connections but in turn allows them to be connected to `ref` ports; this flag selects that behavior.
+
+For example, by default the following is allowed, but is an error when this flag is set:
+
+@code{.sv}
+module m(input logic w);
+    n n(w);
+endmodule
+
+module n(inout logic w);
+endmodule
+@endcode
+
+This option is enabled automatically when `--compat=vcs` or `--compat=all` is used.
 
 `--cmd-ignore <vendor_cmd>,<N>`
 
@@ -649,6 +788,7 @@ disable the limit. The default is 64.
 `--ignore-unknown-modules`
 
 Don't issue an error for instantiations of unknown modules, interface, and programs.
+Alternatively, selected instantiations of unknown modules can be ignored with the `(* maybe_unknown *)` attribute.
 
 `--disallow-refs-to-unknown-instances`
 
@@ -707,6 +847,17 @@ Treat warning (or group of warnings) "foo" as a warning even if `-Werror` is spe
 of whether `-Werror` appears before or after in the command line. Note that unlike `-Werror=`, this
 will not turn on the warning if it hasn't been enabled with a separate option.
 
+slang also supports external waiver files for suppressing diagnostics without modifying source.
+See @ref waivers for more details. Commands controlling this are:
+
+`--waiver-file <file-pattern>[,...]`
+
+One or more waiver files (in TOML format) to control diagnostic output.
+
+`--print-unused-waivers`
+
+If set, detailed information about unused waiver rules will be printed.
+
 @section clr-profiling Profiling
 
 `--time-trace <path>`
@@ -715,5 +866,17 @@ Run slang with time tracing enabled, which collects information about how long
 various parts of the compilation take. When the program exits it will write the
 trace results to the given file, which is JSON text containing events in
 the Chrome Trace Event format.
+
+`--time-stats <path>`
+
+Print high-level timing summary stats to the given file, or stdout if the path is '-'.
+The format is a small JSON blob with keys for timing different stages of compilation, in microseconds.
+Peak process memory usage, in bytes, is also included.
+
+`--memory-stats <path>`
+
+Print a detailed breakdown of memory usage by category to the given file, or stdout if the path is '-'.
+The output is a text document containing memory usage (in bytes) for each major compilation phase:
+source files, the concrete syntax tree (CST), the abstract syntax tree (AST), and analysis.
 
 */

@@ -31,6 +31,9 @@ public:
                                 const syntax::ParameterDeclarationStatementSyntax& syntax,
                                 SmallVectorBase<Symbol*>& results);
 
+    static bool allMatching(std::ranges::range auto&& leftParams,
+                            std::ranges::range auto&& rightParams);
+
 protected:
     ParameterSymbolBase(const Symbol& symbol, bool isLocal, bool isPort) :
         symbol(symbol), isLocal(isLocal), isPort(isPort) {}
@@ -61,6 +64,8 @@ public:
 
     bool isFromGenvar() const { return isFromGv; }
     void setIsFromGenvar(bool newIsFromGenvar) { isFromGv = newIsFromGenvar; }
+
+    bool isEvaluating() const { return evaluating; }
 
     void serializeTo(ASTSerializer& serializer) const;
 
@@ -146,6 +151,8 @@ public:
         return pathDest;
     }
 
+    bool isEvaluating() const { return evaluating; }
+
     static void fromSyntax(const Scope& scope, const syntax::SpecparamDeclarationSyntax& syntax,
                            SmallVectorBase<const SpecparamSymbol*>& results);
 
@@ -165,5 +172,35 @@ private:
     mutable bool evaluating = false;
     mutable bool pathPulseResolved = false;
 };
+
+bool ParameterSymbolBase::allMatching(std::ranges::range auto&& leftParams,
+                                      std::ranges::range auto&& rightParams) {
+    if (leftParams.size() != rightParams.size())
+        return false;
+
+    for (auto li = leftParams.begin(), ri = rightParams.begin(); li != leftParams.end();
+         li++, ri++) {
+
+        auto& lp = **li;
+        auto& rp = **ri;
+        if (lp.kind != rp.kind)
+            return false;
+
+        if (lp.kind == SymbolKind::Parameter) {
+            auto& lv = lp.template as<ParameterSymbol>().getValue();
+            auto& rv = rp.template as<ParameterSymbol>().getValue();
+            if (lv != rv)
+                return false;
+        }
+        else {
+            auto& lt = lp.template as<TypeParameterSymbol>().targetType.getType();
+            auto& rt = rp.template as<TypeParameterSymbol>().targetType.getType();
+            if (!lt.isMatching(rt))
+                return false;
+        }
+    }
+
+    return true;
+}
 
 } // namespace slang::ast

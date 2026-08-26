@@ -313,19 +313,20 @@ bool CallExpression::bindArgs(const ArgumentListSyntax* argSyntax,
     return !bad;
 }
 
-Expression& CallExpression::fromArgs(Compilation& compilation, const Subroutine& subroutine,
+Expression& CallExpression::fromArgs(Compilation& comp, const Subroutine& subroutine,
                                      const Expression* thisClass,
                                      const ArgumentListSyntax* argSyntax, SourceRange range,
                                      const ASTContext& context) {
-    SmallVector<const Expression*> boundArgs;
     const SubroutineSymbol& symbol = *std::get<0>(subroutine);
+    comp.noteReference(symbol);
+
+    SmallVector<const Expression*> boundArgs;
     bool bad = !bindArgs(argSyntax, symbol.getArguments(), symbol.name, range, context, boundArgs);
 
-    auto result = compilation.emplace<CallExpression>(&symbol, symbol.getReturnType(), thisClass,
-                                                      boundArgs.copy(compilation),
-                                                      context.getLocation(), range);
+    auto result = comp.emplace<CallExpression>(&symbol, symbol.getReturnType(), thisClass,
+                                               boundArgs.copy(comp), context.getLocation(), range);
     if (bad)
-        return badExpr(compilation, result);
+        return badExpr(comp, result);
 
     if (context.flags.has(ASTFlags::Function | ASTFlags::Final) &&
         symbol.subroutineKind == SubroutineKind::Task) {
@@ -338,11 +339,11 @@ Expression& CallExpression::fromArgs(Compilation& compilation, const Subroutine&
         else
             context.addDiag(diag::TaskFromFinal, range);
 
-        return badExpr(compilation, result);
+        return badExpr(comp, result);
     }
 
     if (!checkOutputArgs(context, symbol.hasOutputArgs(), range))
-        return badExpr(compilation, result);
+        return badExpr(comp, result);
 
     return *result;
 }
@@ -754,6 +755,53 @@ Expression::EffectiveSign CallExpression::getEffectiveSignImpl(bool) const {
             return EffectiveSign::Either;
     }
     return type->isSigned() ? EffectiveSign::Signed : EffectiveSign::Unsigned;
+}
+
+bool CallExpression::isEquivalentImpl(const CallExpression& rhs) const {
+    if (subroutine.index() != rhs.subroutine.index())
+        return false;
+
+    if (subroutine.index() == 1) {
+        // We deliberately allow scopes to differ here; the only way this
+        // is observable is for display calls that use %m formatting.
+        auto& lci = std::get<1>(subroutine);
+        auto& rci = std::get<1>(rhs.subroutine);
+        if (lci.subroutine != rci.subroutine)
+            return false;
+
+        if (lci.extraInfo.index() != rci.extraInfo.index())
+            return false;
+
+        if (lci.extraInfo.index() == 1) {
+            auto& lii = std::get<1>(lci.extraInfo);
+            auto& rii = std::get<1>(rci.extraInfo);
+            if (lii.iterVar != rii.iterVar || bool(lii.iterExpr) != bool(rii.iterExpr) ||
+                (lii.iterExpr && !lii.iterExpr->isEquivalentTo(*rii.iterExpr))) {
+                return false;
+            }
+        }
+        else if (lci.extraInfo.index() == 2) {
+            auto& lrc = std::get<2>(lci.extraInfo);
+            auto& rrc = std::get<2>(rci.extraInfo);
+            if (bool(lrc.inlineConstraints) != bool(rrc.inlineConstraints) ||
+                (lrc.inlineConstraints &&
+                 !lrc.inlineConstraints->isEquivalentTo(*rrc.inlineConstraints)) ||
+                !std::ranges::equal(lrc.constraintRestrictions, rrc.constraintRestrictions)) {
+                return false;
+            }
+        }
+    }
+    else {
+        if (std::get<0>(subroutine) != std::get<0>(rhs.subroutine))
+            return false;
+    }
+
+    return bool(thisClass_) == bool(rhs.thisClass_) &&
+           (!thisClass_ || thisClass_->isEquivalentTo(*rhs.thisClass_)) &&
+           std::ranges::equal(arguments(), rhs.arguments(),
+                              [](const Expression* a, const Expression* b) {
+                                  return a->isEquivalentTo(*b);
+                              });
 }
 
 bool CallExpression::checkConstant(EvalContext& context, const SubroutineSymbol& subroutine,

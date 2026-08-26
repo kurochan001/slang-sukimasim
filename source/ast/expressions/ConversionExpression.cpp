@@ -98,6 +98,11 @@ bool Expression::isImplicitlyAssignableTo(Compilation& compilation, const Type& 
         return true;
     }
 
+    if (targetType.isString() && type->isIntegral() &&
+        compilation.hasFlag(CompilationFlags::RelaxStringConversions)) {
+        return true;
+    }
+
     return false;
 }
 
@@ -170,20 +175,6 @@ Expression& Expression::convertAssignment(const ASTContext& context, const Type&
         if (expr.isImplicitlyAssignableTo(comp, type)) {
             return ConversionExpression::makeImplicit(context, type, ConversionKind::Implicit,
                                                       *result, nullptr, assignmentRange);
-        }
-
-        if (expr.kind == ExpressionKind::Streaming) {
-            if (Bitstream::canBeSource(type, expr.as<StreamingConcatenationExpression>(),
-                                       assignmentRange, context)) {
-                // Add an implicit bit-stream casting otherwise types are not assignment compatible.
-                // The size rule is not identical to explicit bit-stream casting so a different
-                // ConversionKind is used.
-                result = comp.emplace<ConversionExpression>(type, ConversionKind::StreamingConcat,
-                                                            *result, result->sourceRange);
-                selfDetermined(context, result);
-                return *result;
-            }
-            return badExpr(comp, &expr);
         }
 
         if (expr.kind == ExpressionKind::ValueRange) {
@@ -277,54 +268,69 @@ static bool actuallyNeededCast(const Type& type, const Expression& operand) {
 Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpressionSyntax& syntax,
                                              const ASTContext& context,
                                              const Type* assignmentTarget) {
-    auto& targetExpr = bind(*syntax.left, context, ASTFlags::AllowDataType);
-    if (targetExpr.bad())
-        return badExpr(comp, nullptr);
+    const Type* type = &comp.getErrorType();
+    auto bindOperand = [&](const Type* target = nullptr) -> Expression& {
+        return create(comp, *syntax.right, context, ASTFlags::StreamingAllowed, target);
+    };
+    auto result = [&](Expression& operand, ConversionKind cast = ConversionKind::Explicit) {
+        return comp.emplace<ConversionExpression>(*type, cast, operand, syntax.sourceRange());
+    };
 
-    auto type = &comp.getErrorType();
+    auto& targetExpr = bind(*syntax.left, context, ASTFlags::AllowDataType);
+    if (targetExpr.bad()) {
+        return badExpr(comp, result(bindOperand()));
+    }
+
     Expression* operand;
+
     if (targetExpr.kind == ExpressionKind::DataType) {
         type = targetExpr.type;
+        bool badCastType = false;
         if (!type->isSimpleType() && !type->isError() && !type->isString() &&
             syntax.left->kind != SyntaxKind::TypeReference) {
             context.addDiag(diag::BadCastType, targetExpr.sourceRange) << *type;
-            return badExpr(comp, nullptr);
+            badCastType = true;
         }
 
-        operand = &create(comp, *syntax.right, context, ASTFlags::StreamingAllowed, type);
-        if (operand->bad())
-            return badExpr(comp, nullptr);
+        // Don't pass type as assignmentTarget for streaming operands: the existing
+        // isBitstreamCast path below handles them with the correct semantics and error codes.
+        // For other operands (e.g. assignment patterns), assignmentTarget is needed for type
+        // deduction. The cast syntax wraps the operand in ParenthesizedExpressionSyntax, so
+        // check the inner expression kind.
+        const bool isStreamingOperand = syntax.right->expression->kind ==
+                                        SyntaxKind::StreamingConcatenationExpression;
+        operand = &bindOperand(badCastType || isStreamingOperand ? nullptr : type);
+        if (badCastType || operand->bad())
+            return badExpr(comp, result(*operand));
     }
     else {
         auto val = context.evalInteger(targetExpr);
-        if (!val || !context.requireGtZero(val, targetExpr.sourceRange))
-            return badExpr(comp, nullptr);
+        if (!val || !context.requireGtZero(val, targetExpr.sourceRange)) {
+            return badExpr(comp, result(bindOperand()));
+        }
 
         bitwidth_t width = bitwidth_t(*val);
-        if (!context.requireValidBitWidth(width, targetExpr.sourceRange))
-            return badExpr(comp, nullptr);
+        if (!context.requireValidBitWidth(width, targetExpr.sourceRange)) {
+            return badExpr(comp, result(bindOperand()));
+        }
 
-        operand = &create(comp, *syntax.right, context, ASTFlags::StreamingAllowed);
+        operand = &bindOperand();
         if (operand->bad())
-            return badExpr(comp, nullptr);
+            return badExpr(comp, result(*operand));
 
         if (!operand->type->isIntegral()) {
             auto& diag = context.addDiag(diag::BadIntegerCast, syntax.apostrophe.location());
             diag << *operand->type;
             diag << targetExpr.sourceRange << operand->sourceRange;
-            return badExpr(comp, nullptr);
+            return badExpr(comp, result(*operand));
         }
 
         type = &comp.getType(width, operand->type->getIntegralFlags());
     }
 
-    auto result = [&](ConversionKind cast = ConversionKind::Explicit) {
-        return comp.emplace<ConversionExpression>(*type, cast, *operand, syntax.sourceRange());
-    };
-
     if (!type->isCastCompatible(*operand->type)) {
         if (!Bitstream::checkClassAccess(*type, context, targetExpr.sourceRange)) {
-            return badExpr(comp, result());
+            return badExpr(comp, result(*operand));
         }
 
         if (operand->kind == ExpressionKind::Streaming) {
@@ -333,20 +339,20 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
                 auto& diag = context.addDiag(diag::BadStreamCast, syntax.apostrophe.location());
                 diag << *type;
                 diag << targetExpr.sourceRange << operand->sourceRange;
-                return badExpr(comp, result());
+                return badExpr(comp, result(*operand));
             }
         }
         else if (!type->isBitstreamCastable(*operand->type)) {
             auto& diag = context.addDiag(diag::BadConversion, syntax.apostrophe.location());
             diag << *operand->type << *type;
             diag << targetExpr.sourceRange << operand->sourceRange;
-            return badExpr(comp, result());
+            return badExpr(comp, result(*operand));
         }
         else if (!Bitstream::checkClassAccess(*operand->type, context, operand->sourceRange)) {
-            return badExpr(comp, result());
+            return badExpr(comp, result(*operand));
         }
 
-        return *result(ConversionKind::BitstreamCast);
+        return *result(*operand, ConversionKind::BitstreamCast);
     }
 
     // We have a useless cast if the type of the operand matches what we're casting to, unless:
@@ -397,7 +403,7 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
         selfDetermined(context, operand);
     }
 
-    return *result();
+    return *result(*operand);
 }
 
 Expression& ConversionExpression::fromSyntax(Compilation& compilation,
@@ -438,7 +444,8 @@ Expression& ConversionExpression::makeImplicit(const ASTContext& context, const 
                                                const Expression* parentExpr,
                                                SourceRange operatorRange) {
     auto& comp = context.getCompilation();
-    SLANG_ASSERT(expr.isImplicitlyAssignableTo(comp, targetType));
+    SLANG_ASSERT(conversionKind == ConversionKind::Explicit ||
+                 expr.isImplicitlyAssignableTo(comp, targetType));
 
     Expression* op = &expr;
     selfDetermined(context, op);
@@ -633,20 +640,29 @@ void ConversionExpression::checkImplicitConversions(
     };
 
     // Don't warn about conversions in compound assignment operators.
+    auto& unwrapped = op.unwrapImplicitConversions();
     auto isCompoundAssign = [&] {
-        auto& expr = op.unwrapImplicitConversions();
-        if (expr.kind == ExpressionKind::LValueReference)
+        if (unwrapped.kind == ExpressionKind::LValueReference)
             return true;
 
-        return expr.kind == ExpressionKind::BinaryOp &&
-               expr.as<BinaryExpression>().left().unwrapImplicitConversions().kind ==
+        return unwrapped.kind == ExpressionKind::BinaryOp &&
+               unwrapped.as<BinaryExpression>().left().unwrapImplicitConversions().kind ==
                    ExpressionKind::LValueReference;
     };
     if (isCompoundAssign())
         return;
 
-    const Type& lt = targetType.getCanonicalType();
-    const Type& rt = sourceType.getCanonicalType();
+    // Drill through one-element packed arrays, since they can be treated
+    // as implicitly being their one element.
+    auto unwrapType = [&](const Type& t) -> const Type& {
+        auto& ct = t.getCanonicalType();
+        if (ct.kind == SymbolKind::PackedArrayType && ct.getFixedRange().width() == 1)
+            return *ct.getArrayElementType();
+        return ct;
+    };
+
+    auto& lt = unwrapType(targetType);
+    auto& rt = unwrapType(sourceType);
     if (lt.isIntegral() && rt.isIntegral()) {
         // Warn for conversions between different enums/structs/unions.
         if (isStructUnionEnum(lt) && isStructUnionEnum(rt) && !lt.isMatching(rt)) {
@@ -657,7 +673,7 @@ void ConversionExpression::checkImplicitConversions(
 
         // Warn for conversions between packed arrays of differing
         // dimension counts or sizes.
-        if (isMultiDimArray(lt) && isMultiDimArray(rt) && !hasSameDims(lt, rt)) {
+        if ((isMultiDimArray(lt) || isMultiDimArray(rt)) && !hasSameDims(lt, rt)) {
             // Avoid warning for assignments or comparisons with 0 or '0, '1.
             auto isZeroOrUnsized = [](const Expression& e) {
                 auto expr = &e.unwrapImplicitConversions();
@@ -671,9 +687,23 @@ void ConversionExpression::checkImplicitConversions(
                         bool(expr->as<IntegerLiteral>().getValue() == 0));
             };
 
-            if (!isZeroOrUnsized(op) &&
+            auto isAppropriateConcat = [&]() {
+                if (unwrapped.kind == ExpressionKind::Concatenation && isMultiDimArray(lt) &&
+                    lt.getBitWidth() == rt.getBitWidth()) {
+                    auto& elemType = *lt.getArrayElementType();
+                    for (auto subExpr : unwrapped.as<ConcatenationExpression>().operands()) {
+                        if (!hasSameDims(elemType, *subExpr->type))
+                            return false;
+                    }
+                    return true;
+                }
+                return false;
+            };
+
+            if (!isZeroOrUnsized(unwrapped) &&
                 (!parentIsComparison() ||
-                 !isZeroOrUnsized(parentExpr->as<BinaryExpression>().right()))) {
+                 !isZeroOrUnsized(parentExpr->as<BinaryExpression>().right())) &&
+                !isAppropriateConcat()) {
                 addDiag(diag::PackedArrayConv) << sourceType << targetType;
             }
         }
@@ -758,6 +788,11 @@ Expression::EffectiveSign ConversionExpression::getEffectiveSignImpl(bool isForC
     if (isImplicit())
         return operand().getEffectiveSign(isForConversion);
     return type->isSigned() ? EffectiveSign::Signed : EffectiveSign::Unsigned;
+}
+
+bool ConversionExpression::isEquivalentImpl(const ConversionExpression& rhs) const {
+    return conversionKind == rhs.conversionKind && isConstCast == rhs.isConstCast &&
+           operand().isEquivalentTo(rhs.operand());
 }
 
 void ConversionExpression::serializeTo(ASTSerializer& serializer) const {

@@ -608,6 +608,23 @@ TEST_CASE("Dynamic arrays -- out of bounds") {
     CHECK(diags[5].code == diag::ConstEvalEmptyQueue);
 }
 
+TEST_CASE("Queue read at the append index") {
+    // Reading a queue at index == size() (the append slot) is out of bounds; it
+    // must warn and return the element default rather than crash. Writing that
+    // slot is still allowed and appends.
+    ScriptSession session;
+    session.eval("int q[$] = '{10, 20, 30};");
+    CHECK(session.eval("q[3]").integer() == 0);
+    CHECK(session.eval("q[2]").integer() == 30);
+
+    session.eval("q[3] = 40;");
+    CHECK(session.eval("q[3]").integer() == 40);
+
+    auto diags = session.getDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ConstEvalDynamicArrayIndex);
+}
+
 TEST_CASE("Associative array eval") {
     ScriptSession session;
     session.eval("integer arr[string] = '{\"Hello\":4, \"World\":8, default:-1};");
@@ -1245,6 +1262,39 @@ TEST_CASE("sformatf with trailing percent") {
 TEST_CASE("sformatf with real conversion") {
     ScriptSession session;
     CHECK(session.eval("$sformatf(\"%0d\", 3.14)"s).str() == "3");
+}
+
+TEST_CASE("Raw format specifiers (%u/%z) on an unpacked union") {
+    // Regression: %u and %z on an unpacked union previously aborted with an internal
+    // error (std::get on the wrong ConstantValue variant). The active member's raw
+    // representation must be emitted -- identical to formatting that member directly.
+    ScriptSession session;
+    session.eval(R"(
+typedef union { byte a; byte b; } u_t;
+typedef struct { u_t u; byte c; } s_t;
+typedef struct { byte a; byte c; } s2_t;
+function automatic bit chk_u();
+    u_t u; u.a = 8'h41;
+    return ($sformatf("%u", u) == $sformatf("%u", byte'(8'h41)));
+endfunction
+function automatic bit chk_z();
+    u_t u; u.a = 8'h41;
+    return ($sformatf("%z", u) == $sformatf("%z", byte'(8'h41)));
+endfunction
+function automatic bit chk_struct();
+    // A struct containing a union must format the same as the struct with the
+    // union replaced by its (byte) active member.
+    s_t s;
+    s2_t s2;
+    s.u.a = 8'h41; s.c = 8'h42;
+    s2.a = 8'h41; s2.c = 8'h42;
+    return ($sformatf("%u", s) == $sformatf("%u", s2));
+endfunction
+)");
+    CHECK(session.eval("chk_u()").integer() == 1);
+    CHECK(session.eval("chk_z()").integer() == 1);
+    CHECK(session.eval("chk_struct()").integer() == 1);
+    NO_SESSION_ERRORS;
 }
 
 TEST_CASE("Concat assignments") {
@@ -2047,6 +2097,22 @@ localparam logic[7:0] value6 = {<<4{ {<<2{value5}} }};
     CHECK(diags[0].code == diag::IgnoredSlice);
 }
 
+TEST_CASE("Streaming concat with irregular packed slice boundary") {
+    // Regression: a right-to-left streaming concatenation whose packed layout
+    // makes a slice land exactly on an element boundary used to crash reOrder
+    // (the packing iterator ran past the end of the packed list). Streaming is
+    // a bit permutation, so the population count must be preserved.
+    ScriptSession session;
+    session.eval("localparam logic [2:0] a = 3'h5;");
+    session.eval("localparam logic b = 1'b1;");
+    session.eval("localparam logic [15:0] s = {<<3{a, a, a, a, a, b}};");
+    CHECK(session.eval("$countones(s)").integer() == 11);
+
+    session.eval("localparam logic [15:0] c = 16'hCAFE;");
+    session.eval("localparam logic [15:0] p = {<<3{ {<<3{c}} }};");
+    CHECK(session.eval("$countones(p)").integer() == session.eval("$countones(c)").integer());
+}
+
 TEST_CASE("streaming operator target evaluation") {
     ScriptSession session;
     session.eval(R"(
@@ -2203,6 +2269,40 @@ endfunction
     CHECK(queue4[0].integer() == 0);
     CHECK(queue4[1].integer() == 0);
     CHECK(queue4[2].integer() == "8'sh12"_si);
+
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Streaming 'with' range starting past the array extent") {
+    // Regression: a source-side streaming 'with' range may begin beyond the current
+    // queue/dynamic-array size; the nonexistent elements are streamed as the default
+    // value (IEEE 1800-2017 11.4.14.3). Previously this crashed with an internal error
+    // because the range's lower bound was not clamped to the array size.
+    ScriptSession session;
+    session.eval(R"(
+    function automatic bit [63:0] f_empty_queue();
+        int q[$];
+        return {>>{q with [1:2]}};      // empty queue, indices 1,2 nonexistent -> 0
+    endfunction
+    function automatic bit [63:0] f_empty_dynarray();
+        int d[];
+        return {>>{d with [1:2]}};      // empty dynamic array, indices 1,2 nonexistent -> 0
+    endfunction
+    function automatic bit [63:0] f_small_queue();
+        int q[$] = {7};
+        return {>>{q with [3:4]}};      // size 1, indices 3,4 nonexistent -> 0
+    endfunction
+    function automatic bit [95:0] f_partial();
+        int q[$] = {10, 20, 30};
+        return {>>{q with [1:3]}};      // 20, 30, then default 0 for nonexistent index 3
+    endfunction
+)");
+
+    CHECK(session.eval("f_empty_queue()").integer() == 0);
+    CHECK(session.eval("f_empty_dynarray()").integer() == 0);
+    CHECK(session.eval("f_small_queue()").integer() == 0);
+    CHECK(session.eval("f_partial()").integer() ==
+          session.eval("{32'd20, 32'd30, 32'd0}").integer());
 
     NO_SESSION_ERRORS;
 }
@@ -2379,6 +2479,20 @@ TEST_CASE("Tagged union eval") {
     CHECK(diags[1].code == diag::ConstEvalTaggedUnion);
     CHECK(diags[2].code == diag::ConstEvalTaggedUnion);
     CHECK(diags[3].code == diag::ConstEvalTaggedUnion);
+}
+
+TEST_CASE("Tagged union eval with unknown tag") {
+    // Accessing a member of a 4-state packed tagged union whose tag bits are
+    // unknown must report a tagged-union access error, not crash: the tag slice
+    // has no known value, so it can never match a member's tag.
+    ScriptSession session;
+    session.eval("union tagged packed { logic [7:0] a; logic [7:0] b; } v;");
+    session.eval("v = 'x;");
+    session.eval("v.a");
+
+    auto diags = session.getDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ConstEvalTaggedUnion);
 }
 
 TEST_CASE("Assignment pattern eval") {
@@ -2653,4 +2767,75 @@ endpackage)");
 TEST_CASE("Eval bad statement") {
     ScriptSession session;
     CHECK(!session.eval("fork=L:for"));
+}
+
+TEST_CASE("Concat LHS assignment preserves signedness -- GH #1705") {
+    ScriptSession session;
+    session.eval(R"(
+function [7:0] f(input [7:0] value);
+    reg signed [2:0] tmp1, tmp2;
+    begin
+        {tmp1, tmp2} = {value[2:0], value[6:4]};
+        f[7:4] = tmp1;
+        f[3:0] = tmp2;
+    end
+endfunction
+)");
+
+    CHECK(session.eval("f(8'h5a)").integer() == 0x2d);
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Void system functions in constant functions") {
+    // Regression test: void-returning system methods (push_back, sort, etc.)
+    // should not cause constant function evaluation to fail.
+    ScriptSession session;
+    session.eval(R"(
+function automatic int foo;
+    int a[$] = '{1, 2};
+    a.push_back(3);
+    return a[$];
+endfunction
+)");
+    CHECK(session.eval("foo()").integer() == 3);
+
+    session.eval(R"(
+function automatic int bar;
+    int a[] = '{3, 1, 2};
+    a.sort;
+    return a[0];
+endfunction
+)");
+    CHECK(session.eval("bar()").integer() == 1);
+
+    session.eval(R"(
+function automatic int baz;
+    int a[$] = '{1, 2, 3};
+    a.delete(0);
+    return a[0];
+endfunction
+)");
+    CHECK(session.eval("baz()").integer() == 2);
+
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Eval scalar bit select") {
+    // Bit-select of a scalar type is nonstandard but permitted as a warning.
+    // Verify constant evaluation returns correct values.
+    ScriptSession session;
+    session.eval("logic p = 1'b1;");
+    CHECK(session.eval("p[0]").integer() == 1);
+
+    session.eval("logic q = 1'bx;");
+    CHECK(session.eval("q[0]").integer().hasUnknown());
+
+    session.eval("bit b = 1'b1;");
+    CHECK(session.eval("b[0]").integer() == 1);
+
+    auto diags = session.getDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::CannotIndexScalar);
+    CHECK(diags[1].code == diag::CannotIndexScalar);
+    CHECK(diags[2].code == diag::CannotIndexScalar);
 }

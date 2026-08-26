@@ -19,7 +19,7 @@ slang is the fastest and most compliant SystemVerilog frontend (according to the
 Full documentation is available on the website: https://sv-lang.com
 
 ### Features
--   Fully parse, analyze, and elaborate all SystemVerilog features - see [this page](https://sv-lang.com/language-support.html) for current status.
+-   Fully parse, elaborate, and analyze all SystemVerilog features.
 -   Be robust about compilation, no matter how broken the source text. This makes the compiler usable in editor highlighting and completion scenarios, where the code is likely to be broken because the user is still writing it.
 -   The parse tree should round trip back to the original source, making it easy to write refactoring and code generation tools.
 -   Provide great error messages, ala clang.
@@ -47,6 +47,8 @@ See documentation in the [docs/](docs/) directory for details.
 
 ### Getting Started
 
+Pre-built binaries for Linux, macOS, and Windows are available on the [releases page](https://github.com/MikePopoloski/slang/releases).
+
 Instructions on building slang from source are [here](https://sv-lang.com/building.html). The tl;dr is:
 ```
 git clone https://github.com/kurochan001/slang-sukimasim.git
@@ -59,13 +61,7 @@ The slang binary can be run on your code right out of the box; check out the [us
 
 If you're looking to use slang as a library, please read through the [developer guide](https://sv-lang.com/developer-guide.html).
 
-### Try It Out
-
-Experiment with parsing, type checking, and error detection live [on the web](https://sv-lang.com/explore/) (inspired by Matt Godbolt's excellent [Compiler Explorer](https://godbolt.org/)).
-
-### Python Bindings
-
-This project also includes Python bindings for the library, which can be installed via PyPI:
+The project also includes Python bindings for the library, which can be installed via PyPI:
 ```
 pip install pyslang
 ```
@@ -80,66 +76,9 @@ cd slang-sukimasim
 pip install .
 ```
 
-#### Example Python Usage
+### Try It Out
 
-Given a 'test.sv' source file:
-```sv
-module memory(
-    address,
-    data_in,
-    data_out,
-    read_write,
-    chip_en
-  );
-
-  input wire [7:0] address, data_in;
-  output reg [7:0] data_out;
-  input wire read_write, chip_en;
-
-  reg [7:0] mem [0:255];
-
-  always @ (address or data_in or read_write or chip_en)
-    if (read_write == 1 && chip_en == 1) begin
-      mem[address] = data_in;
-  end
-
-  always @ (read_write or chip_en or address)
-    if (read_write == 0 && chip_en)
-      data_out = mem[address];
-    else
-      data_out = 0;
-
-endmodule
-```
-
-We can use slang to load the syntax tree and inspect it:
-```py
-import pyslang
-
-tree = pyslang.SyntaxTree.fromFile('test.sv')
-mod = tree.root.members[0]
-print(mod.header.name.value)
-print(mod.members[0].kind)
-print(mod.members[1].header.dataType)
-```
-
-```
-memory
-SyntaxKind.PortDeclaration
-reg [7:0]
-```
-
-We can also evaluate arbitrary SystemVerilog expressions:
-```py
-session = pyslang.ScriptSession()
-session.eval("logic bit_arr [16] = '{0:1, 1:1, 2:1, default:0};")
-result = session.eval("bit_arr.sum with ( int'(item) );")
-print(result)
-```
-
-```
-3
-```
+Experiment with parsing, type checking, and error detection live [on the web](https://sv-lang.com/explore/) (inspired by Matt Godbolt's excellent [Compiler Explorer](https://godbolt.org/)).
 
 ### Upstream Sync
 
@@ -179,7 +118,7 @@ Special thanks to Michael Popoloski, the original author of slang, and all contr
 
 **Original License (MIT):**
 
->   Copyright (c) 2015-2025 Michael Popoloski
+>   Copyright (c) 2015-2026 Michael Popoloski
 >
 >   Permission is hereby granted, free of charge, to any person obtaining a copy
 >   of this software and associated documentation files (the "Software"), to deal

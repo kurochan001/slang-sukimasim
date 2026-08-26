@@ -98,7 +98,7 @@ TEST_CASE("Test CommandLine -- basic") {
     CHECK(vals[5] == "--buz");
     CHECK(vals[6] == "--boz");
 
-    auto help = "\n" + cmdLine.getHelpText("prog - A fun program!!");
+    auto help = "\n" + cmdLine.getHelpText("prog - A fun program!!", 100);
     CHECK(help == R"(
 OVERVIEW: prog - A fun program!!
 
@@ -122,6 +122,96 @@ OPTIONS:
   -m,+multi            SDF
   --count              asdf
 )");
+
+    std::vector<std::pair<std::string, std::string>> expected = {
+        {"-a", "SDF"},
+        {"-b", "SDF"},
+        {"-z,-y,-x,--longFlag", "This flag does fun stuff"},
+        {"--longFlag2", "Another\ngood\nthing"},
+        {"-c", "SDF"},
+        {"-d", "SDF"},
+        {"-e,--ext", "Definitely should set me"},
+        {"-f,--ext2 <value>", "Me too!"},
+        {"--biz,--baz <entry>", "SDF"},
+        {"--buz,--boz=<val>", "SDF"},
+        {"--fiz,--faz", "SDF"},
+        {"--fuz,--foz", "SDF"},
+        {"-m,+multi", "SDF"},
+        {"--count", "asdf"},
+    };
+    CHECK(cmdLine.getHelpOptions() == expected);
+}
+
+TEST_CASE("Test CommandLine -- help text groups") {
+    std::optional<bool> a, b, c, d, e;
+
+    CommandLine cmdLine;
+    cmdLine.setProgramName("prog");
+
+    // Start with a named group so that the default group isn't the first one seen.
+    cmdLine.setGroup("First Group");
+    cmdLine.add("--one", a, "in first group");
+
+    cmdLine.setGroup("Second Group");
+    cmdLine.add("--two", b, "in second group");
+
+    // Registering back into the first group should cluster with --one.
+    cmdLine.setGroup("First Group");
+    cmdLine.add("--three", c, "also first group");
+
+    // Setting an empty group name reverts to the default section, which is always
+    // displayed at the top of the list, before any named groups.
+    cmdLine.setGroup("");
+    cmdLine.add("--four", d, "ungrouped");
+    cmdLine.add("--five", e, "also ungrouped");
+
+    auto help = "\n" + cmdLine.getHelpText("grouped program", 100);
+    CHECK(help == R"(
+OVERVIEW: grouped program
+
+USAGE: prog [options]
+
+OPTIONS:
+  --four   ungrouped
+  --five   also ungrouped
+
+First Group:
+  --one    in first group
+  --three  also first group
+
+Second Group:
+  --two    in second group
+)");
+}
+
+TEST_CASE("Test CommandLine -- help text description wrapping") {
+    std::optional<bool> a;
+
+    CommandLine cmdLine;
+    cmdLine.setProgramName("prog");
+    cmdLine.add("--a-very-long-option-name-here", a,
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen");
+
+    auto help = cmdLine.getHelpText("", 100);
+
+    // The description is word-wrapped, with continuation lined up under the
+    // description column and no word split across lines.
+    std::string expected = "USAGE: prog [options]\n\nOPTIONS:\n"
+                           "  --a-very-long-option-name-here  "
+                           "one two three four five six seven eight nine ten eleven twelve\n" +
+                           std::string(34, ' ') + "thirteen fourteen\n";
+    CHECK(help == expected);
+
+    // No line may exceed the maximum column width.
+    size_t pos = 0;
+    while (pos < help.size()) {
+        size_t nl = help.find('\n', pos);
+        size_t end = (nl == std::string::npos) ? help.size() : nl;
+        CHECK(end - pos <= 100);
+        if (nl == std::string::npos)
+            break;
+        pos = nl + 1;
+    }
 }
 
 TEST_CASE("Test CommandLine -- backslash at EOL") {
@@ -301,15 +391,15 @@ TEST_CASE("Test CommandLine -- user errors") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 9);
-    CHECK(errors[0] == "prog: expected value for argument '--foo'"s);
-    CHECK(errors[1] == "prog: invalid value '123f4' for integer argument '--foo'"s);
-    CHECK(errors[2] == "prog: expected value for argument '--bar'"s);
-    CHECK(errors[3] == "prog: invalid value '123.45g' for float argument '--bar'"s);
-    CHECK(errors[4] == "prog: invalid value 'asdf' for boolean argument '--frob=asdf'"s);
-    CHECK(errors[5] == "prog: more than one value provided for argument '--foo'"s);
-    CHECK(errors[6] == "prog: unknown command line argument '-D'"s);
-    CHECK(errors[7] == "prog: unknown command line argument '--frib', did you mean '--frob'?"s);
-    CHECK(errors[8] == "prog: no value provided for argument '--bar'"s);
+    CHECK(errors[0].message == "expected value for argument '--foo'"s);
+    CHECK(errors[1].message == "invalid value '123f4' for integer argument '--foo'"s);
+    CHECK(errors[2].message == "expected value for argument '--bar'"s);
+    CHECK(errors[3].message == "invalid value '123.45g' for float argument '--bar'"s);
+    CHECK(errors[4].message == "invalid value 'asdf' for boolean argument '--frob=asdf'"s);
+    CHECK(errors[5].message == "more than one value provided for argument '--foo'"s);
+    CHECK(errors[6].message == "unknown command line argument '-D'"s);
+    CHECK(errors[7].message == "unknown command line argument '--frib', did you mean '--frob'?"s);
+    CHECK(errors[8].message == "no value provided for argument '--bar'"s);
 }
 
 TEST_CASE("Test CommandLine -- grouping") {
@@ -392,7 +482,7 @@ TEST_CASE("Test CommandLine -- grouping error") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 1);
-    CHECK(errors[0] == "prog: unknown command line argument '-abc', did you mean '-a'?"s);
+    CHECK(errors[0].message == "unknown command line argument '-abc', did you mean '-a'?"s);
 }
 
 TEST_CASE("Test CommandLine -- grouping trailing error") {
@@ -409,7 +499,7 @@ TEST_CASE("Test CommandLine -- grouping trailing error") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 1);
-    CHECK(errors[0] == "prog: no value provided for argument 'c'"s);
+    CHECK(errors[0].message == "no value provided for argument 'c'"s);
 }
 
 TEST_CASE("Test CommandLine -- nearest match tests") {
@@ -422,8 +512,8 @@ TEST_CASE("Test CommandLine -- nearest match tests") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 2);
-    CHECK(errors[0] == "prog: unknown command line argument '--asdfasdf=asdfasdf'"s);
-    CHECK(errors[1] == "prog: unknown command line argument '--fooey', did you mean '--foo'?"s);
+    CHECK(errors[0].message == "unknown command line argument '--asdfasdf=asdfasdf'"s);
+    CHECK(errors[1].message == "unknown command line argument '--fooey', did you mean '--foo'?"s);
 }
 
 TEST_CASE("Test CommandLine -- positional not allowed") {
@@ -436,7 +526,7 @@ TEST_CASE("Test CommandLine -- positional not allowed") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 1);
-    CHECK(errors[0] == "prog: positional arguments are not allowed (see e.g. 'asdf')"s);
+    CHECK(errors[0].message == "positional arguments are not allowed (see e.g. 'asdf')"s);
 }
 
 TEST_CASE("Test CommandLine -- plusarg errors") {
@@ -453,9 +543,9 @@ TEST_CASE("Test CommandLine -- plusarg errors") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 3);
-    CHECK(errors[0] == "prog: unknown command line argument '+unknown'"s);
-    CHECK(errors[1] == "prog: no value provided for argument '+foo'"s);
-    CHECK(errors[2] == "prog: invalid value 'asdf' for float argument '+num'"s);
+    CHECK(errors[0].message == "unknown command line argument '+unknown'"s);
+    CHECK(errors[1].message == "no value provided for argument '+foo'"s);
+    CHECK(errors[2].message == "invalid value 'asdf' for float argument '+num'"s);
 }
 
 TEST_CASE("Test CommandLine -- file names") {
@@ -534,7 +624,7 @@ TEST_CASE("Test CommandLine -- check setRenameCommand()") {
 
 TEST_CASE("Test CommandLine -- ignore and rename errors") {
     CommandLine cmdLine;
-    CHECK(cmdLine.addRenameCommand("--xxx").find("missing or extra comma") != std::string::npos);
+    CHECK(contains(cmdLine.addRenameCommand("--xxx"), "missing or extra comma"));
     CHECK(cmdLine.addIgnoreCommand("--yyy,--bar,baz").find("missing or extra comma") !=
           std::string::npos);
 }
@@ -549,7 +639,7 @@ TEST_CASE("Test CommandLine enum options basic") {
     CHECK(mode == TestMode::Fast);
 
     // Test help text includes valid options
-    auto help = cmdLine.getHelpText("Test program");
+    auto help = cmdLine.getHelpText("Test program", 100);
     CHECK(help.find("Valid options: 'fast', 'normal', 'slow', 'very-detailed-mode'") !=
           std::string::npos);
 }
@@ -584,8 +674,8 @@ TEST_CASE("Test CommandLine -- enum options invalid value") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 1);
-    CHECK(errors[0] == "prog: invalid value 'invalid', valid options are: 'fast', 'normal', "
-                       "'slow', 'very-detailed-mode'");
+    CHECK(errors[0].message == "invalid value 'invalid', valid options are: 'fast', 'normal', "
+                               "'slow', 'very-detailed-mode'");
 }
 
 TEST_CASE("Test CommandLine -- enum options case sensitive") {
@@ -599,8 +689,8 @@ TEST_CASE("Test CommandLine -- enum options case sensitive") {
 
     auto errors = cmdLine.getErrors();
     REQUIRE(errors.size() == 1);
-    CHECK(errors[0] == "prog: invalid value 'Fast', valid options are: 'fast', 'normal', 'slow', "
-                       "'very-detailed-mode'");
+    CHECK(errors[0].message == "invalid value 'Fast', valid options are: 'fast', 'normal', 'slow', "
+                               "'very-detailed-mode'");
 }
 
 TEST_CASE("Test CommandLine -- enum options default value") {
@@ -637,8 +727,8 @@ TEST_CASE("Test CommandLine -- enum options invalid value with valid prefix") {
         CHECK(!cmdLine.parse("prog --mode fast-invalid"));
         auto errors = cmdLine.getErrors();
         REQUIRE(errors.size() == 1);
-        CHECK(errors[0] ==
-              "prog: invalid value 'fast-invalid', valid options are: 'fast', 'normal', "
+        CHECK(errors[0].message ==
+              "invalid value 'fast-invalid', valid options are: 'fast', 'normal', "
               "'slow', 'very-detailed-mode'");
     }
 }

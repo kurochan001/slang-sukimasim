@@ -56,7 +56,8 @@ const Statement& SubroutineSymbol::getBody() const {
                                          stmtCtx);
             // SukimaSim integration: some recovered class function bodies can leave cached
             // statement blocks unconsumed during diagnostic traversal. Do not turn that
-            // recovery state into a frontend abort; the bound statement above is authoritative.
+            // recovery state into a frontend abort; the bound statement above is
+            // authoritative. This subsumes upstream's `if (stmt->bad())` clearing.
             stmtCtx.blocks = {};
         }
     }
@@ -143,11 +144,12 @@ std::pair<SubroutineSymbol*, bool> SubroutineSymbol::fromSyntax(
         result->flags |= MethodFlags::Constructor;
         result->declaredReturnType.setType(compilation.getVoidType());
     }
-    else if (subroutineKind == SubroutineKind::Function) {
+    else if (subroutineKind == SubroutineKind::Function &&
+             proto->returnType->kind != SyntaxKind::VoidType) {
         // The function gets an implicit variable inserted that represents the return value.
         auto implicitReturnVar = compilation.emplace<VariableSymbol>(result->name, result->location,
                                                                      VariableLifetime::Automatic);
-        implicitReturnVar->setDeclaredType(*proto->returnType);
+        implicitReturnVar->getDeclaredType()->setLink(result->declaredReturnType);
         implicitReturnVar->flags |= VariableFlags::CompilerGenerated;
         result->addMember(*implicitReturnVar);
         result->returnValVar = implicitReturnVar;
@@ -467,6 +469,10 @@ SubroutineSymbol& SubroutineSymbol::createFromPrototype(Compilation& compilation
     result->flags = prototype.flags;
     result->arguments = cloneArguments(compilation, *result, prototype.getArguments());
     result->prototype = &prototype;
+
+    if (auto s = prototype.getSyntax())
+        result->setSyntax(*s);
+
     return *result;
 }
 
@@ -684,8 +690,8 @@ bitmask<MethodFlags> SubroutineSymbol::buildArguments(
     bitmask<MethodFlags> resultFlags;
 
     for (auto portBase : syntax.ports) {
-        if (portBase->previewNode)
-            scope.addMembers(*portBase->previewNode);
+        if (auto preview = portBase->previewNode())
+            scope.addMembers(*preview);
 
         if (portBase->kind == SyntaxKind::DefaultFunctionPort) {
             lastDirection = ArgumentDirection::In;
@@ -854,7 +860,7 @@ void SubroutineSymbol::connectExternInterfacePrototype() const {
 
     if (!proto->flags.has(MethodFlags::ForkJoin) && proto->getFirstExternImpl() != nullptr) {
         auto& diag = scope->addDiag(diag::DupInterfaceExternMethod, location);
-        diag << (subroutineKind == SubroutineKind::Function ? "function"sv : "task"sv);
+        diag << SemanticFacts::getSubroutineKindStr(subroutineKind);
         diag << ifaceName << name;
         diag.addNote(diag::NotePreviousDefinition, proto->getFirstExternImpl()->impl->location);
     }
@@ -1184,7 +1190,7 @@ const SubroutineSymbol* MethodPrototypeSymbol::getSubroutine() const {
             subroutine = &SubroutineSymbol::createFromPrototype(comp, *this, nearScope);
             return *subroutine;
         }
-        outerScope.addDiag(diag::NoMemberImplFound, location) << name;
+        outerScope.addDiag(diag::MemberImplNotFound, location) << name;
         return nullptr;
     }
 
@@ -1293,7 +1299,7 @@ void MethodPrototypeSymbol::serializeTo(ASTSerializer& serializer) const {
     if (flags)
         serializer.write("flags", flagsToStr(flags));
 
-    if (auto* sub = getSubroutine())
+    if (auto sub = getSubroutine())
         serializer.write("subroutine", *sub);
 }
 

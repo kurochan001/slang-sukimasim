@@ -181,6 +181,22 @@ endfunction : new
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
+TEST_CASE("Extern/Pure implicit function parsing") {
+    auto& text = R"(
+module memMod();
+    class C;
+        extern static function f();
+    endclass
+
+    function C::f();
+    endfunction
+endmodule
+)";
+
+    parseCompilationUnit(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
 TEST_CASE("Property declarations") {
     auto& text = R"(
 property p3;
@@ -189,6 +205,7 @@ endproperty
 
 c1: cover property (@(posedge clk) a #-# p3);
 a1: assert property (@(posedge clk) a |-> p3);
+r1: restrict property (@(posedge clk) a);
 )";
 
     diagnostics.clear();
@@ -201,10 +218,13 @@ a1: assert property (@(posedge clk) a |-> p3);
     auto propertyDecl = parser.parseSingleMember(SyntaxKind::ModuleDeclaration);
     auto coverStatement = parser.parseSingleMember(SyntaxKind::ModuleDeclaration);
     auto assertStatement = parser.parseSingleMember(SyntaxKind::ModuleDeclaration);
+    auto restrictStatement = parser.parseSingleMember(SyntaxKind::ModuleDeclaration);
 
     REQUIRE(propertyDecl);
     REQUIRE(coverStatement);
     REQUIRE(assertStatement);
+    REQUIRE(restrictStatement);
+    CHECK(restrictStatement->kind == SyntaxKind::ConcurrentAssertionMember);
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
@@ -499,6 +519,49 @@ endclass
     REQUIRE(diagnostics.size() == 2);
     CHECK(diagnostics[0].code == diag::InvalidSuperNew);
     CHECK(diagnostics[1].code == diag::InvalidSuperNew);
+}
+
+TEST_CASE("super.new inside begin/end block -- valid") {
+    auto& text = R"(
+class A;
+    function new;
+    endfunction
+endclass
+
+class B extends A;
+    function new;
+        begin
+            super.new();
+        end
+    endfunction
+endclass
+)";
+
+    parseCompilationUnit(text);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("super.new inside begin/end block -- not first statement") {
+    auto& text = R"(
+class A;
+    function new;
+    endfunction
+endclass
+
+class B extends A;
+    function new;
+        begin
+            $display("Test");
+            super.new();
+        end
+    endfunction
+endclass
+)";
+
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::InvalidSuperNew);
 }
 
 TEST_CASE("Bind directive parsing") {
@@ -1165,6 +1228,28 @@ library rtlLib /a/b/c, f/...*?/asdf*.v,
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
+TEST_CASE("Library map path with glob wildcard containing /*") {
+    // Paths like $ROOT/*/subdir/*.v contain /* which must not be treated as
+    // a block comment start by the lexer.
+    auto tree = SyntaxTree::fromLibraryMapText(
+        R"(library STUB $IP_ROOT/*/stub/*.v, $PRJ/top/stubs/*.v;)", getSourceManager());
+
+    REQUIRE(tree);
+
+    diagnostics = tree->diagnostics();
+    CHECK_DIAGNOSTICS_EMPTY;
+
+    auto& libMap = tree->root().as<LibraryMapSyntax>();
+    REQUIRE(libMap.members.size() == 1);
+    auto& libDecl = libMap.members[0]->as<LibraryDeclarationSyntax>();
+    CHECK(libDecl.name.valueText() == "STUB");
+    REQUIRE(libDecl.filePaths.size() == 2);
+    CHECK(libDecl.filePaths[0]->path.valueText().find("$IP_ROOT/*/stub/*.v") !=
+          std::string_view::npos);
+    CHECK(libDecl.filePaths[1]->path.valueText().find("$PRJ/top/stubs/*.v") !=
+          std::string_view::npos);
+}
+
 TEST_CASE("Genblock parsing regress") {
     auto& text = R"(
 module m;
@@ -1530,7 +1615,7 @@ task:
 )";
 
     parseCompilationUnit(text, LanguageVersion::v1800_2023);
-    REQUIRE(diagnostics.size() == 3);
+    REQUIRE(diagnostics.size() == 1);
 }
 
 TEST_CASE("Nested attributes are not allowed") {
@@ -1604,4 +1689,172 @@ endmodule
     CHECK(diagnostics[0].code == diag::ImplicitParamTypeKeyword);
     CHECK(diagnostics[1].code == diag::ImplicitParamTypeKeyword);
     CHECK(diagnostics[2].code == diag::ImplicitParamTypeKeyword);
+}
+
+TEST_CASE("Trailing comma in ANSI port list") {
+    auto& text = "module foo(input wire a, input wire b,); endmodule";
+    const auto& module = parseModule(text);
+
+    REQUIRE(module.kind == SyntaxKind::ModuleDeclaration);
+    CHECK(module.header->ports->kind == SyntaxKind::AnsiPortList);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::MisplacedTrailingSeparator);
+}
+
+TEST_CASE("No trailing comma in ANSI port list still works") {
+    auto& text = "module foo(input wire a, input wire b); endmodule";
+    const auto& module = parseModule(text);
+
+    REQUIRE(module.kind == SyntaxKind::ModuleDeclaration);
+    CHECK(module.header->ports->kind == SyntaxKind::AnsiPortList);
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
+TEST_CASE("Regress for malformed diag with empty duplicate function specifiers") {
+    auto& text = R"(
+function:o:
+)";
+
+    parseCompilationUnit(text, LanguageVersion::v1800_2023);
+    REQUIRE(diagnostics.size() == 2);
+}
+
+TEST_CASE("Typo keyword in parseMember - 'alwasy' close to 'always'") {
+    // 'alwasy' should trigger TypoKeyword in parseMember
+    auto& text = R"(
+module m;
+    alwasy @(posedge clk) begin end
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::TypoKeyword);
+}
+
+TEST_CASE("Typo keyword in expected location") {
+    // 'alwasy' should trigger TypoKeyword in parseMember
+    auto& text = R"(
+module m;
+    property p;
+        1;
+    endpropety
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::TypoKeyword);
+}
+
+TEST_CASE("Enum base type must be integer or named") {
+    parseCompilationUnit("module m; enum real { A } e; endmodule");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::ExpectedEnumBase);
+}
+
+TEST_CASE("Type reference declaration without var keyword") {
+    parseCompilationUnit("module m; int x; type(x) y; endmodule");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::TypeRefDeclVar);
+}
+
+TEST_CASE("Const function port requires ref direction") {
+    parseCompilationUnit("module m; function void f(const int x); endfunction endmodule");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::ConstFunctionPortRequiresRef);
+}
+
+TEST_CASE("Modport port missing direction specifier") {
+    parseCompilationUnit("interface I; logic a; modport mp((* x *) a); endinterface");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::MissingModportPortDirection);
+}
+
+TEST_CASE("Expected net strength keyword in drive strength") {
+    parseCompilationUnit("module m; wire (foo, strong0) w; endmodule");
+
+    REQUIRE(!diagnostics.empty());
+    CHECK(diagnostics[0].code == diag::ExpectedNetStrength);
+}
+
+TEST_CASE("Nettype not allowed in class") {
+    parseCompilationUnit("class C; nettype real nt; endclass");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::NotAllowedInClass);
+}
+
+TEST_CASE("Unexpected qualifiers on class member") {
+    parseCompilationUnit("class C; local covergroup cg; coverpoint a; endgroup endclass");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::UnexpectedQualifiers);
+}
+
+TEST_CASE("Invalid coverage option assignment") {
+    parseCompilationUnit("module m; covergroup cg; option = 1; endgroup endmodule");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::InvalidCoverageOption);
+}
+
+TEST_CASE("Global clocking block cannot declare items") {
+    auto& text = R"(
+module m;
+    logic clk;
+    global clocking cb @(posedge clk); default input #0; endclocking
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::GlobalClockingEmpty);
+}
+
+TEST_CASE("Delay3 not allowed on user-defined primitive instance") {
+    auto& text = R"(
+module m;
+    p (strong1, strong0) #(1, 2, 3) i1(x, y);
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::Delay3UdpNotAllowed);
+}
+
+TEST_CASE("Implicit return type not allowed in modport import prototype") {
+    parseCompilationUnit("interface I; modport mp(import function f); endinterface");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::ImplicitNotAllowed);
+}
+
+TEST_CASE("Nonstandard nested constraint block") {
+    parseCompilationUnit("class C; int x; constraint cc { { x > 0; } } endclass");
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::NonstandardConstraintBlock);
+}
+
+TEST_CASE("Type reference local variable declaration without var") {
+    auto& text = R"(
+module m;
+    int x;
+    property p;
+        type(x) y;
+        1;
+    endproperty
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 1);
+    CHECK(diagnostics[0].code == diag::TypeRefDeclVar);
 }

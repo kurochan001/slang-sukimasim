@@ -16,6 +16,7 @@ add_custom_command(
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/CompilationDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/ConstEvalDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/DeclarationsDiags.h
+         ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/DriverDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/ExpressionsDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/GeneralDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/LexerDiags.h
@@ -71,15 +72,21 @@ add_library(
   analysis/CaseDecisionDag.cpp
   analysis/ClockInference.cpp
   analysis/DataFlowAnalysis.cpp
+  analysis/DFAResults.cpp
   analysis/DriverTracker.cpp
   analysis/ValueDriver.cpp
   diagnostics/DiagnosticClient.cpp
   diagnostics/DiagnosticEngine.cpp
   diagnostics/Diagnostics.cpp
   diagnostics/JsonDiagnosticClient.cpp
+  diagnostics/StderrDiagnosticClient.cpp
   diagnostics/TextDiagnosticClient.cpp
+  diagnostics/WaiverManager.cpp
+  driver/CompatSettings.cpp
   driver/Driver.cpp
+  driver/MemoryStats.cpp
   driver/SourceLoader.cpp
+  driver/UserDefinedSubroutine.cpp
   numeric/ConstantValue.cpp
   numeric/SVInt.cpp
   numeric/Time.cpp
@@ -101,7 +108,7 @@ add_library(
   syntax/SyntaxNode.cpp
   syntax/SyntaxPrinter.cpp
   syntax/SyntaxTree.cpp
-  syntax/SyntaxVisitor.cpp
+  syntax/SyntaxRewriter.cpp
   text/CharInfo.cpp
   text/Glob.cpp
   text/Json.cpp
@@ -109,10 +116,12 @@ add_library(
   text/SourceManager.cpp
   util/BumpAllocator.cpp
   util/CommandLine.cpp
+  util/Fmt.cpp
   util/IntervalMap.cpp
   util/OS.cpp
   util/SmallVector.cpp
   util/String.cpp
+  util/ThreadPool.cpp
   util/TimeTrace.cpp
   util/Util.cpp)
 
@@ -131,6 +140,7 @@ set_target_properties(
 # Compile options
 target_compile_options(slang_slang PRIVATE ${SLANG_WARN_FLAGS})
 target_compile_definitions(slang_slang PUBLIC $<$<CONFIG:Debug>:SLANG_DEBUG>)
+target_compile_features(slang_slang PUBLIC cxx_std_20)
 
 # Phase 89: Suppress GCC 14 array-bounds false positive warnings
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14.0")
@@ -149,7 +159,12 @@ target_include_directories(
   PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../external/>")
 
 # Link libraries
-target_link_libraries(slang_slang PUBLIC fmt::fmt Boost::headers)
+target_link_libraries(slang_slang PUBLIC Boost::headers)
+target_link_libraries(slang_slang PRIVATE ${tomlplusplus_target} ${fmt_target})
+
+if(SLANG_USE_SYSTEM_BOOST)
+  target_compile_definitions(slang_slang PUBLIC SLANG_USE_SYSTEM_BOOST)
+endif()
 
 if(SLANG_USE_THREADS)
   find_package(Threads REQUIRED)
@@ -158,13 +173,7 @@ if(SLANG_USE_THREADS)
 endif()
 
 if(SLANG_USE_MIMALLOC)
-  target_link_libraries(slang_slang PUBLIC ${mimalloc_target})
-  target_compile_definitions(slang_slang PUBLIC SLANG_USE_MIMALLOC)
-endif()
-
-if(SLANG_USE_CPPTRACE)
-  target_link_libraries(slang_slang PUBLIC cpptrace::cpptrace)
-  target_compile_definitions(slang_slang PUBLIC SLANG_USE_CPPTRACE)
+  target_link_libraries(slang_slang PRIVATE ${mimalloc_target})
 endif()
 
 # If building the Python library we'll end up with a shared lib no matter what,
