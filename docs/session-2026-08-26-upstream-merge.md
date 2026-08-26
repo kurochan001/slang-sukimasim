@@ -120,3 +120,35 @@ IEEE 1800-2023 Strict 互換モード。
 
 pyslang (upstream が pybind11 → nanobind 移行) は `SLANG_INCLUDE_PYLIB` が off のため
 ビルド・検証していない。
+
+## リグレッションスイート (ctest -R regression)
+
+マージ直後は 3件中3件失敗。内訳と対応:
+
+| テスト | 原因 | 状態 |
+|---|---|---|
+| `regression_all_file` | upstream が all.sv に `bins sf = arr;` を追加。fork の `bindCovergroupExpr` が定数評価するため `ConstEvalNonConstVariable` | **修正済** (aac0b3420) — 当該箇所のみ `Expression::bind` へ戻した |
+| `regression_cst_json_gen` | 上と同一原因 | **修正済** |
+| `regression_cst_json_roundtrip` | **マージ前から失敗していた既存バグ**。fork commit `bf0b82e90` が `LexerFacts::getTokenKindText` から `strong0/strong1/weak0/weak1` の case を削除したため、これらのトークンの `rawText()` が空文字を返す。CST JSON が `"kind":"Weak1Keyword","text":""` となり再構築で欠落する | **未修正** |
+
+### regression_cst_json_roundtrip の再現と修正案
+
+```systemverilog
+module m;
+    wor [1:0] w;
+    assign (supply0, weak1) w = 2;   // 再構築時に weak1 が消える
+endmodule
+```
+
+`source/parsing/LexerFacts.cpp` の `getTokenKindText` に以下4行を復元すれば直る見込み
+(upstream・merge-base の双方に存在する。`scripts/tokenkinds.txt` の
+`Weak1Keyword` 等の定義は fork にも残っているため、case の復元のみで足りるはず):
+
+```cpp
+        case TokenKind::Strong0Keyword: return "strong0";
+        case TokenKind::Strong1Keyword: return "strong1";
+        case TokenKind::Weak0Keyword: return "weak0";
+        case TokenKind::Weak1Keyword: return "weak1";
+```
+
+マージ起因ではないため今回は手を入れていない。
