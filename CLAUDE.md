@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | ブランチ | 用途 | テスト状態 |
 |----------|------|-----------|
 | `master` | upstream (MikePopoloski/slang) との互換性維持 | 全テスト通過 |
-| `sukimasim-improvements` | sukimasim シミュレータ開発用 | 54件の意図的差異あり |
+| `sukimasim-improvements` | sukimasim シミュレータ開発用 | 76件の意図的差異あり |
 
 **重要**: `sukimasim-improvements` を `master` にマージしないこと。upstream との互換性が失われます。
 
