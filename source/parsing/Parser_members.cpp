@@ -2101,16 +2101,6 @@ BlockEventExpressionSyntax& Parser::parseBlockEventExpression() {
     return left;
 }
 
-static bool nameHasSelects(const NameSyntax& name) {
-    if (name.kind == SyntaxKind::IdentifierSelectName)
-        return true;
-    if (name.kind == SyntaxKind::ScopedName) {
-        auto& scoped = name.as<ScopedNameSyntax>();
-        return nameHasSelects(*scoped.left) || nameHasSelects(*scoped.right);
-    }
-    return false;
-}
-
 CoverCrossSyntax* Parser::parseCoverCross(AttrList attributes, NamedLabelSyntax* label) {
     auto keyword = expect(TokenKind::CrossKeyword);
 
