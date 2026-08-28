@@ -152,3 +152,26 @@ endmodule
 ```
 
 マージ起因ではないため今回は手を入れていない。
+
+## 後日談: 取り残した dead code (2026-08-28)
+
+マージ後に macOS でビルドしたところ `-Werror` で失敗し、`f7580725f` で修正された。
+
+`Parser_members.cpp` の cover cross 衝突 (上表の「fork の階層参照許容」) で fork 側を採用した際、
+`nameHasSelects()` の呼び出しが両方とも消え、**static 関数の定義だけが残った**。
+自分自身の再帰呼び出ししか参照が無い状態になり、Apple clang 21 の
+`-Wunneeded-internal-declaration` が発火した。
+
+```cpp
+// 削除された、呼び出し元のない関数
+static bool nameHasSelects(const NameSyntax& name) { ... }
+```
+
+### 教訓
+
+- **Linux の gcc はこれを警告しない。** マージ検証 (ビルド + unittests 2493件 +
+  リグレッション) はすべて Linux/gcc で行っており、全て通ったため見逃した
+- 「呼び出し側を削除したが定義が残る」パターンは衝突解決で発生しやすい。
+  解決したファイルの static 関数について呼び出し元の有無を確認すること
+- 他に同種の取り残しが無いことは、解決した12ファイルを走査して確認済み
+- **プラットフォーム依存の警告差は他にも残っている可能性がある** (MSVC 等は未検証)
