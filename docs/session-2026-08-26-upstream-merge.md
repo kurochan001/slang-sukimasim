@@ -175,3 +175,91 @@ static bool nameHasSelects(const NameSyntax& name) { ... }
   解決したファイルの static 関数について呼び出し元の有無を確認すること
 - 他に同種の取り残しが無いことは、解決した12ファイルを走査して確認済み
 - **プラットフォーム依存の警告差は他にも残っている可能性がある** (MSVC 等は未検証)
+
+## 現在の意図的差異 76件（基準リスト）
+
+`803ab9934` 時点。`./build/bin/unittests` は 2493件中76件失敗する。
+これが CLAUDE.md の「76件の意図的差異」の実体。**新しい変更を入れたあと、この一覧と
+差分が出たら退行**とみなす。再生成は:
+
+```bash
+./build/bin/unittests -r xml 2>/dev/null | grep -oP "(?<=<TestCase name=\")[^\"]*"  # 全件
+```
+
+```
+$sformat invalid %p call
+$typename
+Accessing program objects from modules is disallowed
+Additional explicit port expression checks
+Additional implicit port type mismatch checking
+Annex D option system tasks and functions
+Ansi port initializers
+Array query functions
+Array reduction method errors
+Array select out of bounds - invalid
+Array select out of bounds - valid
+Binary operator warnings
+Class constructor calls
+Concurrent assertion expression errors
+Conditional matching expression
+Constraint metadata surfaces solve/soft/dist information
+Cover cross bin set expressions
+Cover cross illegal matches expr
+Cover cross with dotted member access
+Cover points
+Coverage function in constant context
+Coverage options
+Coverage system functions
+Covergroup basic errors
+Covergroup coverage expr forward reference errors
+Covergroup formals are const
+Coverpoint bins
+Coverpoint non-constant bins expressions
+Coverpoints and cover cross name lookup
+Cycle delay errors
+DPI Imports
+DPI signature checking
+Deferred assertion error cases
+Distribution functions
+Enum method eval with non-const args
+Enum method hierarchical reference errors
+Enum method lookup
+Eval enum methods
+Eval string methods
+Format string - errors
+Implicit net creation with missing identifier in port connection -- GH #1888
+Invalid continuous assign
+Invalid name component lookup handling
+Invalid nets
+Invalid unpacked dimensions
+JSON dump -- covergroup with an option
+Methods allowed in constant context
+More port connection tests
+Multi assign through ref ports 2
+Multi assign via mutually referential interfaces
+New array expression
+No latch inferred for always_latch
+No range select ordering error for single bit value
+Non-ansi port errors
+Non-const name selector
+Out-of-bounds range selects in consteval
+Range order mismatch error suppressed in untaken conditionals
+Range select out of bounds during constant eval
+Sampled value functions
+Selects with negative bounds
+Stochastic tasks
+Streaming concat in non-stream context
+Streaming operators
+String method eval with non-const args
+System function args count as outputs
+Task / constructor parse errors
+Typed input port with non-net data type -- GH #1853
+Unrollable for loop drivers -- strict checking
+Unused param defaults are still checked for correctness
+ValuePath toString - element select dynamic index
+Visit all file
+bit-stream cast evaluation
+foreach loop with function call as array name
+v1800-2023: derived covergroups
+v1800-2023: real coverpoint errors
+v1800-2023: solve-before with reals, array sizes```
