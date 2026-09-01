@@ -2215,7 +2215,7 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
         // had a problem resolving its base class, since the symbol may be
         // expected to be defined in the base.
         auto baseClass = sym.as<ClassType>().getBaseClass();
-        if (baseClass && baseClass->isError())
+        if (baseClass && baseClass->isError() && !sym.as<ClassType>().isBaseClassPending())
             result.flags |= LookupResultFlags::SuppressUndeclared;
     }
 

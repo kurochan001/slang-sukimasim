@@ -325,7 +325,12 @@ void ClassType::handleExtends(const ExtendsClauseSyntax& extendsClause, const AS
     auto& comp = context.getCompilation();
     baseClass = &comp.getErrorType();
 
+    // Mark the sentinel as pending so that looking up the base class name
+    // itself is not suppressed by the error-base-class logic in Lookup
+    // (sukimasim #1349).
+    baseClassPending = true;
     auto baseType = Lookup::findClass(*extendsClause.baseName, context);
+    baseClassPending = false;
     if (!baseType)
         return;
 

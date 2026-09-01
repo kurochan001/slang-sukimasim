@@ -80,6 +80,14 @@ public:
         return baseClass;
     }
 
+    /// True while handleExtends is resolving this class's base class, during
+    /// which getBaseClass() returns an error-type sentinel. Lookups for the
+    /// base class name itself must not treat the sentinel as a real error
+    /// base (sukimasim #1349: it silenced the undeclared-identifier error).
+    bool isBaseClassPending() const {
+        return baseClassPending;
+    }
+
     /// Gets the list of interface classes that this class implements.
     /// If this class is itself an interface class, this is instead the list of
     /// interface classes that it extends from, if any.
@@ -194,6 +202,7 @@ private:
     void computeCycles() const;
 
     mutable const Type* baseClass = nullptr;
+    mutable bool baseClassPending = false;
     mutable const Symbol* baseConstructor = nullptr;
     mutable const ForwardingTypedefSymbol* firstForward = nullptr;
     mutable std::span<const Type* const> implementsIfaces;
