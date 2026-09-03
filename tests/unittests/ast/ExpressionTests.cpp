@@ -891,17 +891,17 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto diags = compilation.getAllDiagnostics().filter({diag::PackedArrayConv});
-    REQUIRE(diags.size() == 6);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 10);
     CHECK(diags[0].code == diag::IndexOOB);
     CHECK(diags[1].code == diag::IndexOOB);
-    CHECK(diags[2].code == diag::InvalidPackedRange);
+    CHECK(diags[2].code == diag::PackedArrayConv);
     CHECK(diags[3].code == diag::RangeOOB);
-    CHECK(diags[4].code == diag::InvalidPackedRange);
+    CHECK(diags[4].code == diag::PackedArrayConv);
     CHECK(diags[5].code == diag::RangeOOB);
-    CHECK(diags[6].code == diag::InvalidPackedRange);
+    CHECK(diags[6].code == diag::PackedArrayConv);
     CHECK(diags[7].code == diag::RangeOOB);
-    CHECK(diags[8].code == diag::InvalidPackedRange);
+    CHECK(diags[8].code == diag::PackedArrayConv);
     CHECK(diags[9].code == diag::RangeOOB);
 }
 
