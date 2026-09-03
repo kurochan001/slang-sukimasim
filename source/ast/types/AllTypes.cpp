@@ -716,23 +716,14 @@ const Type& PackedArrayType::fromDim(BumpAllocator& alloc, const ASTContext& con
     if (elementType.isError())
         return elementType;
 
-    // P1.3: Check for invalid packed array range with negative indices
-    // IEEE 1800-2017 §7.4.1: packed array ranges must have non-negative bounds
-    if (dim.left < 0 || dim.right < 0) {
-        // Downgrade to warning: parameter-dependent packed ranges (e.g.,
-        // logic [CVA6Cfg.XLEN-1:0]) may evaluate to invalid bounds when using
-        // a zero-initialized default parameter (config_pkg::cva6_cfg_empty).
-        // The correct bounds are resolved when the module is instantiated with
-        // actual parameter values. Return a 1-bit placeholder type so that
-        // downstream elaboration can continue.
-        context.addDiag(diag::InvalidPackedRange, sourceRange.get()) << dim.left << dim.right;
-        ConstantRange placeholder{0, 0};
-        auto result = alloc.emplace<PackedArrayType>(elementType, placeholder, bitwidth_t(1));
-        if (auto syntax = sourceRange.syntax())
-            result->setSyntax(*syntax);
-        return *result;
-    }
-
+    // IEEE 1800-2023 §6.9.1 Specifying vectors: "The msb and lsb constant
+    // expressions (see 11.2.1) may be any integer value—positive, negative,
+    // or zero."  §7.4.1 Packed arrays says the same for every packed
+    // dimension. The former P1.3 gate downgraded any negative bound to a
+    // 1-bit {0,0} placeholder, which silently collapsed legal declarations
+    // like `logic [-1:4] b` (the §6.9.1 example verbatim) and destroyed
+    // stored values (sukimasim #1236). Upstream slang never had this gate,
+    // so negative bounds now flow through like any other range.
     auto width = checkedMulU32(elementType.getBitWidth(), dim.width());
     if (!width || width > (uint32_t)SVInt::MAX_BITS) {
         uint64_t fullWidth = uint64_t(elementType.getBitWidth()) * dim.width();
