@@ -7,6 +7,8 @@
 //------------------------------------------------------------------------------
 #include "Builtins.h"
 
+#include <cmath>
+
 #include "slang/ast/Compilation.h"
 #include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/types/Type.h"
@@ -61,7 +63,23 @@ public:
         if (!val)
             return nullptr;
 
-        return SVInt(32, (uint64_t)val.real(), true);
+        // Convert through a signed 64-bit value: casting a negative (or NaN /
+        // infinite / out-of-range) double straight to uint64_t is undefined
+        // behaviour (sukimasim #1334, caught by UBSan on $rtoi(-2.9)). Truncate
+        // toward zero per IEEE 1800-2023 20.5, saturate anything the int64 range
+        // cannot hold, and let the 32-bit SVInt take the low bits as before.
+        double r = val.real();
+        int64_t i = 0;
+        if (std::isfinite(r)) {
+            double t = std::trunc(r);
+            if (t >= 9223372036854775808.0)
+                i = INT64_MAX;
+            else if (t < -9223372036854775808.0)
+                i = INT64_MIN;
+            else
+                i = (int64_t)t;
+        }
+        return SVInt(32, (uint64_t)i, true);
     }
 };
 
