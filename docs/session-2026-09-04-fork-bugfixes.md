@@ -91,7 +91,7 @@ import re, xml.etree.ElementTree as ET
 fail = {tc.get('name') for tc in ET.parse('/tmp/junit.xml').getroot().iter('testcase')
         if tc.find('failure') is not None or tc.find('error') is not None}
 doc = open('docs/session-2026-09-04-fork-bugfixes.md').read()
-sec = doc[doc.index('### 現在の基準リスト'):]
+sec = doc[doc.rindex('### 現在の基準リスト'):]  # rindex: この手順自身にも同じ文字列がある
 base = {l.strip() for l in re.search(r'```(.*?)```', sec, re.S).group(1).splitlines() if l.strip()}
 print('fail', len(fail), 'base', len(base))
 print('NEW (退行):', sorted(fail - base))
