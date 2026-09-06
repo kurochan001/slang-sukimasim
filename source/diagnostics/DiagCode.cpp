@@ -849,7 +849,11 @@ static const flat_hash_map<DiagCode, std::tuple<std::string_view, std::string_vi
     {diag::ExpectedValueRangeElement, std::make_tuple("ExpectedValueRangeElement"sv, "expected value range element"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::ExpectedVariableAssignment, std::make_tuple("ExpectedVariableAssignment"sv, "expected variable assignment"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::ExternWildcardPortList, std::make_tuple("ExternWildcardPortList"sv, "extern declaration cannot have a wildcard port list"sv, DiagnosticSeverity::Error, ""sv)},
-    {diag::FinalSpecifierLast, std::make_tuple("FinalSpecifierLast"sv, "'final' specifier must come last in a list of class override specifiers"sv, DiagnosticSeverity::Error, ""sv)},
+    // Issue sukimasim #1230 option 1: the grammar is unambiguous (Annex
+    // A.2.6 puts final last) but IEEE 1800-2023 8.20 Example 3 itself
+    // spells ':final :extends', so say which source requires what - users
+    // copying the example should learn it is the LRM's own inconsistency.
+    {diag::FinalSpecifierLast, std::make_tuple("FinalSpecifierLast"sv, "'final' specifier must come last in a list of class override specifiers per Annex A.2.6 (note: IEEE 1800-2023 8.20 Example 3 spells ':final :extends', which the normative grammar rejects)"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::FinalWithPure, std::make_tuple("FinalWithPure"sv, "'final' specifier cannot be used with a pure virtual member"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::GlobalClockingEmpty, std::make_tuple("GlobalClockingEmpty"sv, "global clocking block cannot declare items"sv, DiagnosticSeverity::Error, ""sv)},
     {diag::IfNoneEdgeSensitive, std::make_tuple("IfNoneEdgeSensitive"sv, "ifnone specify path cannot be an edge-sensitive path"sv, DiagnosticSeverity::Error, ""sv)},
