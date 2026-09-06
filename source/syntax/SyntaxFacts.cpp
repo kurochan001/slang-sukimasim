@@ -1207,6 +1207,12 @@ bool SyntaxFacts::isPossiblePropertyPortItem(TokenKind kind) {
         case TokenKind::LocalKeyword:
         case TokenKind::PropertyKeyword:
         case TokenKind::SequenceKeyword:
+        // sukimasim #1263: `untyped` as the FIRST formal of let/sequence/
+        // property/checker - parseAssertionItemPort already handles the
+        // keyword; the list-entry predicate just never listed it (the
+        // trailing-formal case worked because parseList calls the item
+        // parser directly after a comma).
+        case TokenKind::UntypedKeyword:
         case TokenKind::Comma:
         case TokenKind::InputKeyword:
         case TokenKind::OutputKeyword:
