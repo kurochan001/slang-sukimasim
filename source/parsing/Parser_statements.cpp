@@ -763,14 +763,15 @@ SyntaxList<SyntaxNode> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
             buffer.push_back(newNode);
             errored = false;
 
-            // sukimasim: Disabled DeclarationsAtStart restriction to allow variable declarations anywhere in blocks
-            // This enables more flexible coding patterns and improves compatibility
-            // Completely removed DeclarationsAtStart check for sukimasim compatibility
-            // Original code:
-            // if (!erroredAboutDecls && !isStmt && sawStatement) {
-            //     addDiag(diag::DeclarationsAtStart, loc);
-            //     erroredAboutDecls = true;
-            // }
+            // sukimasim #1313: re-enabled. The relaxation (declarations
+            // anywhere in a block) contradicts Annex A.6.3 / 1666-free
+            // grammar: seq_block/par_block put { block_item_declaration }
+            // strictly before { statement_or_null }, and iverilog /
+            // Verilator / upstream slang all reject the trailing form.
+            if (!erroredAboutDecls && !isStmt && sawStatement) {
+                addDiag(diag::DeclarationsAtStart, loc);
+                erroredAboutDecls = true;
+            }
         }
         kind = peek().kind;
     }

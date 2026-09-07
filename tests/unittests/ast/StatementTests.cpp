@@ -863,6 +863,10 @@ endmodule
 }
 
 TEST_CASE("Statement blocks -- decl after statements") {
+    // sukimasim #1313: the fork had removed the DeclarationsAtStart check
+    // (and this test pinned the removal); re-enabled to match Annex A.6.3 /
+    // 9.3.1 Syntax 9-2 and upstream slang. sukimasim suppresses the
+    // diagnostic in its default mode and surfaces it under --lint/--lrm-strict.
     auto tree = SyntaxTree::fromText(R"(
 module m;
     initial begin
@@ -876,7 +880,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 0);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::DeclarationsAtStart);
 }
 
 TEST_CASE("Void-casted function call statement") {
