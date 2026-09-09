@@ -1081,22 +1081,38 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
     }
 
     classType->genericParameters = paramSymbols.copy(comp);
+    std::optional<detail::ClassSpecializationKey> key;
+    // Uninstantiated scopes keep a separate cache so diagnostic traversal does
+    // not elaborate their specializations and report spurious errors.
+    auto& cache = classType->isUninstantiated ? uninstantiatedSpecMap : specMap;
     if (!forceInvalidParams) {
-        detail::ClassSpecializationKey key(paramValues.copy(comp), typeParams.copy(comp));
-        if (classType->isUninstantiated) {
-            // If we're in an uninstantiated scope we save this specialization
-            // in a separate map so that we don't try to elaborate it further
-            // and potentially cause spurious errors to be issued.
-            auto [it, inserted] = uninstantiatedSpecMap.emplace(key, classType);
-            if (!inserted)
-                return it->second;
-        }
-        else {
-            auto [it, inserted] = specMap.emplace(key, classType);
-            if (!inserted)
-                return it->second;
+        key.emplace(paramValues.copy(comp), typeParams.copy(comp));
+        if (auto it = cache.find(*key); it != cache.end())
+            return it->second;
+    }
+
+    // IEEE 1800-2023 §8.25: matching specializations denote the same type, so
+    // cached references above must remain valid even at the resource limit.
+    // Lazy member resolution can request fresh types after recursionDepth has
+    // unwound. Retain dependency depth across those separate requests instead
+    // of counting all independent specializations of a generic class.
+    uint32_t parentDepth = 0;
+    for (auto parent = context.scope; parent; parent = parent->asSymbol().getParentScope()) {
+        const auto& symbol = parent->asSymbol();
+        if (symbol.kind == SymbolKind::ClassType) {
+            auto depth = symbol.as<ClassType>().specializationDepth;
+            if (depth > parentDepth)
+                parentDepth = depth;
         }
     }
+    auto maxDepth = comp.getOptions().maxClassSpecializationDepth;
+    if (parentDepth >= maxDepth) {
+        context.addDiag(diag::MaxClassSpecializationDepth, instanceLoc) << name << maxDepth;
+        return &comp.getErrorType();
+    }
+    classType->specializationDepth = parentDepth + 1;
+    if (key)
+        cache.emplace(*key, classType);
 
     // Not found, so this is a new entry. Fill in its members and store the
     // specialization for later lookup. If we have a specialization function,

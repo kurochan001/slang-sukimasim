@@ -10,7 +10,9 @@
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
+#include "slang/parsing/Preprocessor.h"
 #include "slang/syntax/AllSyntax.h"
+#include "slang/text/SourceManager.h"
 
 static constexpr const char* PacketClass = R"(
 class Packet;
@@ -4118,4 +4120,67 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::MissingConstraintBlock);
+}
+
+TEST_CASE("Lazy generic class specialization depth limit") {
+    for (const auto* form :
+         {"ISSUE1410_MEMBER", "ISSUE1410_STATIC", "ISSUE1410_TYPEDEF", "ISSUE1410_RETURN"}) {
+        INFO(form);
+        PreprocessorOptions preprocessor;
+        preprocessor.predefines = {form, "ISSUE1410_UNBOUNDED"};
+        CompilationOptions compilationOptions;
+        compilationOptions.maxClassSpecializationDepth = 16;
+        Bag options{preprocessor, compilationOptions};
+        SourceManager sourceManager;
+        auto tree = SyntaxTree::fromFile(
+            TEST_DATA_DIR "../../regression/test_issue1410_class_specialization_depth.sv",
+            sourceManager, options);
+        REQUIRE(tree);
+        Compilation compilation(options);
+        compilation.addSyntaxTree(*tree);
+        auto& diags = compilation.getAllDiagnostics();
+        REQUIRE(diags.size() == 1);
+        CHECK(diags[0].code == diag::MaxClassSpecializationDepth);
+    }
+}
+
+TEST_CASE("Finite and cached class specializations preserve their identity") {
+    for (const auto* form :
+         {"ISSUE1410_MEMBER", "ISSUE1410_STATIC", "ISSUE1410_TYPEDEF", "ISSUE1410_RETURN"}) {
+        for (bool sameType : {false, true}) {
+            INFO(form);
+            INFO(sameType);
+            PreprocessorOptions preprocessor;
+            preprocessor.predefines = {form};
+            CompilationOptions compilationOptions;
+            compilationOptions.maxClassSpecializationDepth = sameType ? 1 : 65;
+            if (sameType)
+                preprocessor.predefines.emplace_back("ISSUE1410_SELF");
+            Bag options{preprocessor, compilationOptions};
+            SourceManager sourceManager;
+            auto tree = SyntaxTree::fromFile(
+                TEST_DATA_DIR "../../regression/test_issue1410_class_specialization_depth.sv",
+                sourceManager, options);
+            REQUIRE(tree);
+            Compilation compilation(options);
+            compilation.addSyntaxTree(*tree);
+            NO_COMPILATION_ERRORS;
+        }
+    }
+}
+
+TEST_CASE("Independent generic specializations do not consume dependency depth") {
+    PreprocessorOptions preprocessor;
+    preprocessor.predefines = {"ISSUE1410_SELF", "ISSUE1410_WIDE"};
+    CompilationOptions compilationOptions;
+    compilationOptions.maxClassSpecializationDepth = 1;
+    Bag options{preprocessor, compilationOptions};
+    SourceManager sourceManager;
+    auto tree = SyntaxTree::fromFile(
+        TEST_DATA_DIR "../../regression/test_issue1410_class_specialization_depth.sv",
+        sourceManager, options);
+    REQUIRE(tree);
+    Compilation compilation(options);
+    compilation.addSyntaxTree(*tree);
+    NO_COMPILATION_ERRORS;
 }

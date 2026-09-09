@@ -211,6 +211,7 @@ private:
     mutable std::optional<uint64_t> cachedBitstreamWidth;
     mutable std::optional<bool> cachedHasCycles;
     SymbolIndex headerIndex;
+    uint32_t specializationDepth = 0;
 };
 
 namespace detail {

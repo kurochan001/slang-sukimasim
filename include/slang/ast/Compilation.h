@@ -205,6 +205,10 @@ struct SLANG_EXPORT CompilationOptions {
     /// The maximum depth of recursive generic class specializations.
     uint32_t maxRecursiveClassSpecialization = 8;
 
+    /// Maximum depth of new class specializations requested through class members.
+    /// This also bounds lazy chains that do not recurse on the C++ call stack.
+    uint32_t maxClassSpecializationDepth = 128;
+
     /// The maximum number of UDP coverage notes that will be generated for a single
     /// warning about missing edge transitions.
     uint32_t maxUDPCoverageNotes = 8;
