@@ -687,6 +687,24 @@ bool lookupUpward(std::span<const NamePlusLoc> nameParts, const NameComponents& 
         upwardCount++;
     } while (scope);
 
+    // sukimasim #1423: LintMode intentionally avoids constructing root
+    // instances, so an otherwise resolvable top-name reference from a package
+    // has no instance to match above. The reference is illegal regardless of
+    // the target members (IEEE 1800-2023 §26.3), so diagnose a dotted name whose
+    // head names a design definition without forcing full elaboration.
+    if (!nameParts.empty() &&
+        context.getCompilation().hasFlag(CompilationFlags::LintMode) &&
+        getContainingPackage(context.scope->asSymbol())) {
+        auto definition =
+            context.getCompilation().tryGetDefinition(name.text, *context.scope).definition;
+        if (definition) {
+            result.clear();
+            result.nameRange = savedRange;
+            result.addDiag(*context.scope, diag::HierarchicalFromPackage, savedRange);
+            return false;
+        }
+    }
+
     result.clear();
     result.nameRange = savedRange;
     if (firstMatch) {
