@@ -1755,6 +1755,10 @@ const Diagnostics& Compilation::getParseDiagnostics() {
     return *cachedParseDiagnostics;
 }
 
+Diagnostics Compilation::getRecordedSemanticDiagnostics() {
+    return diagMap.coalesce(sourceManager);
+}
+
 const Diagnostics& Compilation::getSemanticDiagnostics() {
     if (cachedSemanticDiagnostics)
         return *cachedSemanticDiagnostics;

@@ -375,6 +375,12 @@ public:
     /// Gets the diagnostics produced during lexing, preprocessing, and syntax parsing.
     const Diagnostics& getParseDiagnostics();
 
+    /// Gets semantic diagnostics that have already been recorded without triggering
+    /// elaboration or freezing the compilation. This is intended for clients that
+    /// perform a bounded, explicit semantic check before deciding whether full
+    /// elaboration is safe.
+    Diagnostics getRecordedSemanticDiagnostics();
+
     /// Gets the diagnostics produced during semantic analysis, including the creation of
     /// symbols, type checking, and name lookup. Note that this will finalize the compilation,
     /// including forcing the evaluation of any symbols or expressions that were still waiting
