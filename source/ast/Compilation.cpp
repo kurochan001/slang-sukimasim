@@ -1176,6 +1176,19 @@ void Compilation::noteDPIExportDirective(const DPIExportSyntax& syntax, const Sc
     dpiExportDirectives.emplace_back(&syntax, &scope);
 }
 
+void Compilation::resolveDPIExports() {
+    SLANG_ASSERT(!isFrozen());
+
+    // Issue #1363: full elaboration populates dpiExports at the end of Compilation::elaborate().
+    // A caller that does not fully elaborate (sukimasim's bounded --enable-uvm path) still needs
+    // the resolved exports, so run the export half of checkDPIMethods here. An empty import list
+    // only skips the import/export signature comparison, which needs the import symbols.
+    if (dpiExportDirectives.empty() || !dpiExports.empty())
+        return;
+
+    checkDPIMethods({});
+}
+
 void Compilation::addOutOfBlockDecl(const Scope& scope, const ScopedNameSyntax& name,
                                     const SyntaxNode& syntax, SymbolIndex index) {
     SLANG_ASSERT(!isFrozen());

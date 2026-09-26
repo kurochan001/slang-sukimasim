@@ -627,6 +627,16 @@ public:
     /// Returns the DPI exports collected during elaboration.
     std::span<const DPIExport> getDPIExports() const { return dpiExports; }
 
+    /// Resolves the DPI export directives noted so far into getDPIExports() entries.
+    ///
+    /// Compilation::elaborate() normally performs this at the end of a full elaboration.
+    /// sukimasim compiles --enable-uvm runs with LintMode and deliberately skips full
+    /// elaboration (B225), so without this call the C-to-SV export shim would see zero
+    /// exports and a --lib caller of an `export "DPI-C"` function would fail to resolve
+    /// it (sukimasim #1363). Safe to call more than once: it is a no-op when no export
+    /// directives were noted or the exports are already resolved.
+    void resolveDPIExports();
+
     /// Tracks the existence of an out-of-block declaration (method or constraint) in the
     /// given scope. This can later be retrieved by calling findOutOfBlockDecl().
     void addOutOfBlockDecl(const Scope& scope, const syntax::ScopedNameSyntax& name,
