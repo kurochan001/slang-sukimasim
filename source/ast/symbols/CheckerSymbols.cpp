@@ -752,6 +752,14 @@ public:
             switch (stmt.kind) {
                 case StatementKind::Empty:
                 case StatementKind::List:
+                case StatementKind::Conditional:
+                case StatementKind::Case:
+                case StatementKind::ForLoop:
+                case StatementKind::RepeatLoop:
+                case StatementKind::ForeachLoop:
+                case StatementKind::WhileLoop:
+                case StatementKind::DoWhileLoop:
+                case StatementKind::ForeverLoop:
                     break;
                 case StatementKind::Timed:
                     if (!checkTimed())
