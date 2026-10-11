@@ -26,6 +26,7 @@
 #include <nanobind/trampoline.h>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -48,19 +49,50 @@ using namespace slang::parsing;
 using namespace slang::syntax;
 using namespace slang::ast;
 
-#define EXPOSE_ENUM(handle, name)                                \
-    do {                                                         \
-        nb::enum_<name> e(handle, #name);                        \
-        for (auto member : name##_traits::values) {              \
-            std::string nameStr = std::string(toString(member)); \
-            if (nameStr == "None")                               \
-                nameStr = "None_";                               \
-            if (nameStr == "and")                                \
-                nameStr = "and_";                                \
-            if (nameStr == "or")                                 \
-                nameStr = "or_";                                 \
-            e.value(nameStr.c_str(), member);                    \
-        }                                                        \
+// The Python 3 hard keywords. Any name that collides with one of these gets a
+// trailing underscore appended; soft keywords like "match" are valid attribute
+// names and are left unchanged.
+inline constexpr std::string_view pythonKeywords[] = {
+    "False", "None",     "True",  "and",    "as",   "assert", "async",  "await",    "break",
+    "class", "continue", "def",   "del",    "elif", "else",   "except", "finally",  "for",
+    "from",  "global",   "if",    "import", "in",   "is",     "lambda", "nonlocal", "not",
+    "or",    "pass",     "raise", "return", "try",  "while",  "with",   "yield",
+};
+
+// For each name in the enum we need to sanitize it.
+// For simple Python keywords we need to simply add '_' to the end.
+// For names which start with '$' prepend 's_' in place of '$'.
+// For names which contain '$' replace '$' with '_'.
+inline std::string sanitizeName(const std::string& name) {
+    // A trailing underscore resolves collisions with Python keywords, e.g.
+    // "None" -> "None_", "with" -> "with_".
+    for (std::string_view keyword : pythonKeywords) {
+        if (name == keyword)
+            return name + "_";
+    }
+
+    // '$' is not a valid identifier character. A leading '$' is replaced with
+    // "s_" ("$bits" -> "s_bits") and any other '$' with '_' ("a$b" -> "a_b").
+    std::string result;
+    result.reserve(name.size() + 1);
+    for (size_t i = 0; i < name.size(); i++) {
+        if (name[i] != '$')
+            result.push_back(name[i]);
+        else if (i == 0)
+            result.append("s_");
+        else
+            result.push_back('_');
+    }
+    return result;
+}
+
+#define EXPOSE_ENUM(handle, name)                                              \
+    do {                                                                       \
+        nb::enum_<name> e(handle, #name);                                      \
+        for (auto member : name##_traits::values) {                            \
+            std::string nameStr = sanitizeName(std::string(toString(member))); \
+            e.value(nameStr.c_str(), member);                                  \
+        }                                                                      \
     } while (0)
 
 // nanobind's return-value policies. Unlike pybind11, nanobind returns raw
@@ -87,7 +119,10 @@ static constexpr auto byrefint = nb::rv_policy::reference_internal;
 //
 // NOTE: a behavioral consequence is that `isinstance(x, Scope)` /
 // `isinstance(x, ParameterSymbolBase)` is False for these subclasses in Python,
-// since they no longer inherit the base type but only its methods.
+// since they no longer inherit the base type but only its methods. Scope-derived
+// symbols are still accepted wherever a Scope argument is expected, via an
+// implicit conversion registered alongside the Scope class binding (which can
+// also be invoked explicitly from Python as `Scope(symbol)`).
 template<typename Derived, typename... Extra>
 void addScopeMethods(nb::class_<Derived, Extra...>& cls) {
     cls.def_prop_ro("compilation",
@@ -283,7 +318,7 @@ struct type_caster<std::span<T>> {
         return true;
     }
 
-    bool from_python(handle src, uint8_t flags, cleanup_list* cleanup) noexcept {
+    bool from_python(handle src, uint32_t flags, cleanup_list* cleanup) noexcept {
         // Attempt to reference a buffer, including np.ndarray and array.arrays.
         bool loaded;
         std::tie(loaded, value) = loadSpanFromBuffer<T>(src);
@@ -304,9 +339,25 @@ struct type_caster<std::span<T>> {
         return false; // Python type cannot be loaded into a span.
     }
 
-    template<typename CType>
-    static handle from_cpp(CType&& src, rv_policy policy, cleanup_list* cleanup) noexcept {
-        return ListCaster::from_cpp(std::forward<CType>(src), policy, cleanup);
+    // A span never owns its elements, so they must always be converted as
+    // lvalues no matter the value category of the span itself. Forwarding an
+    // rvalue span would cause nanobind to *move* out of each element (which
+    // for trivially relocatable types zeroes out the source storage).
+    static handle from_cpp(std::span<T> src, rv_policy policy, cleanup_list* cleanup) noexcept {
+        object result = steal(PyList_New(Py_ssize_t(src.size())));
+        if (!result.is_valid())
+            return {};
+
+        Py_ssize_t index = 0;
+        for (T& value : src) {
+            handle h = make_caster<T>::from_cpp(value, policy, cleanup);
+            if (!h.is_valid())
+                return {};
+
+            NB_LIST_SET_ITEM(result.ptr(), index++, h.ptr());
+        }
+
+        return result.release();
     }
 
     explicit operator std::span<T>() { return value; }
@@ -338,7 +389,7 @@ struct type_caster<not_null<Type>> {
         return true;
     }
 
-    bool from_python(handle src, uint8_t flags, cleanup_list* cleanup) noexcept {
+    bool from_python(handle src, uint32_t flags, cleanup_list* cleanup) noexcept {
         return caster.from_python(src, flags, cleanup);
     }
 
@@ -365,7 +416,7 @@ struct type_caster<bitmask<Type>> {
         return true;
     }
 
-    bool from_python(handle src, uint8_t flags, cleanup_list* cleanup) noexcept {
+    bool from_python(handle src, uint32_t flags, cleanup_list* cleanup) noexcept {
         return caster.from_python(src, flags, cleanup);
     }
 
@@ -396,7 +447,7 @@ struct syntax_list_caster_base {
         return true;
     }
 
-    bool from_python(handle src, uint8_t, cleanup_list*) noexcept {
+    bool from_python(handle src, uint32_t, cleanup_list*) noexcept {
         if (!PySequence_Check(src.ptr()))
             return false;
 
@@ -534,7 +585,7 @@ struct type_caster<TokenList> : syntax_list_caster_base<type_caster<TokenList>, 
 // base so the conversion still succeeds.
 inline const std::type_info* registeredOr(const std::type_info* concrete,
                                           const std::type_info* fallback) noexcept {
-    if (concrete && nb_type_lookup(concrete))
+    if (concrete && NB_CALL(nb_type_lookup)(NB_CTX, concrete))
         return concrete;
     return fallback;
 }

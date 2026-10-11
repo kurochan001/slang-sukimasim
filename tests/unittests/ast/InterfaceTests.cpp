@@ -1006,7 +1006,7 @@ parameter p = foo();
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ConstEvalVifType);
 }
@@ -1030,7 +1030,7 @@ TEST_CASE("Top-level iface port params from $static_assert") {
     };
     auto diagCodes = [](Compilation& c) {
         std::vector<DiagCode> codes;
-        for (auto& d : c.getAllDiagnostics())
+        for (auto& d : c.getAllDiagnostics().filter(DefaultIgnoreWarnings))
             codes.push_back(d.code);
         return codes;
     };
@@ -1325,4 +1325,38 @@ endclass
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Arrayed interface port cache regress -- GH #1947") {
+    // NoAck has no 'ack', so on_no_ack is in error. It is written second because that is
+    // the instance a shared body would hide.
+    auto tree = SyntaxTree::fromText(R"(
+interface HasAck;
+    logic req;
+    logic ack;
+endinterface
+
+interface NoAck;
+    logic req;
+endinterface
+
+module Reader (interface a[2]);
+    initial $display("%b", a[0].ack);
+endmodule
+
+module top;
+    HasAck has_ack [2] ();
+    NoAck no_ack [2] ();
+
+    Reader on_has_ack (.a(has_ack));
+    Reader on_no_ack (.a(no_ack));
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::CouldNotResolveHierarchicalPath);
 }

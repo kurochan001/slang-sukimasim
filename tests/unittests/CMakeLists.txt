@@ -10,6 +10,7 @@ add_executable(
   analysis/ConstraintAnalysisTests.cpp
   analysis/DFATests.cpp
   analysis/SensitivityTests.cpp
+  analysis/TautologyTests.cpp
   analysis/MultiAssignTests.cpp
   analysis/PortAnalysisTests.cpp
   analysis/UnusedTests.cpp
@@ -35,6 +36,7 @@ add_executable(
   ast/SystemFuncTests.cpp
   ast/TypeTests.cpp
   ast/WarningTests.cpp
+  parsing/CSTSerializerTests.cpp
   parsing/DiagnosticTests.cpp
   parsing/ExpressionParsingTests.cpp
   parsing/LexerTests.cpp

@@ -3,13 +3,33 @@
 # SPDX-License-Identifier: MIT
 # ~~~
 
-execute_process(
-  COMMAND
-    bash -c
-    "git remote get-url origin | sed -E 's#(git@[^:]+:|ssh://git@[^/]+/|https://[^/]+/).*#\\1#'"
-  OUTPUT_VARIABLE GITHUB_PREFIX
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
-message(STATUS "Git remote URL: ${GITHUB_PREFIX}")
+# Derive the base URL prefix used to fetch slang's dependencies. By default they
+# come from GitHub over HTTPS, which keeps the self-contained build working from
+# a plain checkout, a release tarball, or any tree without a .git directory. If
+# slang itself was cloned from a mirror we inherit that mirror's host and
+# protocol so the dependencies are fetched from the same place. Users behind a
+# firewall or using a custom mirror can override this directly with
+# -DSLANG_DEP_URL_PREFIX=...
+find_package(Git QUIET)
+set(_slang_default_prefix "https://github.com/")
+if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} remote get-url origin
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    OUTPUT_VARIABLE _slang_origin
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    RESULT_VARIABLE _slang_git_rc)
+  # CMAKE_MATCH_1 is only set on a real match, so unusual origins (local paths,
+  # file:// clones, ...) fall back to HTTPS instead of forming a malformed URL.
+  if(_slang_git_rc EQUAL 0 AND _slang_origin MATCHES
+                               "^(git@[^:]+:|ssh://[^/]+/|https?://[^/]+/)")
+    set(_slang_default_prefix "${CMAKE_MATCH_1}")
+  endif()
+endif()
+set(SLANG_DEP_URL_PREFIX
+    "${_slang_default_prefix}"
+    CACHE STRING "Base URL prefix used to fetch slang's dependencies")
+message(STATUS "Dependency URL prefix: ${SLANG_DEP_URL_PREFIX}")
 
 # --- fmt lib ---
 if(SLANG_USE_SYSTEM_FMT)
@@ -26,7 +46,7 @@ if(SLANG_USE_SYSTEM_FMT)
 else()
   FetchContent_Declare(
     fmt
-    GIT_REPOSITORY ${GITHUB_PREFIX}fmtlib/fmt.git
+    GIT_REPOSITORY ${SLANG_DEP_URL_PREFIX}fmtlib/fmt.git
     GIT_TAG 12.2.0
     GIT_SHALLOW ON
     SYSTEM EXCLUDE_FROM_ALL)
@@ -70,15 +90,14 @@ else()
   add_library(Boost::headers ALIAS boost_unordered)
 
   # slang uses boost::regex (in place of std::regex) as a header-only library.
-  # We fetch just the regex repo; boost.regex auto-detects standalone mode by
-  # the absence of <boost/config.hpp> and falls back to the C++ standard library
-  # for its dependencies. We don't add_subdirectory the fetched repo
-  # (SOURCE_SUBDIR pointed at a non-existent path makes
-  # FetchContent_MakeAvailable populate only).
+  # We fetch just the regex repo and force standalone mode (see below) so it
+  # falls back to the C++ standard library for its dependencies. We don't
+  # add_subdirectory the fetched repo (SOURCE_SUBDIR pointed at a non-existent
+  # path makes FetchContent_MakeAvailable populate only).
   message(STATUS "Using FetchContent for boost::regex (header-only)")
   FetchContent_Declare(
     boost_regex
-    GIT_REPOSITORY ${GITHUB_PREFIX}MikePopoloski/regex.git
+    GIT_REPOSITORY ${SLANG_DEP_URL_PREFIX}MikePopoloski/regex.git
     GIT_TAG boost-1.91.0
     GIT_SHALLOW ON
     SOURCE_SUBDIR _no_build_)
@@ -87,6 +106,13 @@ else()
   target_include_directories(
     boost_unordered SYSTEM
     INTERFACE "$<BUILD_INTERFACE:${boost_regex_SOURCE_DIR}/include>")
+
+  # Force boost::regex standalone mode instead of relying on its auto-detection,
+  # which only kicks in when <boost/version.hpp> is absent. If a system boost is
+  # installed, auto-detection fails to enable standalone mode and boost::regex
+  # pulls in system boost headers that clash with our vendored boost_unordered.
+  target_compile_definitions(
+    boost_unordered INTERFACE "$<BUILD_INTERFACE:BOOST_REGEX_STANDALONE>")
 endif()
 
 # --- mimalloc ---
@@ -111,8 +137,8 @@ if(SLANG_USE_MIMALLOC)
 
   FetchContent_Declare(
     mimalloc
-    GIT_REPOSITORY ${GITHUB_PREFIX}microsoft/mimalloc.git
-    GIT_TAG v3.5.0
+    GIT_REPOSITORY ${SLANG_DEP_URL_PREFIX}microsoft/mimalloc.git
+    GIT_TAG v3.5.3
     GIT_SHALLOW ON
     FIND_PACKAGE_ARGS 3.5)
   FetchContent_MakeAvailable(mimalloc)
@@ -147,7 +173,7 @@ endif()
 if(SLANG_INCLUDE_TESTS)
   FetchContent_Declare(
     Catch2
-    GIT_REPOSITORY ${GITHUB_PREFIX}catchorg/Catch2.git
+    GIT_REPOSITORY ${SLANG_DEP_URL_PREFIX}catchorg/Catch2.git
     GIT_TAG v3.16.0
     GIT_SHALLOW ON
     FIND_PACKAGE_ARGS 3.16)
@@ -175,7 +201,7 @@ if(SLANG_USE_SYSTEM_TOMLPLUSPLUS)
 else()
   FetchContent_Declare(
     tomlplusplus
-    GIT_REPOSITORY ${GITHUB_PREFIX}marzer/tomlplusplus.git
+    GIT_REPOSITORY ${SLANG_DEP_URL_PREFIX}marzer/tomlplusplus.git
     GIT_TAG v3.4.0
     GIT_SHALLOW ON
     FIND_PACKAGE_ARGS 3.4)

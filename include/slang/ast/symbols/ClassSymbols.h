@@ -210,8 +210,15 @@ private:
     mutable std::optional<const Expression*> baseConstructorCall;
     mutable std::optional<uint64_t> cachedBitstreamWidth;
     mutable std::optional<bool> cachedHasCycles;
+    // Depth of this specialization within a chain of specializations of the *same*
+    // generic class, bounded by CompilationOptions::maxRecursiveClassSpecialization.
+    mutable uint32_t specializationDepth = 0;
     SymbolIndex headerIndex;
-    uint32_t specializationDepth = 0;
+    // sukimasim (#1410): depth of this specialization within a chain of *any* enclosing
+    // class specializations, bounded by CompilationOptions::maxClassSpecializationDepth.
+    // Kept separate from specializationDepth so the same-generic-class guard above is
+    // not tripped by legitimately deep nesting of distinct generic classes.
+    uint32_t dependencyDepth = 0;
 };
 
 namespace detail {

@@ -53,7 +53,7 @@ error LiteralSizeIsZero "size of vector literal cannot be zero"
 error LiteralSizeTooLarge "size of vector literal is too large (> {} bits)"
 error ValueMustBeIntegral "value must be integral"
 warning value-must-not-be-unknown ValueMustNotBeUnknown "value must not have any unknown bits"
-warning value-must-be-positive ValueMustBePositive "value must be positive"
+error ValueMustBePositive "value must be positive"
 error ValueExceedsMaxBitWidth "value exceeds maximum vector width ({} bits)"
 error ValueOutOfRange "{} is out of allowed range ({} to {})"
 error ExpectedVectorDigits "expected vector literal digits"
@@ -600,6 +600,7 @@ warning init-self InitSelf "initializer of '{}' refers to itself"
 warning unnamed-generate UnnamedGenerate "generate block is unnamed"
 warning member-impl-not-found MemberImplNotFound "implementation not found in parent scope for '{}'"
 warning ref-arg-automatic RefArgAutomaticFunc "'ref' arguments can only be used in 'automatic' subroutines"
+warning prefer-localparam PreferLocalparam "prefer 'localparam' because parameter cannot be overridden in this context"
 
 subsystem Expressions
 error BadUnaryExpression "invalid operand type {} to unary expression"
@@ -615,7 +616,7 @@ error BadSetMembershipType "invalid type {} for {} expression"
 error RangeWidthOverflow "select range overflows the bounds of a signed 32-bit integer"
 error RangeSelectAssociative "cannot take a slice of an associative array"
 error ExprMustBeIntegral "expression type {} is not integral"
-warning index-value-invalid IndexValueInvalid "cannot refer to element {} of {}"
+error IndexValueInvalid "cannot refer to element {} of {}"
 warning select-endian-mismatch SelectEndianMismatch "endianness of selection must match declared range (type is {})"
 error SelectEndianDynamic "range of selection [{}:{}] into {} is reversed"
 error BadAssignment "value of type {} cannot be assigned to type {}"
@@ -646,7 +647,8 @@ error AssignmentPatternKeyDupDefault "assignment pattern has multiple default ke
 error AssignmentPatternKeyDupValue "assignment pattern has multiple keys for index {}"
 error AssignmentPatternKeyDupName "assignment pattern has multiple keys for member '{}'"
 error AssignmentPatternNoMember "member '{}' is not covered by any assignment pattern key"
-error AssignmentPatternMissingElements "not all elements of array are covered by an assignment pattern key"
+error AssignmentPatternMissingElements "assignment pattern does not cover all elements of type {}"
+error AssignmentPatternMissingDynamicElements "assignment pattern does not cover all elements in an array of length {} of type {}"
 error AssignmentPatternDynamicType "assignment patterns for dynamic arrays, associative arrays, and queues cannot have type keys"
 error AssignmentPatternAssociativeType "assignment pattern for associative array must specify key:value pairs"
 error EmptyArgNotAllowed "empty argument not allowed"
@@ -1286,6 +1288,12 @@ warning multiple-always-assigns MultipleAlwaysAssigns "variable '{}' driven by {
 warning fork-loop-var ForkLoopVar "loop variable '{}' is used inside a {} block; all loop iterations will see the same stale value (use an automatic local variable inside the fork to capture the current value)"
 warning loop-var-modify LoopVarModify "loop variable '{}' is modified in both the `for` loop step and the loop body"
 note NoteLoopVarStep "loop step expression here"
+warning tautological-self-compare SelfCompare "self-comparison always evaluates to {}"
+warning tautological-range-compare OutOfRangeCompare "comparison of {}-bit {} value {} {} is always {}"
+warning tautological-limit-compare LimitCompare "comparison of {}-bit {} value {} {} is always {}"
+warning tautological-bitwise-compare BitwiseCompare "bitwise comparison always evaluates to {}"
+warning tautological-overlap-compare OverlapCompare "{} comparisons always evaluate to {}"
+warning tautological-negation-compare NegationCompare "'{}' of a value and its negation always evaluates to {}"
 warning loop-cond-not-modified LoopCondNotModified "none of the variables in `for` loop condition are modified in the loop step expressions or body statements"
 
 subsystem Meta
@@ -1325,7 +1333,9 @@ group default = { real-underflow real-overflow vector-overflow int-overflow unco
                   string-int-concat range-select-reversed nonstandard-constraint-block format-empty-arg
                   format-too-many-args clockvar-target-assign cross-ident-in-binsof ref-arg-in-fork-join
                   cannot-index-scalar string-in-constraint virtual-arg-name-mismatch undefined-param-override
-                  redefinition redefinition-different-type command-line }
+                  redefinition redefinition-different-type command-line tautological-self-compare
+                  tautological-range-compare tautological-bitwise-compare tautological-overlap-compare
+                  tautological-negation-compare }
 
 group extra = { empty-member empty-stmt dup-import pointless-void-cast case-gen-none case-gen-dup
                 unused-result format-real ignored-slice task-ignored width-trunc dup-attr event-const
@@ -1338,7 +1348,7 @@ group extra = { empty-member empty-stmt dup-import pointless-void-cast case-gen-
                 shadow-hierarchy shadow-property implicit-conv inc-dec-bit dangling-else constraint-func-cycle
                 misleading-indentation constraint-solve-cycle header-guard dynamic-cast-const
                 fork-loop-var loop-var-modify loop-cond-not-modified divide-by-zero colon-plus empty-input-connection
-                bits-of-integer-constant missing-else-clause }
+                bits-of-integer-constant missing-else-clause tautological-limit-compare }
 
 group pedantic = { empty-pattern implicit-net-port nonstandard-escape-code nonstandard-generate format-multibit-strength
                    nonstandard-sys-func nonstandard-foreach nonstandard-dist nonstandard-randomize isunbounded-param-arg udp-coverage }
@@ -1363,3 +1373,50 @@ group parentheses = { bitwise-rel-precedence arith-in-shift logical-not-parenthe
 group unconnected-port = { unconnected-input-port unconnected-output-port unconnected-inout-port }
 group empty-connection = { empty-input-connection empty-output-connection empty-inout-connection }
 group shadow = { randomize-var-shadow shadow-value shadow-hierarchy shadow-property }
+group tautological-compare = { tautological-self-compare tautological-range-compare tautological-limit-compare
+                               tautological-bitwise-compare tautological-overlap-compare tautological-negation-compare }
+
+// Following are per-compat-mode baseline severity overrides, applied by the driver based
+// on the selected --compat mode. Syntax is: compat <mode> <severity> = { <warning-option>... }
+
+compat Default error = { duplicate-definition bad-procedural-force unknown-sys-name
+                         nonstandard-hierarchical-cross nonstandard-string-concat nonstandard-inside
+                         mixed-var-assigns multiple-cont-assigns multiple-always-assigns
+                         misplaced-trailing-separator initializer-required string-int-concat index-oob
+                         range-oob range-width-oob implicit-port-type-mismatch split-distweight-op
+                         dpi-pure-task specify-condition-expr nested-solve-before foreach-call-expr
+                         dynamic-non-procedural qualifiers-on-out-of-block member-impl-not-found
+                         package-import-in-class nonstandard-bare-assoc-pattern literal-leading-underscore
+                         ref-arg-automatic range-select-reversed nonstandard-constraint-block format-empty-arg
+                         format-too-many-args clockvar-target-assign cross-ident-in-binsof
+                         ref-arg-in-fork-join cannot-index-scalar string-in-constraint
+                         virtual-arg-name-mismatch undefined-param-override redefinition
+                         redefinition-different-type }
+
+// sukimasim: --compat=strict is an IEEE 1800-2023 maximum-compliance mode. It takes the
+// same promotions as Default (the mode it used to fall through to when the driver built
+// these lists in C++) plus missing-time-scale, which is only an error under strict.
+compat Strict error = { duplicate-definition bad-procedural-force unknown-sys-name
+                        nonstandard-hierarchical-cross nonstandard-string-concat nonstandard-inside
+                        mixed-var-assigns multiple-cont-assigns multiple-always-assigns
+                        misplaced-trailing-separator initializer-required string-int-concat index-oob
+                        range-oob range-width-oob implicit-port-type-mismatch split-distweight-op
+                        dpi-pure-task specify-condition-expr nested-solve-before foreach-call-expr
+                        dynamic-non-procedural qualifiers-on-out-of-block member-impl-not-found
+                        package-import-in-class nonstandard-bare-assoc-pattern literal-leading-underscore
+                        ref-arg-automatic range-select-reversed nonstandard-constraint-block format-empty-arg
+                        format-too-many-args clockvar-target-assign cross-ident-in-binsof
+                        ref-arg-in-fork-join cannot-index-scalar string-in-constraint
+                        virtual-arg-name-mismatch undefined-param-override redefinition
+                        redefinition-different-type missing-time-scale }
+
+compat Vcs error = { duplicate-definition bad-procedural-force unknown-sys-name nonstandard-hierarchical-cross
+                     nonstandard-string-concat nonstandard-inside mixed-var-assigns multiple-cont-assigns
+                     multiple-always-assigns misplaced-trailing-separator initializer-required
+                     string-int-concat }
+
+compat Vcs ignored = { explicit-static implicit-conv finish-num nonstandard-sys-func nonstandard-foreach
+                       foreach-call-expr nonstandard-dist nested-comment }
+
+compat All ignored = { explicit-static implicit-conv finish-num nonstandard-sys-func nonstandard-foreach
+                       foreach-call-expr nonstandard-dist nested-comment }

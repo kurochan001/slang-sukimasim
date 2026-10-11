@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | ブランチ | 用途 | テスト状態 |
 |----------|------|-----------|
 | `master` | upstream (MikePopoloski/slang) との互換性維持 | 全テスト通過 |
-| `sukimasim-improvements` | sukimasim シミュレータ開発用 | 67件の意図的差異あり (基準リストは `docs/session-2026-09-04-fork-bugfixes.md`) |
+| `sukimasim-improvements` | sukimasim シミュレータ開発用 | 71件の意図的差異あり (基準リストは `docs/session-2026-10-11-upstream-merge.md`) |
 
 **重要**: `sukimasim-improvements` を `master` にマージしないこと。upstream との互換性が失われます。
 
@@ -138,8 +138,10 @@ AST ノードと診断メッセージは `scripts/` 内のテキストファイ�
 - 配列メソッドの動作変更
 - シミュレータ向けセマンティック情報追加
 
-詳細は `docs/session-*.md` を参照。最新の状態は `docs/session-2026-09-04-fork-bugfixes.md`
-(sukimasim issue 起点の修正手順、意図的差異の基準リストと突き合わせ手順、申し送り事項)。
+詳細は `docs/session-*.md` を参照。最新の状態は `docs/session-2026-10-11-upstream-merge.md`
+(upstream v12.0 の取り込み記録、71 件の基準リスト、申し送り事項)。修正手順と突き合わせ
+手順そのものは `docs/session-2026-09-04-fork-bugfixes.md` に、upstream マージの落とし穴は
+`docs/session-2026-08-26-upstream-merge.md` にある。
 
 ## Python バインディング
 

@@ -1025,10 +1025,39 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
         return &comp.getErrorType();
     }
 
+    // The recursionDepth guard above only catches specializations that nest
+    // directly on the call stack. A specialization can also request another
+    // specialization of the same generic class lazily -- for example when
+    // computing the bitstream width of a class property whose type is the
+    // class itself, parameterized by a decrementing value with no base case.
+    // That chain is driven from ClassType::computeSize rather than from a
+    // nested getSpecialization call, so recursionDepth returns to zero between
+    // links and never trips, and the unbounded chain overflows the stack.
+    // Bound it explicitly by tracking, for each specialization, its depth
+    // within a chain of specializations of this same generic class.
+    uint32_t specChainDepth = 0;
+    for (const Scope* s = context.scope; s;) {
+        auto& enclosingSym = s->asSymbol();
+        if (enclosingSym.kind == SymbolKind::ClassType) {
+            auto& enclosing = enclosingSym.as<ClassType>();
+            if (enclosing.genericClass == this) {
+                specChainDepth = enclosing.specializationDepth + 1;
+                break;
+            }
+        }
+        s = enclosingSym.getParentScope();
+    }
+
+    if (specChainDepth > comp.getOptions().maxRecursiveClassSpecialization) {
+        context.addDiag(diag::RecursiveClassSpecialization, instanceLoc) << name;
+        return &comp.getErrorType();
+    }
+
     // Create a class type instance to hold the parameters. If it turns out we already
     // have this specialization cached we'll throw it away, but that's not a big deal.
     auto classType = comp.emplace<ClassType>(comp, name, location);
     classType->genericClass = this;
+    classType->specializationDepth = specChainDepth;
     classType->isUninstantiated = forceInvalidParams || context.scope->isUninstantiated();
     classType->setParent(*scope, getIndex());
 
@@ -1100,7 +1129,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
     for (auto parent = context.scope; parent; parent = parent->asSymbol().getParentScope()) {
         const auto& symbol = parent->asSymbol();
         if (symbol.kind == SymbolKind::ClassType) {
-            auto depth = symbol.as<ClassType>().specializationDepth;
+            auto depth = symbol.as<ClassType>().dependencyDepth;
             if (depth > parentDepth)
                 parentDepth = depth;
         }
@@ -1110,7 +1139,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
         context.addDiag(diag::MaxClassSpecializationDepth, instanceLoc) << name << maxDepth;
         return &comp.getErrorType();
     }
-    classType->specializationDepth = parentDepth + 1;
+    classType->dependencyDepth = parentDepth + 1;
     if (key)
         cache.emplace(*key, classType);
 

@@ -40,7 +40,7 @@ static const Type& getIndexedType(TTypeProvider& typeProvider, const ASTContext&
     const Type& ct = valueType.getCanonicalType();
     if (ct.isArray()) {
         auto& elemType = *ct.getArrayElementType();
-        if (valueType.kind == SymbolKind::PackedArrayType && valueType.isSigned())
+        if (ct.kind == SymbolKind::PackedArrayType && ct.isSigned())
             return elemType.makeUnsigned(typeProvider);
 
         return elemType;
@@ -284,7 +284,7 @@ LValue ElementSelectExpression::evalLValueImpl(EvalContext& context) const {
     bool softFail = false;
     ConstantValue associativeIndex;
     auto range = evalIndex(context, loadedVal, associativeIndex, softFail,
-                           /*allowQueueAppend=*/true);
+                           /* allowQueueAppend */ true);
     if (!range && associativeIndex.bad()) {
         if (!softFail)
             return nullptr;
@@ -1299,8 +1299,6 @@ static bool checkPackedUnionTag(const Type& valueType, const SVInt& val, uint32_
     if (tagBits) {
         bitwidth_t bits = val.getBitWidth();
         auto tag = val.slice(int32_t(bits - 1), int32_t(bits - tagBits)).as<uint32_t>();
-        // An unknown (x/z) tag can never match a concrete member's tag; treat it
-        // as a mismatch rather than dereferencing the empty optional.
         if (!tag || *tag != expectedTag) {
             context.addDiag(diag::ConstEvalTaggedUnion, sourceRange) << memberName;
             return false;

@@ -6,9 +6,11 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "Builtins.h"
+#include <fmt/format.h>
 
 #include "slang/ast/Compilation.h"
 #include "slang/ast/SystemSubroutine.h"
+#include "slang/text/CharInfo.h"
 #include "slang/util/String.h"
 
 namespace slang::ast::builtins {
@@ -169,7 +171,8 @@ public:
 
 class StringAtoIMethod : public SimpleSystemSubroutine {
 public:
-    StringAtoIMethod(const Builtins& builtins, KnownSystemName knownNameId, int /* base */) :
+    StringAtoIMethod(const Builtins& builtins, KnownSystemName knownNameId,
+                     LiteralBase /* base */) :
         SimpleSystemSubroutine(knownNameId, SubroutineKind::Function, 0, {}, builtins.integerType,
                                true) {}
 
@@ -197,7 +200,8 @@ public:
 
 class StringItoAMethod : public SimpleSystemSubroutine {
 public:
-    StringItoAMethod(const Builtins& builtins, KnownSystemName knownNameId, LiteralBase /* base */) :
+    StringItoAMethod(const Builtins& builtins, KnownSystemName knownNameId,
+                     LiteralBase /* base */) :
         SimpleSystemSubroutine(knownNameId, SubroutineKind::Function, 1, {&builtins.integerType},
                                builtins.voidType, true, /* isFirstArgLValue */ true) {}
 
@@ -236,10 +240,13 @@ void Builtins::registerStringMethods() {
     REGISTER(SymbolKind::StringType, StringCompare, *this, KnownSystemName::Compare, false);
     REGISTER(SymbolKind::StringType, StringCompare, *this, KnownSystemName::ICompare, true);
     REGISTER(SymbolKind::StringType, StringSubstr, *this);
-    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToI, 10);
-    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToHex, 16);
-    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToOct, 8);
-    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToBin, 2);
+    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToI,
+             LiteralBase::Decimal);
+    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToHex, LiteralBase::Hex);
+    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToOct,
+             LiteralBase::Octal);
+    REGISTER(SymbolKind::StringType, StringAtoI, *this, KnownSystemName::AToBin,
+             LiteralBase::Binary);
     REGISTER(SymbolKind::StringType, StringAtoReal, *this);
     REGISTER(SymbolKind::StringType, StringItoA, *this, KnownSystemName::IToA,
              LiteralBase::Decimal);
