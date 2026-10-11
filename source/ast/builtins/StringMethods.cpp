@@ -200,7 +200,8 @@ public:
 
 class StringItoAMethod : public SimpleSystemSubroutine {
 public:
-    StringItoAMethod(const Builtins& builtins, KnownSystemName knownNameId, LiteralBase /* base */) :
+    StringItoAMethod(const Builtins& builtins, KnownSystemName knownNameId,
+                     LiteralBase /* base */) :
         SimpleSystemSubroutine(knownNameId, SubroutineKind::Function, 1, {&builtins.integerType},
                                builtins.voidType, true, /* isFirstArgLValue */ true) {}
 

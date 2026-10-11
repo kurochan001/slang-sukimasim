@@ -2619,8 +2619,7 @@ Diagnostic* Compilation::errorMissingDef(std::string_view name, const Scope& sco
     // Genuinely uninstantiated scopes (an unselected `if (0)` generate branch)
     // still answer true here and stay silent, exactly as in a non-lint run.
     if (hasFlag(CompilationFlags::IgnoreUnknownModules) || name.empty() ||
-        (scope.isUninstantiatedIgnoringLint() &&
-         !hasFlag(CompilationFlags::CheckUninstantiated))) {
+        (scope.isUninstantiatedIgnoringLint() && !hasFlag(CompilationFlags::CheckUninstantiated))) {
         return nullptr;
     }
 
