@@ -1129,7 +1129,9 @@ endmodule
 
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
-    CHECK(diags[0].code == diag::InvalidStmtInChecker);
+    // The forever loop itself is allowed in a checker initial procedure, so the
+    // verifier descends into its body and rejects the #1 delay instead.
+    CHECK(diags[0].code == diag::CheckerTimingControl);
 }
 
 TEST_CASE("Checker instance array exceeds maximum size") {
