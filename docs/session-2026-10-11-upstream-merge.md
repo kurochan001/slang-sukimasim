@@ -105,9 +105,11 @@ used 扱いになる (望ましい方向)。
 
 ctest --test-dir build
   FAILED: unittests (上記 71 件)
-  FAILED: ast_lit_tests
   FAILED: regression_cst_json_roundtrip  (既知の未修正バグ, 2026-08-26 から継続)
 ```
+
+(`ast_lit_tests` はマージ直後は失敗していたが、後述の `ValueMustBePositive` /
+`IndexValueInvalid` の `error` 復帰 (同日) で解消した。)
 
 **基準リストからの退行は 0 件。** 新規失敗 4 件はすべて、既存のフォーク意図的差異を
 upstream の新規テストが初めて踏んだもの:
@@ -119,13 +121,44 @@ upstream の新規テストが初めて踏んだもの:
 | `JSON DiagnosticClient` | フォークは `UsedBeforeDeclared` のメッセージに `(IEEE 1800-2023 §6.20.1)` を付ける。upstream `f9bd6fcb0` の新テストが文言を完全一致で検査する |
 | `Effective width of masks, shifts, division, and concatenations` | フォークは宣言初期化子以外の代入 (`assign` / `always_comb`) で幅警告を出さない。upstream `801f5bf32` の新テストが `assign` を使う。同じ差異は既に別テストの期待値を 0 件に書き換える形でベースライン化されている (`WarningTests.cpp` の `test3`) |
 
-`ast_lit_tests` も同種:
+### `ast_lit_tests`: `ValueMustBePositive` / `IndexValueInvalid` を upstream の `error` に戻した (解消)
+
 upstream `ea4f84c55` が追加した `tests/regression/ast/assignment-pattern-diags.sv` が
 `ValueMustBePositive` (4 箇所) と `IndexValueInvalid` (1 箇所) を注釈するが、
-フォークは `scripts/diagnostics.txt` でこの 2 つを `error` → `warning` に降格している
+フォークは `scripts/diagnostics.txt` でこの 2 つを `error` → `warning` に降格していた
 (マージ前 `cce923a81` の時点で既にそう)。既定の警告セットに入らないため lit の
-既定起動では出力されない。**lit は ctest 上の 1 テストなので、基準リスト
-(unittests のテストケース名) には現れない。別枠の既知差異として本節に記録する。**
+既定起動では出力されず、注釈と食い違っていた。
+
+降格の出自は `d2353ce9b` (2026-03-14, OpenTitan/Ibex DV 対応) で、同コミットは
+`ValueMustNotBeUnknown` / `InvalidPackedRange` / `CannotIndexScalar` /
+`SelectEndianMismatch` も一緒に降格している。今回は **依頼どおり
+`ValueMustBePositive` と `IndexValueInvalid` の 2 件だけを upstream の
+`error <Name> "<msg>"` 形式に戻した** (警告はオプション名を要求するが、`error` は
+取らないので `value-must-be-positive` / `index-value-invalid` というオプション名も
+同時に消える)。この 2 つのオプション名は警告グループにも `compat` ブロックにも
+現れていなかったので、参照は孤立しない。
+
+結果:
+
+- `ast_lit_tests` → **Passed**
+- `unittests` の失敗集合は **71 件のまま、名前も完全一致** (NEW 0 / FIXED 0)。
+  `diag::ValueMustBePositive` / `diag::IndexValueInvalid` を検査するテストは
+  重大度ではなく diag code を見ているので影響を受けない
+
+残る注意点 (今回は変えていない):
+
+- `SelectExpressions.cpp` の X/Z スキップ (`d2353ce9b`) はそのままなので、
+  `IndexValueInvalid` が出るのは **定数として確定した不正インデックス**だけ。
+  それが警告ではなくハードエラーになり、CLI の終了コードが非 0 になる
+- 上記の兄弟 4 件 (`ValueMustNotBeUnknown` など) と `AllTypes.cpp` の
+  プレースホルダ型は降格のまま
+- `source/diagnostics/DiagCode.cpp` と `source/diagnostics/slang/diagnostics/*.h`
+  はコミット済みだが CMake は `build/source/` 側を生成・コンパイルするため
+  **ビルドには使われていない死んだ生成物**。今回も更新していない
+
+なお **`ast_lit_tests` と `regression_cst_json_roundtrip` は ctest 上の 1 テストで、
+基準リスト (unittests のテストケース名の列挙) には現れない**。ctest 側の差異は
+今後もこの散文の側に記録する。
 
 ## 現在の基準リスト (71 件, `9e965faf8` 時点)
 
@@ -209,11 +242,13 @@ v1800-2023: solve-before with reals, array sizes
   修正済みだが、upstream 61 コミット分の新規コードに他の警告が残る可能性がある
 - `regression_cst_json_roundtrip` は 2026-08-26 から未修正。再現手順と修正案は
   [session-2026-08-26-upstream-merge.md](session-2026-08-26-upstream-merge.md)
-- `ast_lit_tests` の `ValueMustBePositive` / `IndexValueInvalid` 降格は意図的差異
-  として扱っているが、sukimasim 側が本当にこの緩和を必要としているかは未確認。
-  必要なければ upstream の `error` に戻して lit を通すのが素直
+- ~~`ast_lit_tests` の `ValueMustBePositive` / `IndexValueInvalid` 降格~~ →
+  2026-10-11 に upstream の `error` へ戻して解消。同じ `d2353ce9b` が降格した
+  `ValueMustNotBeUnknown` / `InvalidPackedRange` / `CannotIndexScalar` /
+  `SelectEndianMismatch` は手付かず。OpenTitan/Ibex DV と CVA6 が本当にこの緩和を
+  必要としているかは引き続き未確認
 - `compat Strict` ブロックは Default のリストを丸ごと複製している。upstream が
   モード間の継承構文を導入したら差分を縮められる
 - Phase 2.1 (文字列メソッドの定数評価無効化) は upstream が定数評価を実装した今、
   差分が広がり続ける。sukimasim 側が実行時評価を本当に必要とするか再確認の価値あり
-- push は未実施
+- `master` (`55e72bcfd`) と `sukimasim-improvements` は 2026-10-11 に origin へ push 済み
