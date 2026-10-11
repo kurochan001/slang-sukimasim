@@ -608,6 +608,48 @@ TEST_CASE("Dynamic arrays -- out of bounds") {
     CHECK(diags[5].code == diag::ConstEvalEmptyQueue);
 }
 
+TEST_CASE("Slice store past the end of an array or queue") {
+    // A slice that runs past the last element stores only the elements that
+    // exist; nothing is written one past the end.
+    ScriptSession session;
+    session.eval("int d[] = '{1, 2, 3, 4};");
+    session.eval("int src[4] = '{8, 9, 10, 11};");
+    session.eval("d[2:5] = src;");
+
+    auto cv = session.eval("d");
+    REQUIRE(cv.elements().size() == 4);
+    CHECK(cv.elements()[0].integer() == 1);
+    CHECK(cv.elements()[1].integer() == 2);
+    CHECK(cv.elements()[2].integer() == 8);
+    CHECK(cv.elements()[3].integer() == 9);
+
+    session.eval("int q[$] = '{1, 2, 3};");
+    session.eval("int qsrc[$] = '{7, 8, 9, 10};");
+    session.eval("q[1:4] = qsrc;");
+
+    cv = session.eval("q");
+    REQUIRE(cv.queue()->size() == 3);
+    CHECK((*cv.queue())[0].integer() == 1);
+    CHECK((*cv.queue())[1].integer() == 7);
+    CHECK((*cv.queue())[2].integer() == 8);
+
+    session.eval(R"(
+function automatic int f(int i);
+    int a[4] = '{1, 2, 3, 4};
+    int b[2] = '{8, 9};
+    a[i +: 2] = b;
+    return a[3];
+endfunction
+)");
+    CHECK(session.eval("f(3)").integer() == 8);
+
+    auto diags = session.getDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::ConstEvalDynamicArrayRange);
+    CHECK(diags[1].code == diag::ConstEvalDynamicArrayRange);
+    CHECK(diags[2].code == diag::RangeOOB);
+}
+
 TEST_CASE("Queue read at the append index") {
     // Reading a queue at index == size() (the append slot) is out of bounds; it
     // must warn and return the element default rather than crash. Writing that
@@ -953,6 +995,18 @@ TEST_CASE("Dynamic string ops") {
     CHECK(session.eval("{\"Hi\",str2}").str() == "Hiaaaaa");
     CHECK(session.eval("str2 = {\"Hi\", \"Bye\"}").str() == "HiBye");
 
+    session.eval("localparam int zero = 0;");
+    session.eval("string str3 = \"x\";");
+    CHECK(session.eval("str3 = {0{str1}}").str() == "");
+    CHECK(session.eval("str3 = {zero{str1}}").str() == "");
+    CHECK(session.eval("str3 = {0{str1, \"Hi\"}}").str() == "");
+    CHECK(session.eval("str3 = {0{\"Hi\"}}").str() == "");
+    CHECK(session.eval("{0{str1}}").str() == "");
+    CHECK(session.eval("{{0{str1}}}").str() == "");
+    CHECK(session.eval("{\"x\", {0{str1}}, \"y\"}").str() == "xy");
+    CHECK(session.eval("{str1, {0{\"Hi\"}}, \"y\"}").str() == "ay");
+    CHECK(session.eval("{8'h41, {0{\"Hi\"}}}").integer() == 0x41);
+
     CHECK(session.eval("str1").str() == "a");
 
     session.eval("byte ba[] = \"asdf\";");
@@ -966,6 +1020,18 @@ TEST_CASE("Dynamic string ops") {
     auto diags = session.getDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ConstantConversion);
+}
+
+TEST_CASE("String conversion of values with x or z bits") {
+    // Only zero bytes are removed when an integral value becomes a string [6.16].
+    // A byte reads its x and z bits as 0 [6.11.2], so a byte with a known 1 bit
+    // is kept, and a byte with no known 1 bit is removed.
+    ScriptSession session;
+    CHECK(session.eval("string'(24'h31_3x_33)").str() == "103");
+    CHECK(session.eval("string'(16'b0011_0001_0011_001z)").str() == "12");
+    CHECK(session.eval("string'(16'hxx_31)").str() == "1");
+    CHECK(session.eval("$sformatf(\"%s\", 24'h31_3x_33)"s).str() == "103");
+    NO_SESSION_ERRORS;
 }
 
 TEST_CASE("Ambiguous numeric literals") {
@@ -1191,6 +1257,10 @@ TEST_CASE("Eval sformatf") {
     CHECK(sformatf("%c", "18'hx031") == "1");
     CHECK(sformatf("%c", "999") == "\xe7");
 
+    // The result is a string, so it holds no "\0" characters [6.16] [21.3.3].
+    CHECK(sformatf("a%cb", "8'h00") == "ab");
+    CHECK(sformatf("%c", "0") == "");
+
     CHECK(session.eval("$sformatf(\"%m\")"s).str() == "$unit");
     CHECK(session.eval("$sformatf(\"%l\")"s).str() == "work.$unit");
 
@@ -1203,8 +1273,8 @@ endfunction
 )");
     CHECK(session.eval("func()").str() == "func.baz");
 
-    CHECK(sformatf("%u", "14'ha2c") == "\x2c\x0a\0\0"s);
-    CHECK(sformatf("%z", "14'hzX2c") == "\x2c\x0f\0\0\0\x3f\0\0"s);
+    CHECK(sformatf("%u", "14'ha2c") == "\x2c\x0a"s);
+    CHECK(sformatf("%z", "14'hzX2c") == "\x2c\x0f\x3f"s);
 
     CHECK(sformatf("%v", "1'b1") == "St1");
     CHECK(sformatf("%v", "1'b0") == "St0");
@@ -1264,6 +1334,24 @@ TEST_CASE("sformatf with real conversion") {
     CHECK(session.eval("$sformatf(\"%0d\", 3.14)"s).str() == "3");
 }
 
+TEST_CASE("sformatf with unpacked arrays of byte") {
+    // %s takes an unpacked array of byte [21.2.1.8], and so does the format
+    // string [21.3.3]; characters run from the left bound to the right bound.
+    ScriptSession session;
+    session.eval("byte b[3] = '{\"a\", \"b\", \"c\"};");
+    session.eval("byte r[2:0] = '{\"x\", \"y\", \"z\"};");
+    session.eval("byte q[$] = '{\"q\", 0, \"r\"};");
+    session.eval("byte f[3] = '{\"%\", \"0\", \"d\"};");
+    session.eval("byte e[$];");
+
+    CHECK(session.eval("$sformatf(\"%s\", b)"s).str() == "abc");
+    CHECK(session.eval("$sformatf(\"%s\", r)"s).str() == "xyz");
+    CHECK(session.eval("$sformatf(\"[%4s]\", q)"s).str() == "[  qr]");
+    CHECK(session.eval("$sformatf(f, 5)"s).str() == "5");
+    CHECK(session.eval("$sformatf(\"[%s]\", e)"s).str() == "[]");
+    NO_SESSION_ERRORS;
+}
+
 TEST_CASE("Raw format specifiers (%u/%z) on an unpacked union") {
     // Regression: %u and %z on an unpacked union previously aborted with an internal
     // error (std::get on the wrong ConstantValue variant). The active member's raw
@@ -1294,6 +1382,50 @@ endfunction
     CHECK(session.eval("chk_u()").integer() == 1);
     CHECK(session.eval("chk_z()").integer() == 1);
     CHECK(session.eval("chk_struct()").integer() == 1);
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Integer format specifiers on null literal or chandle") {
+    // Regression: %d/%h/%x/%o/%b/%c on the null literal or a chandle previously aborted
+    // with an internal error (std::get on an invalid ConstantValue variant). The
+    // format-string checker permits these types for the integer specifiers, so they
+    // must format as their numeric value (zero for a null handle).
+    ScriptSession session;
+    CHECK(session.eval("$sformatf(\"%0d\", null)"s).str() == "0");
+    CHECK(session.eval("$sformatf(\"%0x\", null)"s).str() == "0");
+    CHECK(session.eval("$sformatf(\"%0o\", null)"s).str() == "0");
+    CHECK(session.eval("$sformatf(\"%0b\", null)"s).str() == "0");
+    CHECK(session.eval("$sformatf(\"%0h\", null)"s).str() == "0");
+    CHECK(session.eval("$sformatf(\"%c\", null)"s).str() == "");
+
+    session.eval(R"(
+function automatic string f_chandle();
+    chandle ch = null;
+    return $sformatf("%0x", ch);
+endfunction
+)");
+    CHECK(session.eval("f_chandle()").str() == "0");
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("sformatf of a leading x or z digit") {
+    // When the leading digit is a whole x or z digit and the bits above it are zero,
+    // one zero is kept in front of it to show that the value is not extended with
+    // unknowns. Xcelium and Questa do the same; VCS does not.
+    ScriptSession session;
+    auto sformatf = [&](const std::string& fmt, const std::string& arg) {
+        return session.eval("$sformatf(\"" + fmt + "\", " + arg + ")").str();
+    };
+
+    CHECK(sformatf("%0h", "16'h00x1") == "0x1");
+    CHECK(sformatf("%0o", "12'o0x1") == "0x1");
+    CHECK(sformatf("%0b", "8'b0000_000x") == "0x");
+    CHECK(sformatf("%0x", "16'h0z00") == "0z00");
+    CHECK(sformatf("%0h", "8'b000x_0001") == "X1");
+    CHECK(sformatf("%0h", "16'h0011") == "11");
+    CHECK(sformatf("%2h", "16'h00x1") == "0x1");
+    CHECK(sformatf("%3h", "16'h00x1") == "0x1");
+    CHECK(sformatf("%h", "16'h00x1") == "00x1");
     NO_SESSION_ERRORS;
 }
 
@@ -1330,6 +1462,32 @@ endfunction
     CHECK(session.eval("foo(4)").integer() == 4);
     CHECK(session.eval("foo(9)").integer() == 4);
     CHECK(session.eval("foo(8)").integer() == 8);
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Eval repeat loop with a real count") {
+    ScriptSession session;
+    session.eval(R"(
+function automatic int foo(real a);
+    int result = 0;
+    repeat (a)
+        result++;
+
+    return result;
+endfunction
+
+function automatic int bar(shortreal a);
+    int result = 0;
+    repeat (a)
+        result++;
+
+    return result;
+endfunction
+)");
+
+    CHECK(session.eval("foo(1.4)").integer() == 1);
+    CHECK(session.eval("foo(1.5)").integer() == 2);
+    CHECK(session.eval("bar(1.5)").integer() == 2);
     NO_SESSION_ERRORS;
 }
 
@@ -1596,7 +1754,55 @@ TEST_CASE("Eval string methods") {
     CHECK(session.eval("asdf").str() == "10011010010");
 
     session.eval("asdf.realtoa(3.14159);");
-    CHECK(session.eval("asdf").str() == "3.141590");
+    CHECK(session.eval("asdf").str() == "3.14159");
+
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Eval string to integer conversions") {
+    ScriptSession session;
+    auto conv = [&](auto str, auto method) {
+        return session.eval("string'(\""s + str + "\")." + method).integer();
+    };
+
+    // Values of 2^31 and above keep their low 32 bits in every base.
+    CHECK_THAT(conv("7fffffff", "atohex"), exactlyEquals("32'sh7fffffff"_si));
+    CHECK_THAT(conv("80000000", "atohex"), exactlyEquals("32'sh80000000"_si));
+    CHECK_THAT(conv("deadbeef", "atohex"), exactlyEquals("32'shdeadbeef"_si));
+    CHECK_THAT(conv("123456789", "atohex"), exactlyEquals("32'sh23456789"_si));
+    CHECK_THAT(conv("2147483648", "atoi"), exactlyEquals("32'sh80000000"_si));
+    CHECK_THAT(conv("4294967295", "atoi"), exactlyEquals("32'shffffffff"_si));
+    CHECK_THAT(conv("4294967296", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("37777777777", "atooct"), exactlyEquals("32'shffffffff"_si));
+    CHECK_THAT(conv("11111111111111111111111111111111", "atobin"),
+               exactlyEquals("32'shffffffff"_si));
+
+    // A leading minus is accepted, and the negated value is truncated the same way.
+    CHECK_THAT(conv("-5", "atoi"), exactlyEquals("32'shfffffffb"_si));
+    CHECK_THAT(conv("-ff", "atohex"), exactlyEquals("32'shffffff01"_si));
+    CHECK_THAT(conv("-2147483648", "atoi"), exactlyEquals("32'sh80000000"_si));
+    CHECK_THAT(conv("-2147483649", "atoi"), exactlyEquals("32'sh7fffffff"_si));
+
+    // Anything else ends the scan: a plus sign, a second minus, a space, and x or z digits.
+    CHECK_THAT(conv("+5", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("-", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("--5", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv(" 5", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("0x1f", "atohex"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("1z", "atohex"), exactlyEquals("32'sh1"_si));
+    CHECK_THAT(conv("19", "atooct"), exactlyEquals("32'sh1"_si));
+    CHECK_THAT(conv("102", "atobin"), exactlyEquals("32'sh2"_si));
+
+    // Underscores are skipped, but the scan must start with a digit.
+    CHECK_THAT(conv("1__2_", "atoi"), exactlyEquals("32'shc"_si));
+    CHECK_THAT(conv("-1_2", "atoi"), exactlyEquals("32'shfffffff4"_si));
+    CHECK_THAT(conv("f_f", "atohex"), exactlyEquals("32'shff"_si));
+    CHECK_THAT(conv("_5", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("-_5", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("_-5", "atoi"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("_ff", "atohex"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("_7", "atooct"), exactlyEquals("32'sh0"_si));
+    CHECK_THAT(conv("_1", "atobin"), exactlyEquals("32'sh0"_si));
 
     NO_SESSION_ERRORS;
 }
@@ -1638,6 +1844,67 @@ TEST_CASE("Real conversion functions") {
 
     CHECK(session.eval("$shortrealtobits(123.456)").integer() == 1123477881);
     CHECK(session.eval("$bitstoshortreal(1123477881)").shortReal() == 123.456f);
+
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Eval atoreal and realtoa") {
+    ScriptSession session;
+    auto atoreal = [&](const std::string& str) {
+        return session.eval("string'(\"" + str + "\").atoreal()").real();
+    };
+
+    // The scan takes a real constant [6.16.10]: digits, an optional fraction with digits
+    // on both sides of the point, and an optional exponent. It stops at the first
+    // character that does not fit.
+    CHECK(atoreal("1_0.5_e1_") == 105.0);
+    CHECK(atoreal("2.5e-1x") == 0.25);
+    CHECK(atoreal("4.E3") == 4.0);
+    CHECK(atoreal("9.") == 9.0);
+    CHECK(atoreal("1e+") == 1.0);
+    CHECK(atoreal("1e") == 1.0);
+    CHECK(atoreal("1.5.5") == 1.5);
+    CHECK(atoreal("12") == 12.0);
+
+    // A leading sign is accepted.
+    CHECK(atoreal("-1.5") == -1.5);
+    CHECK(atoreal("+1.5") == 1.5);
+
+    // Underscores are skipped, but each run of digits must start with a digit.
+    CHECK(atoreal("1__2_.3_4_e1_0_") == 12.34e10);
+    CHECK(atoreal("_1.5") == 0.0);
+    CHECK(atoreal("-_1.5") == 0.0);
+    CHECK(atoreal("1._5") == 1.0);
+    CHECK(atoreal("1.5e_2") == 1.5);
+    CHECK(atoreal("1.5e-_2") == 1.5);
+
+    // A string that does not start with a real constant gives 0.
+    CHECK(atoreal("") == 0.0);
+    CHECK(atoreal("-") == 0.0);
+    CHECK(atoreal("--1") == 0.0);
+    CHECK(atoreal(".12") == 0.0);
+    CHECK(atoreal(".2e-7") == 0.0);
+    CHECK(atoreal(" 2.5") == 0.0);
+    CHECK(atoreal("inf") == 0.0);
+    CHECK(atoreal("nan") == 0.0);
+    CHECK(atoreal("0x1p3") == 0.0);
+
+    // realtoa stores a representation that atoreal reads back as the same value [6.16.15].
+    session.eval("string s;");
+    auto realtoa = [&](const std::string& val) {
+        session.eval("s.realtoa(" + val + ");");
+        return session.eval("s").str();
+    };
+
+    CHECK(realtoa("1.5") == "1.5");
+    CHECK(realtoa("1.0e-10") == "1e-10");
+    CHECK(session.eval("s.atoreal()").real() == 1.0e-10);
+    CHECK(realtoa("-2.5e-7") == "-2.5e-07");
+    CHECK(session.eval("s.atoreal()").real() == -2.5e-7);
+    CHECK(realtoa("1.0 / 3.0") == "0.3333333333333333");
+    CHECK(session.eval("s.atoreal()").real() == 1.0 / 3.0);
+    CHECK(realtoa("1e300") == "1e+300");
+    CHECK(session.eval("s.atoreal()").real() == 1e300);
 
     NO_SESSION_ERRORS;
 }

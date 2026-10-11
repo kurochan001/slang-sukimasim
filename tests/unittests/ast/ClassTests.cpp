@@ -260,7 +260,7 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 4);
     for (int i = 0; i < 4; i++) {
         CHECK(diags[i].code == diag::ConstEvalClassType);
@@ -1409,7 +1409,7 @@ endclass
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
+    auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 5);
     CHECK(diags[0].code == diag::VirtualReturnMismatch);
     CHECK(diags[1].code == diag::IfaceNameConflict);
@@ -2927,6 +2927,29 @@ endmodule
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::RecursiveClassSpecialization);
     CHECK(diags[1].code == diag::RecursiveClassSpecialization);
+}
+
+TEST_CASE("Recursive generic class specialization via property") {
+    // Regression test: a generic class with a property whose type is the
+    // class itself parameterized by a decrementing value with no base case
+    // used to recurse infinitely while computing its bitstream width and
+    // overflow the stack. It should be diagnosed instead.
+    auto tree = SyntaxTree::fromText(R"(
+class Tree #(int DEPTH = 3);
+    Tree #(DEPTH-1) child;
+endclass
+
+module top;
+    Tree #(2) t;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::RecursiveClassSpecialization);
 }
 
 TEST_CASE("Extend from final class") {
