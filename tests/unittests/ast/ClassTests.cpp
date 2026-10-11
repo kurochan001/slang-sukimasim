@@ -4153,6 +4153,9 @@ TEST_CASE("Lazy generic class specialization depth limit") {
         preprocessor.predefines = {form, "ISSUE1410_UNBOUNDED"};
         CompilationOptions compilationOptions;
         compilationOptions.maxClassSpecializationDepth = 16;
+        // Isolate the dependency-depth guard from upstream's same-generic-class
+        // recursion guard, whose default limit of 8 would fire first.
+        compilationOptions.maxRecursiveClassSpecialization = 64;
         Bag options{preprocessor, compilationOptions};
         SourceManager sourceManager;
         auto tree = SyntaxTree::fromFile(
@@ -4177,6 +4180,9 @@ TEST_CASE("Finite and cached class specializations preserve their identity") {
             preprocessor.predefines = {form};
             CompilationOptions compilationOptions;
             compilationOptions.maxClassSpecializationDepth = sameType ? 1 : 65;
+            // These chains are finite but longer than upstream's default limit of 8
+            // on same-generic-class recursion, which is not what this case exercises.
+            compilationOptions.maxRecursiveClassSpecialization = 128;
             if (sameType)
                 preprocessor.predefines.emplace_back("ISSUE1410_SELF");
             Bag options{preprocessor, compilationOptions};
