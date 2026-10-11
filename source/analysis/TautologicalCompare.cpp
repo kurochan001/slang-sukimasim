@@ -187,6 +187,9 @@ bool isPureNode(const Expression& expr) {
         case ExpressionKind::Dist:
         case ExpressionKind::ClockingEvent:
         case ExpressionKind::AssertionInstance:
+        // sukimasim: a `matches` expression binds pattern variables when it
+        // succeeds (IEEE 1800-2023 12.6), so evaluating it is not side-effect free.
+        case ExpressionKind::Matches:
             return false;
         case ExpressionKind::Call:
             // We have no way of knowing whether an arbitrary function
@@ -259,6 +262,7 @@ bool isLiteralNode(const Expression& expr) {
         case ExpressionKind::ClockingEvent:
         case ExpressionKind::AssertionInstance:
         case ExpressionKind::TaggedUnion:
+        case ExpressionKind::Matches:
             return false;
     }
     SLANG_UNREACHABLE;
