@@ -3433,3 +3433,45 @@ endmodule
     CHECK(diags[0].code == diag::DuplicateImport);
     CHECK(diags[1].code == diag::StaticInitValue);
 }
+
+TEST_CASE("Unit anonymous program lookup retains caller context", "[issue1874]") {
+    auto tree = SyntaxTree::fromText(R"(
+program;
+    function automatic int twice1874(int x);
+        return 2 * x;
+    endfunction
+endprogram
+program p;
+    function automatic int twice1874(int x);
+        return 99;
+    endfunction
+    localparam int localValue = twice1874(21);
+    localparam int unitValue = $unit::twice1874(21);
+endprogram
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    CHECK(compilation.getRoot().lookupName<ParameterSymbol>("p.localValue").getValue().integer() ==
+          99);
+    CHECK(compilation.getRoot().lookupName<ParameterSymbol>("p.unitValue").getValue().integer() ==
+          42);
+}
+
+TEST_CASE("Unit anonymous program lookup rejects module callers", "[issue1874]") {
+    auto tree = SyntaxTree::fromText(R"(
+program;
+    function automatic int twice1874(int x);
+        return 2 * x;
+    endfunction
+endprogram
+module m;
+    initial $display("%0d", $unit::twice1874(21));
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::IllegalReferenceToProgramItem);
+}
