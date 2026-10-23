@@ -1477,14 +1477,16 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
-    REQUIRE(diags.size() == 7);
+    // IEEE 1800-2023 24.3: the anonymous constructor's q.foo reference is also illegal.
+    REQUIRE(diags.size() == 8);
     CHECK(diags[0].code == diag::NotAllowedInAnonymousProgram);
     CHECK(diags[1].code == diag::Redefinition);
-    CHECK(diags[2].code == diag::IllegalReferenceToProgramItem);
+    CHECK(diags[2].code == diag::AnonymousProgramHierarchicalReference);
     CHECK(diags[3].code == diag::IllegalReferenceToProgramItem);
     CHECK(diags[4].code == diag::IllegalReferenceToProgramItem);
     CHECK(diags[5].code == diag::IllegalReferenceToProgramItem);
     CHECK(diags[6].code == diag::IllegalReferenceToProgramItem);
+    CHECK(diags[7].code == diag::IllegalReferenceToProgramItem);
 }
 
 TEST_CASE("Untaken generate block instantiation") {

@@ -3475,3 +3475,70 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::IllegalReferenceToProgramItem);
 }
+
+TEST_CASE("Program scope access restrictions", "[issue2090]") {
+    // IEEE 1800-2023 24.3 / 24.5: check the lexical lookup scope.
+    auto tree = SyntaxTree::fromText(R"(
+program;
+    function automatic int get_level();
+        return top.p.count;
+    endfunction
+endprogram
+program p_t;
+    int count = 3;
+    task report(int v); $display("%0d", v); endtask
+    initial $display("%0d", get_level());
+endprogram
+module top;
+    p_t p();
+    initial $display("%0d", p.count);
+    initial p.report(5);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    int errors = 0;
+    int outsideReferences = 0;
+    int anonymousReferences = 0;
+    for (const auto& diag : diags) {
+        errors += diag.isError();
+        outsideReferences += diag.code == diag::IllegalReferenceToProgramItem;
+        anonymousReferences += diag.code == diag::AnonymousProgramHierarchicalReference;
+    }
+    CHECK(errors == 3);
+    CHECK(outsideReferences == 2);
+    CHECK(anonymousReferences == 1);
+}
+
+TEST_CASE("Legal program scope access remains available", "[issue2090]") {
+    auto tree = SyntaxTree::fromText(R"(
+program;
+    function automatic int design_value(); return top.shared; endfunction
+endprogram
+program source_p;
+    parameter int P = 7;
+    int count = 3;
+    function int add(int v); return v + count; endfunction
+endprogram
+program reader_p;
+    initial begin
+        $display("%0d", top.p.count);
+        $display("%0d", top.p.add(2));
+        top.set_shared(9);
+        $display("%0d", design_value());
+    end
+endprogram
+module top;
+    int shared = 0;
+    task set_shared(int v); shared = v; endtask
+    source_p p();
+    reader_p r();
+    initial $display("%0d", p.P);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

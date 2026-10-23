@@ -200,23 +200,29 @@ const NameSyntax* splitScopedName(const ScopedNameSyntax& syntax,
     return scoped->left;
 }
 
-bool isInProgram(const Symbol& symbol) {
+const Symbol* getContainingProgram(const Symbol& symbol) {
     auto curr = &symbol;
     while (true) {
         if (curr->kind == SymbolKind::AnonymousProgram)
-            return true;
+            return curr;
 
         if (curr->kind == SymbolKind::InstanceBody) {
             return curr->as<InstanceBodySymbol>().getDefinition().definitionKind ==
-                   DefinitionKind::Program;
+                           DefinitionKind::Program
+                       ? curr
+                       : nullptr;
         }
 
         auto scope = curr->getParentScope();
         if (!scope)
-            return false;
+            return nullptr;
 
         curr = &scope->asSymbol();
     }
+}
+
+bool isInProgram(const Symbol& symbol) {
+    return getContainingProgram(symbol) != nullptr;
 }
 
 const Symbol* getContainingPackage(const Symbol& symbol) {
@@ -1051,6 +1057,26 @@ void unwrapResult(const Scope& scope, LookupResult& result, bool unwrapGenericCl
         }
     }
     else if (result.flags.has(LookupResultFlags::IsHierarchical)) {
+        // IEEE 1800-2023 24.3 / 24.5: access follows lexical ownership, including
+        // when a design subroutine is called by a program process.
+        if (auto targetProgram = getContainingProgram(*result.found)) {
+            auto sourceProgram = getContainingProgram(scope.asSymbol());
+            std::optional<DiagCode> code;
+            if (sourceProgram && sourceProgram->kind == SymbolKind::AnonymousProgram &&
+                sourceProgram != targetProgram) {
+                code = diag::AnonymousProgramHierarchicalReference;
+            }
+            else if (!sourceProgram && (VariableSymbol::isKind(result.found->kind) ||
+                                        NetSymbol::isKind(result.found->kind) ||
+                                        (result.found->kind == SymbolKind::Subroutine &&
+                                         scope.getContainingInstance()))) {
+                code = diag::IllegalReferenceToProgramItem;
+            }
+            if (code) {
+                auto& diag = result.addDiag(scope, *code, result.nameRange);
+                diag.addNote(diag::NoteDeclarationHere, result.found->location);
+            }
+        }
         // Hierarchical references are not allowed from within packages
         // unless the target symbol is also within the same package.
         auto pkg = getContainingPackage(scope.asSymbol());

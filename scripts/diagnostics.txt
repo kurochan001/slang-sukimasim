@@ -1034,6 +1034,7 @@ error InstanceArrayOrderMismatch "order of selection [{}:{}] must match declared
 error IfaceImportExportTarget "could not find target for {} of '{}'"
 error UnexpectedNameToken "unexpected use of '{}' keyword"
 error IllegalReferenceToProgramItem "cannot reference program item from outside of a program"
+error AnonymousProgramHierarchicalReference "anonymous programs cannot reference other program scopes hierarchically"
 error HierarchicalFromPackage "cannot use hierarchical reference from within a package"
 error CompilationUnitFromPackage "cannot reference compilation unit item from within a package"
 error InvalidHierarchicalIfacePortConn "cannot connect interface port hierarchically through a generate block or instance array"
