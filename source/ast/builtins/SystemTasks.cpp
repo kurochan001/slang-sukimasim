@@ -1163,21 +1163,60 @@ public:
     }
 
     const Expression& bindArgument(size_t argIndex, const ASTContext& context,
-                                   const ExpressionSyntax& syntax, const Args&) const final {
-        // Second argument (memory array) needs to be an lvalue
-        // sukimasim runtime arg order: string_data, memory, [start], [finish]
-        if (argIndex == 1)
-            return Expression::bindLValue(syntax, context);
+                                   const ExpressionSyntax& syntax,
+                                   const Args& previousArgs) const final {
+        // Two argument orders are accepted.  IEEE 1800-2023 §D.14 specifies
+        //     $sreadmemb(mem_name, start_address, finish_address, string {, string})
+        // while sukimasim's historical order is
+        //     $sreadmemb(string, mem_name, [start_address], [finish_address]).
+        // The memory argument is the first one in the §D.14 order and the
+        // second one in the historical order.  At index 0 its type is not yet
+        // known, so bind it as a plain expression and let checkArguments verify
+        // that it is assignable; at index 1 the first argument decides the
+        // layout.
+        if (argIndex == 1) {
+            const bool d14Order =
+                !previousArgs.empty() && previousArgs[0]->type->isUnpackedArray();
+            if (!d14Order)
+                return Expression::bindLValue(syntax, context);
+        }
         return Expression::bind(syntax, context);
     }
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
         auto& comp = context.getCompilation();
-        // sukimasim runtime: $sreadmemb(string_data, memory, [start_addr], [finish_addr])
-        if (!checkArgCount(context, false, args, range, 2, 4))
-            return comp.getErrorType();
 
+        // A memory argument is an unpacked array; anything else means the
+        // historical order, where the string comes first (issue #2016).
+        const bool d14Order = !args.empty() && args[0]->type->isUnpackedArray();
+
+        if (!checkArgCount(context, false, args, range, d14Order ? 4 : 2,
+                           d14Order ? INT32_MAX : 4)) {
+            return comp.getErrorType();
+        }
+
+        if (d14Order) {
+            // §D.14: the memory is written, so it must be assignable.
+            if (!args[0]->requireLValue(context, args[0]->sourceRange.start()))
+                return comp.getErrorType();
+
+            // start_address and finish_address are numeric.
+            if (!args[1]->type->isNumeric())
+                return badArg(context, *args[1]);
+            if (!args[2]->type->isNumeric())
+                return badArg(context, *args[2]);
+
+            // One or more strings, in the same format as a $readmem file.
+            for (size_t i = 3; i < args.size(); i++) {
+                if (!args[i]->type->canBeStringLike())
+                    return badArg(context, *args[i]);
+            }
+
+            return comp.getVoidType();
+        }
+
+        // sukimasim runtime: $sreadmemb(string_data, memory, [start_addr], [finish_addr])
         // First argument must be a string (the data to read)
         if (!args[0]->type->canBeStringLike())
             return badArg(context, *args[0]);
