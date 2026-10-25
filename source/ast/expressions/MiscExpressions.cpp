@@ -1247,13 +1247,21 @@ Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRa
     }
 
     // When looking up an argument reference from within another expanded
-    // argument, use that original location's context.
-    if (inst->argDetails)
+    // argument, use that original location's context. The chain can be more
+    // than one level deep: in `let c(x) = add(mul(x, y), z)` the argument of
+    // `add` is itself a call whose argument is a formal of `c`, so the
+    // reference to `x` sits behind one argDetails hop per expanded argument.
+    // Follow the chain until the port is found instead of stopping after a
+    // single hop, which used to return an invalid expression for the nested
+    // form and made the let evaluate to x.
+    auto it = inst->argumentMap.find(&symbol);
+    while (it == inst->argumentMap.end() && inst->argDetails) {
         inst = inst->argDetails;
+        it = inst->argumentMap.find(&symbol);
+    }
 
     // The only way to reference an assertion port should be from within
     // an assertion or checker instance.
-    auto it = inst->argumentMap.find(&symbol);
     if (it == inst->argumentMap.end()) {
         // Walk through our previous assertion contexts to see if one of
         // them is a checker instance, in which case this argument might
