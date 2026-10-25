@@ -125,8 +125,12 @@ endmodule
     auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ImportNameCollision);
+    // IEEE 1800-2023 §26.3 makes the later local declaration illegal, so the
+    // error points at "int x;" (line 14) and the reference that made the import
+    // visible is a note.
+    CHECK(compilation.getSourceManager()->getLineNumber(diags[0].location) == 14);
     REQUIRE(diags[0].notes.size() == 3);
-    CHECK(diags[0].notes[0].code == diag::NoteDeclarationHere);
+    CHECK(diags[0].notes[0].code == diag::NoteReferencedHere);
     CHECK(diags[0].notes[1].code == diag::NoteImportedFrom);
     CHECK(diags[0].notes[2].code == diag::NoteDeclarationHere);
 }

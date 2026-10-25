@@ -2208,9 +2208,19 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
                         symbol->as<ExplicitImportSymbol>().importedSymbol() !=
                             imports[0].imported) {
 
-                        auto& diag = result.addDiag(scope, diag::ImportNameCollision, *sourceRange);
+                        // IEEE 1800-2023 §26.3: "If a wildcard imported symbol is
+                        // made locally visible in a scope, any later locally visible
+                        // declaration of the same name in that scope shall be
+                        // illegal."  The illegal item is that later declaration, not
+                        // the reference that made the imported symbol visible
+                        // (Example 1: "Line 5 is illegal since it is a local
+                        // declaration in scope top").  Report the error there and keep
+                        // the reference, the import and the package declaration as
+                        // notes (sukimasim issue #2134).
+                        auto& diag =
+                            result.addDiag(scope, diag::ImportNameCollision, symbol->location);
                         diag << name;
-                        diag.addNote(diag::NoteDeclarationHere, symbol->location);
+                        diag.addNote(diag::NoteReferencedHere, sourceRange->start());
                         diag.addNote(diag::NoteImportedFrom, imports[0].import->location);
                         diag.addNote(diag::NoteDeclarationHere, imports[0].imported->location);
                     }
