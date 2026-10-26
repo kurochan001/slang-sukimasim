@@ -737,14 +737,45 @@ public:
     }
 };
 
-class TestPlusArgsFunction : public NonConstantFunction {
+class TestPlusArgsFunction : public SystemSubroutine {
 public:
-    TestPlusArgsFunction(const Builtins& builtins) :
-        NonConstantFunction(KnownSystemName::TestPlusArgs, builtins.intType, 1,
-                            std::vector<const Type*>{&builtins.stringType}) {}
+    TestPlusArgsFunction(const Builtins&) :
+        SystemSubroutine(KnownSystemName::TestPlusArgs, SubroutineKind::Function) {}
+
+    const Expression& bindArgument(size_t, const ASTContext& context,
+                                   const ExpressionSyntax& syntax, const Args&) const final {
+        // IEEE 1800-2023 §21.6: "The string is specified in the argument to the
+        // system function as either a string or an integral variable that is
+        // interpreted as a string."  Bind the argument with its own type; the
+        // string-typed formal rejected the integral form with "no implicit
+        // conversion from 'bit[N:0]' to 'string'" (sukimasim issue #2086).
+        return Expression::bind(syntax, context);
+    }
 
     // Return type is 'int' but the actual value is always either 0 or 1
     std::optional<bitwidth_t> getEffectiveWidth() const final { return 1; }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+
+        // §21.6: the argument is a string or an integral variable.  A real or
+        // an unpacked array is not a valid prefix.
+        const Type& type = *args[0]->type;
+        if (!type.canBeStringLike()) {
+            context.addDiag(diag::InvalidStringArg, args[0]->sourceRange) << type;
+            return comp.getErrorType();
+        }
+        return comp.getIntType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
 };
 
 void Builtins::registerNonConstFuncs() {
