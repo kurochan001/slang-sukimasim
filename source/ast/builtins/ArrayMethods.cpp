@@ -719,8 +719,12 @@ public:
         if (argIndex == 1) {
             auto indexType = args[0]->type->getAssociativeIndexType();
             if (indexType) {
-                return Expression::bindArgument(*indexType, ArgumentDirection::Ref, {}, syntax,
-                                                context);
+                // IEEE 1800-2023 §7.9.8: the index argument "shall be assignment compatible
+                // with the index type", not equivalent to it -- a narrower integral variable
+                // is legal (the function returns -1 and truncates the key).  bindRefArg
+                // rejected it with diag::RefTypeMismatch at elaboration.
+                (void)indexType;
+                return Expression::bindLValue(syntax, context);
             }
         }
 
@@ -728,7 +732,8 @@ public:
     }
 
     // Return type is 'int' but the actual value is always either 0 or 1
-    std::optional<bitwidth_t> getEffectiveWidth() const final { return 1; }
+    // Return type is 'int'; 1/0 and -1 for the truncating narrower-index form.
+    std::optional<bitwidth_t> getEffectiveWidth() const final { return 32; }
 
     bool isArgByRef(size_t argIndex) const final {
         // The first argument is the associative array, the second is the index.

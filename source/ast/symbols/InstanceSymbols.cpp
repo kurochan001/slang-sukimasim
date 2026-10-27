@@ -1999,8 +1999,11 @@ std::span<const Expression* const> PrimitiveInstanceSymbol::getPortConnections()
         SLANG_ASSERT(syntax && scope);
 
         auto& comp = scope->getCompilation();
+        // IEEE 1800-2023 §23.3.3.7.2: an interconnect net connected to a primitive or
+        // UDP terminal "shall be treated as though connecting to a scalar wire".
         ASTContext context(*scope, LookupLocation::after(*this),
-                           ASTFlags::NonProcedural | ASTFlags::DisallowUDNT);
+                           ASTFlags::NonProcedural | ASTFlags::DisallowUDNT |
+                               ASTFlags::AllowInterconnect);
         context.setInstance(*this);
 
         SmallVector<const ExpressionSyntax*> conns;
