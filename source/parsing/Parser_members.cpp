@@ -2251,43 +2251,16 @@ MemberSyntax* Parser::parseCoverCrossMember() {
         return nullptr;
 
     auto name = expect(TokenKind::Identifier);
-    
-    // sukimasim: Support array-style bins for cross coverage
-    // e.g., bins sel[] = { ... }
-    // For now, just consume and ignore the brackets
-    if (peek(TokenKind::OpenBracket)) {
-        consume(); // openBracket
-        expect(TokenKind::CloseBracket);
-    }
-    
+
+    // IEEE 1800-2023 A.2.11:
+    //   bins_selection ::= bins_keyword bin_identifier = select_expression [ iff ( expression ) ]
+    // There is no array form for a cross bin (unlike bins_or_options of a
+    // coverpoint), so a '[' here is a syntax error and is left to expect().
     auto equals = expect(TokenKind::Equals);
 
-    // sukimasim: Handle array initialization syntax for bins
-    // bins sel[] = { binsof(...), binsof(...), ... }
-    // IEEE 1800-2023 §20.6.1: Multiple expressions are combined with OR semantics
-    BinsSelectExpressionSyntax* expr;
-    if (peek(TokenKind::OpenBrace)) {
-        (void)consume(); // consume opening brace
-        expr = &parseBinsSelectExpression();
+    // A.2.11 allows only a select_expression on the right-hand side.
+    auto expr = &parseBinsSelectExpression();
 
-        // Handle comma-separated list - combine with OR semantics
-        // Each comma-separated expression in bins sel[] = {...} represents an alternative bin
-        while (peek(TokenKind::Comma)) {
-            auto comma = consume(); // consume comma
-            // Create a synthetic || token at the comma location for OR semantics
-            auto syntheticOr = Token(alloc, TokenKind::DoubleOr, comma.trivia(), "||"sv,
-                                     comma.location());
-            auto& nextExpr = parseBinsSelectExpression();
-            // Combine expressions with OR: (expr1) || (expr2) || ...
-            expr = &factory.binaryBinsSelectExpr(*expr, syntheticOr, nextExpr);
-        }
-
-        expect(TokenKind::CloseBrace);
-    }
-    else {
-        expr = &parseBinsSelectExpression();
-    }
-    
     auto iff = parseCoverageIffClause();
 
     return &factory.binsSelection(attributes, bins, name, equals, *expr, iff,
