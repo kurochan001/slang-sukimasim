@@ -286,6 +286,7 @@ decltype(auto) Symbol::visit(TVisitor&& visitor, Args&&... args) const {
         TYPE(FloatingType);
         TYPE(EnumType);
         TYPE(PackedArrayType);
+        TYPE(GenericPackedArrayType);
         TYPE(FixedSizeUnpackedArrayType);
         TYPE(DynamicArrayType);
         TYPE(DPIOpenArrayType);

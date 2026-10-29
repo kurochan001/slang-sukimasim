@@ -183,6 +183,28 @@ public:
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::PackedArrayType; }
 };
 
+/// A packed dimension declared on a typeless interconnect net. This is not an
+/// IntegralType: the connected net determines the eventual element data type.
+class SLANG_EXPORT GenericPackedArrayType final : public Type {
+public:
+    const Type& elementType;
+    ConstantRange range;
+
+    /// Number of selectable generic leaves, not the resolved width in bits.
+    uint64_t selectableWidth;
+
+    GenericPackedArrayType(const Type& elementType, ConstantRange range, uint64_t selectableWidth);
+
+    static const Type& fromDim(BumpAllocator& alloc, const ASTContext& context,
+                               const Type& elementType, ConstantRange dim,
+                               syntax::DeferredSourceRange sourceRange);
+
+    ConstantValue getDefaultValueImpl() const { return nullptr; }
+    void serializeTo(ASTSerializer& serializer) const;
+
+    static bool isKind(SymbolKind kind) { return kind == SymbolKind::GenericPackedArrayType; }
+};
+
 /// Represents a fixed size unpacked array (as opposed to a
 /// dynamically sized unpacked array, associative array, or queue).
 class SLANG_EXPORT FixedSizeUnpackedArrayType final : public Type {

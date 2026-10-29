@@ -143,6 +143,12 @@ public:
     /// Indicates whether this is a packed array type.
     bool isPackedArray() const { return getCanonicalType().kind == SymbolKind::PackedArrayType; }
 
+    /// Indicates whether this is a typeless packed dimension of an interconnect net.
+    /// Unlike an ordinary packed array, its element bit width is not yet known.
+    bool isGenericPackedArray() const {
+        return getCanonicalType().kind == SymbolKind::GenericPackedArrayType;
+    }
+
     /// Indicates whether this is any form of unpacked array type:
     /// fixed size, dynamic, associative, or a queue.
     bool isUnpackedArray() const;
@@ -251,6 +257,10 @@ public:
     /// typically means that the two types can be implicitly converted between
     /// one another.
     bool isEquivalent(const Type& rhs) const;
+
+    /// Checks a net port connection involving typeless interconnect dimensions.
+    /// This does not imply assignment compatibility in general expressions.
+    bool isInterconnectCompatible(const Type& rhs) const;
 
     /// Determines whether the given type is "assignment compatible" to this one.
     /// This includes all equivalent types, plus types for which additional

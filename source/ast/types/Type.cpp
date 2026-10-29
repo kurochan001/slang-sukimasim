@@ -117,6 +117,8 @@ uint64_t Type::getBitstreamWidth() const {
 uint64_t Type::getSelectableWidth() const {
     auto& ct = getCanonicalType();
     switch (ct.kind) {
+        case SymbolKind::GenericPackedArrayType:
+            return ct.as<GenericPackedArrayType>().selectableWidth;
         case SymbolKind::FixedSizeUnpackedArrayType:
             return ct.as<FixedSizeUnpackedArrayType>().selectableWidth;
         case SymbolKind::UnpackedStructType:
@@ -194,7 +196,8 @@ bool Type::isSimpleBitVector() const {
 
 bool Type::hasFixedRange() const {
     const Type& ct = getCanonicalType();
-    return ct.isIntegral() || ct.kind == SymbolKind::FixedSizeUnpackedArrayType;
+    return ct.isIntegral() || ct.isGenericPackedArray() ||
+           ct.kind == SymbolKind::FixedSizeUnpackedArrayType;
 }
 
 bool Type::isBooleanConvertible() const {
@@ -216,6 +219,7 @@ bool Type::isArray() const {
     const Type& ct = getCanonicalType();
     switch (ct.kind) {
         case SymbolKind::PackedArrayType:
+        case SymbolKind::GenericPackedArrayType:
         case SymbolKind::FixedSizeUnpackedArrayType:
         case SymbolKind::DynamicArrayType:
         case SymbolKind::DPIOpenArrayType:
@@ -479,6 +483,10 @@ bool Type::isMatching(const Type& rhs) const {
             if (l->as<PackedArrayType>().range != r->as<PackedArrayType>().range)
                 return false;
         }
+        else if (l->isGenericPackedArray()) {
+            if (l->getFixedRange() != r->getFixedRange())
+                return false;
+        }
         else if (l->kind == SymbolKind::FixedSizeUnpackedArrayType) {
             // If fixed size, ranges must match.
             if (l->as<FixedSizeUnpackedArrayType>().range !=
@@ -596,6 +604,28 @@ bool Type::isEquivalent(const Type& rhs) const {
     }
 
     return false;
+}
+
+bool Type::isInterconnectCompatible(const Type& rhs) const {
+    const auto& l = getCanonicalType();
+    const auto& r = rhs.getCanonicalType();
+    if (l.isUntypedType() || r.isUntypedType())
+        return true;
+
+    if (l.kind == SymbolKind::FixedSizeUnpackedArrayType ||
+        r.kind == SymbolKind::FixedSizeUnpackedArrayType) {
+        if (l.kind != r.kind || l.getFixedRange().width() != r.getFixedRange().width())
+            return false;
+        return l.getArrayElementType()->isInterconnectCompatible(*r.getArrayElementType());
+    }
+
+    // A generic packed dimension has no known leaf bit width. Its connection
+    // determines that data type; it must not acquire an unpacked dimension.
+    if (l.isGenericPackedArray())
+        return r.isGenericPackedArray() || r.isIntegral();
+    if (r.isGenericPackedArray())
+        return l.isIntegral();
+    return l.isEquivalent(r);
 }
 
 static bool isSameUnboundGenericClass(const Type& left, const Type& right) {
@@ -840,6 +870,8 @@ ConstantRange Type::getFixedRange() const {
     if (t.isIntegral())
         return t.as<IntegralType>().getBitVectorRange();
 
+    if (t.isGenericPackedArray())
+        return t.as<GenericPackedArrayType>().range;
     if (t.kind == SymbolKind::FixedSizeUnpackedArrayType)
         return t.as<FixedSizeUnpackedArrayType>().range;
 
@@ -851,6 +883,8 @@ const Type* Type::getArrayElementType() const {
     switch (t.kind) {
         case SymbolKind::PackedArrayType:
             return &t.as<PackedArrayType>().elementType;
+        case SymbolKind::GenericPackedArrayType:
+            return &t.as<GenericPackedArrayType>().elementType;
         case SymbolKind::FixedSizeUnpackedArrayType:
             return &t.as<FixedSizeUnpackedArrayType>().elementType;
         case SymbolKind::DynamicArrayType:
@@ -1307,6 +1341,7 @@ bool Type::isKind(SymbolKind kind) {
         case SymbolKind::FloatingType:
         case SymbolKind::EnumType:
         case SymbolKind::PackedArrayType:
+        case SymbolKind::GenericPackedArrayType:
         case SymbolKind::FixedSizeUnpackedArrayType:
         case SymbolKind::DynamicArrayType:
         case SymbolKind::DPIOpenArrayType:

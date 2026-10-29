@@ -752,6 +752,35 @@ void PackedArrayType::serializeTo(ASTSerializer& serializer) const {
     serializer.write("range", fmt::format("[{}:{}]", range.left, range.right));
 }
 
+GenericPackedArrayType::GenericPackedArrayType(const Type& elementType, ConstantRange range,
+                                               uint64_t selectableWidth) :
+    Type(SymbolKind::GenericPackedArrayType, "", SourceLocation()), elementType(elementType),
+    range(range), selectableWidth(selectableWidth) {
+}
+
+const Type& GenericPackedArrayType::fromDim(BumpAllocator& alloc, const ASTContext& context,
+                                            const Type& elementType, ConstantRange dim,
+                                            DeferredSourceRange sourceRange) {
+    if (elementType.isError())
+        return elementType;
+
+    auto width = checkedMulU64(elementType.getSelectableWidth(), dim.width());
+    if (!width || width > MaxBitWidth) {
+        context.addDiag(diag::ObjectTooLarge, sourceRange.get());
+        return ErrorType::Instance;
+    }
+
+    auto result = alloc.emplace<GenericPackedArrayType>(elementType, dim, *width);
+    if (auto syntax = sourceRange.syntax())
+        result->setSyntax(*syntax);
+    return *result;
+}
+
+void GenericPackedArrayType::serializeTo(ASTSerializer& serializer) const {
+    serializer.write("elementType", elementType);
+    serializer.write("range", fmt::format("[{}:{}]", range.left, range.right));
+}
+
 FixedSizeUnpackedArrayType::FixedSizeUnpackedArrayType(const Type& elementType, ConstantRange range,
                                                        uint64_t selectableWidth,
                                                        uint64_t bitstreamWidth) :

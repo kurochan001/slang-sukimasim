@@ -86,6 +86,7 @@ public:
     void visit(const FloatingType& type, std::string_view overrideName);
     void visit(const EnumType& type, std::string_view overrideName);
     void visit(const PackedArrayType& type, std::string_view overrideName);
+    void visit(const GenericPackedArrayType& type, std::string_view overrideName);
     void visit(const PackedStructType& type, std::string_view overrideName);
     void visit(const PackedUnionType& type, std::string_view overrideName);
     void visit(const FixedSizeUnpackedArrayType& type, std::string_view overrideName);

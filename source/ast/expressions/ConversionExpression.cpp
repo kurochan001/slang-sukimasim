@@ -123,6 +123,23 @@ Expression& Expression::convertAssignment(const ASTContext& context, const Type&
         contextDetermined(context, result, nullptr, t, assignmentRange, ConversionKind::Implicit);
     };
 
+    // Interconnects are legal only in net connections. Keep their declared
+    // dimensions on the expression instead of inserting a value conversion.
+    auto hasGenericDimension = [](const Type& type) {
+        const Type* t = &type;
+        while (t->isArray()) {
+            if (t->isGenericPackedArray())
+                return true;
+            t = t->getArrayElementType();
+        }
+        return false;
+    };
+    if (context.flags.has(ASTFlags::AllowInterconnect) &&
+        (hasGenericDimension(type) || hasGenericDimension(*rt)) &&
+        type.isInterconnectCompatible(*rt)) {
+        return expr;
+    }
+
     if (type.isEquivalent(*rt)) {
         finalizeType(*rt);
 

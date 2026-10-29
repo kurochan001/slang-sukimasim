@@ -191,6 +191,18 @@ void TypePrinter::visit(const PackedArrayType& type, std::string_view) {
         buffer->format("[{}:{}]", range.left, range.right);
 }
 
+void TypePrinter::visit(const GenericPackedArrayType& type, std::string_view) {
+    SmallVector<ConstantRange, 8> dims;
+    const Type* curr = &type;
+    while (curr->isGenericPackedArray()) {
+        dims.push_back(curr->getFixedRange());
+        curr = curr->getArrayElementType();
+    }
+    curr->visit(*this, ""sv);
+    for (auto& range : dims)
+        buffer->format("[{}:{}]", range.left, range.right);
+}
+
 void TypePrinter::visit(const PackedStructType& type, std::string_view overrideName) {
     if (options.anonymousTypeStyle == TypePrintingOptions::FriendlyName) {
         printScope(type.getParentScope());

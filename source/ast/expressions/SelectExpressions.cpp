@@ -605,6 +605,10 @@ Expression& RangeSelectExpression::fromSyntax(Compilation& comp, Expression& val
             result->type = &FixedSizeUnpackedArrayType::fromDim(comp, context, elementType,
                                                                 selectionRange, errorRange);
         }
+        else if (valueType.isGenericPackedArray()) {
+            result->type = &GenericPackedArrayType::fromDim(comp, context, elementType,
+                                                            selectionRange, errorRange);
+        }
         else {
             result->type = &PackedArrayType::fromDim(comp, context, elementType, selectionRange,
                                                      errorRange);
@@ -678,6 +682,10 @@ Expression& RangeSelectExpression::fromConstant(const TypeProvider& typeProvider
     if (valueType.isUnpackedArray()) {
         result->type = &FixedSizeUnpackedArrayType::fromDim(alloc, context, elementType, range,
                                                             result->sourceRange);
+    }
+    else if (valueType.isGenericPackedArray()) {
+        result->type = &GenericPackedArrayType::fromDim(alloc, context, elementType, range,
+                                                        result->sourceRange);
     }
     else {
         result->type = &PackedArrayType::fromDim(alloc, context, elementType, range,

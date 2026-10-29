@@ -123,9 +123,19 @@ void DeclaredType::resolveType(const ASTContext& typeContext,
             // This should always be an implicit type unless there's an
             // error (diagnosed by the parser).
             auto& its = syntax->as<ImplicitTypeSyntax>();
-            if (!its.dimensions.empty())
-                type = &comp.getType(*type, its.dimensions,
-                                     typeContext.resetFlags(ASTFlags::AllowInterconnect));
+            // IEEE 1800-2023 6.7.1 permits packed dimensions on typeless interconnects.
+            // Preserve their kind without constructing a zero-width integral type.
+            for (size_t i = its.dimensions.size(); i > 0; i--) {
+                auto& dimSyntax = *its.dimensions[i - 1];
+                auto dim = typeContext.evalDimension(dimSyntax, /* requireRange */ true,
+                                                     /* isPacked */ true);
+                if (!dim.isRange()) {
+                    type = &comp.getErrorType();
+                    break;
+                }
+                type = &GenericPackedArrayType::fromDim(comp, typeContext, *type, dim.range,
+                                                        dimSyntax);
+            }
         }
 
         if (dimensions) {

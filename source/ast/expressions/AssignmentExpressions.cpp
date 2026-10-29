@@ -165,6 +165,11 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
         return &badExpr(comp, &expr);
     };
 
+    auto compatible = [&](const Type& left, const Type& right) {
+        return context.flags.has(ASTFlags::AllowInterconnect) ? left.isInterconnectCompatible(right)
+                                                              : left.isEquivalent(right);
+    };
+
     // Collect all of the dimensions of the instance array that owns the provided instance, ex:
     // MyMod instArray [3][4] (.conn(vec));
     //                 ^~~~~~  // these guys
@@ -225,7 +230,7 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
             auto& unpackedType = FixedSizeUnpackedArrayType::fromDims(comp, context, *ct,
                                                                       unpackedDims,
                                                                       expr.sourceRange);
-            if (!portType.isEquivalent(unpackedType)) {
+            if (!compatible(portType, unpackedType)) {
                 return bad();
             }
 
@@ -237,7 +242,7 @@ Expression* Expression::tryConnectPortArray(const ASTContext& context, const Typ
         // If there are no instance dims left, just make sure the remaining type matches
         // the port and we're good to go.
         if (instanceDims.empty())
-            return portType.isEquivalent(*ct) ? result : bad();
+            return compatible(portType, *ct) ? result : bad();
 
         // Otherwise, if there are instance dimensions left there needs to be a packed
         // integral type in the connection (a packed array, struct, union, enum, or a

@@ -40,6 +40,7 @@ enum class RandMode;
     x(EnumType) \
     x(EnumValue) \
     x(PackedArrayType) \
+    x(GenericPackedArrayType) \
     x(FixedSizeUnpackedArrayType) \
     x(DynamicArrayType) \
     x(DPIOpenArrayType) \

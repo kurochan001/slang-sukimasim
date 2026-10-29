@@ -1705,11 +1705,11 @@ endmodule
     CHECK(diags[3].code == diag::InterconnectReference);
 }
 
-TEST_CASE("More interconnect ports") {
+TEST_CASE("More interconnect ports - standard unpacked example") {
     auto tree = SyntaxTree::fromText(R"(
 module top();
     logic rst;
-    interconnect [0:3] [0:1] aBus;
+    interconnect aBus[0:3][0:1];
     logic [0:3] dBus;
     driver driverArray[0:3](aBus);
     cmp cmpArray[0:3](aBus,rst,dBus);
@@ -2186,4 +2186,171 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::UnknownInterface);
+}
+
+TEST_CASE("Generic packed interconnect declarations and net connections") {
+    auto tree = SyntaxTree::fromText(R"(
+module typed(inout wand [3:0] w); endmodule
+module scalar(inout wire [12:0] w); endmodule
+module aggregate(inout wire struct packed {logic [2:0] a; logic b;} w); endmodule
+module generic(inout interconnect [1:0][1:0] w); endmodule
+module unpacked(inout wire [3:0] w[2]); endmodule
+module top;
+    interconnect [3:0] p;
+    interconnect [1:0][1:0] m;
+    interconnect [3:0] a[2];
+    interconnect s, t;
+    interconnect [3:0] q;
+    typed t1(p);
+    typed t2(m);
+    typed t3(m[1:0]);
+    scalar s1(s);
+    aggregate a1(t);
+    generic g1(p);
+    unpacked u1(a);
+    alias p = q;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    const auto& top = compilation.getRoot().topInstances[0]->body;
+    auto& p = top.find<NetSymbol>("p").getType();
+    CHECK(p.isArray());
+    CHECK_FALSE(p.isIntegral());
+    CHECK_FALSE(p.isPackedArray());
+    CHECK(p.isGenericPackedArray());
+    CHECK(p.getFixedRange() == ConstantRange(3, 0));
+    CHECK(p.getArrayElementType()->isUntypedType());
+    CHECK(p.getBitWidth() == 0);
+    CHECK(p.toString() == "untyped[3:0]");
+    auto& m = top.find<NetSymbol>("m").getType();
+    CHECK(m.getArrayElementType()->isGenericPackedArray());
+    CHECK(m.getArrayElementType()->getFixedRange() == ConstantRange(1, 0));
+    auto& a = top.find<NetSymbol>("a").getType();
+    CHECK(a.isUnpackedArray());
+    CHECK(a.getArrayElementType()->isGenericPackedArray());
+    CHECK(top.find<NetSymbol>("s").getType().isUntypedType());
+}
+
+TEST_CASE("Generic packed interconnect connection restrictions") {
+    auto tree = SyntaxTree::fromText(R"(
+module packed_port(inout wire [3:0] p); endmodule
+module unpacked_port(inout wire p[4]); endmodule
+module variable_port(input var logic [3:0] p); endmodule
+module reference_port(ref logic [3:0] p); endmodule
+module top;
+    interconnect [3:0] p;
+    interconnect u[4];
+    unpacked_port bad1(p);
+    packed_port bad2(u);
+    variable_port bad3(p);
+    reference_port bad4(p);
+    initial p = 0;
+    initial $display(p);
+    assign p = 0;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    const auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 7);
+    CHECK(diags[0].code == diag::BadAssignment);
+    CHECK(diags[1].code == diag::BadAssignment);
+    CHECK(diags[2].code == diag::InterconnectReference);
+    CHECK(diags[3].code == diag::InterconnectReference);
+    CHECK(diags[4].code == diag::InterconnectReference);
+    CHECK(diags[5].code == diag::InterconnectReference);
+    CHECK(diags[6].code == diag::InterconnectReference);
+}
+
+TEST_CASE("Generic packed interconnect instance arrays and selection") {
+    auto tree = SyntaxTree::fromText(R"(
+module typed(inout wire [3:0] w); endmodule
+module generic(inout interconnect [3:0] w); endmodule
+module top;
+    interconnect [3:0] broadcast;
+    interconnect [3:0] unpacked[0:1][3:2];
+    wire [3:0] typed_broadcast;
+    wire [3:0] typed_unpacked[1:0][2:3];
+    typed t1[0:1](broadcast);
+    typed t2[1:0][2:3](unpacked);
+    generic g1[0:1](typed_broadcast);
+    generic g2[0:1][3:2](typed_unpacked);
+    interconnect [1:0][3:0] multi;
+    typed t3(multi[1]);
+    typed t4(multi[0][3:0]);
+    interconnect [0:3] asc;
+    typed t5(asc[0:3]);
+    interconnect [3:0] aliases;
+    alias aliases[3:2] = broadcast[1:0];
+    wire terminal_net;
+    buf b1(terminal_net, broadcast[0]);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto connection = [&](std::string_view path) -> const Expression& {
+        auto& inst = compilation.getRoot().lookupName<InstanceSymbol>(path);
+        const auto& expr = *inst.getPortConnections()[0]->getExpression();
+        return expr.kind == ExpressionKind::Assignment ? expr.as<AssignmentExpression>().left()
+                                                       : expr;
+    };
+    auto connectionPath = [&](std::string_view path) {
+        auto& inst = compilation.getRoot().lookupName<InstanceSymbol>(path);
+        EvalContext evalCtx(inst);
+        return ValuePath(connection(path), evalCtx).toString(evalCtx);
+    };
+    CHECK(connectionPath("top.t1[0]") == "broadcast");
+    CHECK(connectionPath("top.t1[1]") == "broadcast");
+    CHECK(connectionPath("top.g1[0]") == "typed_broadcast");
+    CHECK(connectionPath("top.t2[1][2]") == "unpacked[0][3]");
+    CHECK(connectionPath("top.t2[0][3]") == "unpacked[1][2]");
+    CHECK(connectionPath("top.g2[0][3]") == "typed_unpacked[1][2]");
+    CHECK(connection("top.t3").type->isGenericPackedArray());
+    CHECK(connection("top.t4").type->isGenericPackedArray());
+    CHECK(connection("top.t4").type->getFixedRange() == ConstantRange(3, 0));
+}
+
+TEST_CASE("Generic packed interconnect legacy example mismatches unpacked ports") {
+    auto tree = SyntaxTree::fromText(R"(
+package NetsPkg;
+    nettype real realNet;
+endpackage
+module driver import NetsPkg::*; (output realNet out[0:1]); endmodule
+module cmp import NetsPkg::*; (input realNet inA[0:1]); endmodule
+module top;
+    interconnect [0:3][0:1] aBus;
+    driver driverArray[0:3](aBus);
+    cmp cmpArray[0:3](aBus);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    const auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    for (const auto& diag : diags)
+        CHECK(diag.code == diag::BadAssignment);
+}
+
+TEST_CASE("Generic interconnect unpacked length and rank remain significant") {
+    auto tree = SyntaxTree::fromText(R"(
+module typed_array(inout wire [3:0] p[3]); endmodule
+module typed_rank(inout wire p[4]); endmodule
+module top;
+    interconnect [3:0] length_mismatch[2];
+    interconnect rank_mismatch[2][2];
+    typed_array bad_length(length_mismatch);
+    typed_rank bad_rank(rank_mismatch);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    const auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::BadAssignment);
+    CHECK(diags[1].code == diag::BadAssignment);
 }
