@@ -571,7 +571,7 @@ endmodule
     CHECK(p24.getValue().str() == "logic[67:0]");
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 16);
+    REQUIRE(diags.size() == 15);
     CHECK(diags[0].code == diag::ConstEvalNonConstVariable);
     CHECK(diags[1].code == diag::DynamicDimensionIndex);
     CHECK(diags[2].code == diag::DynamicDimensionIndex);
@@ -584,10 +584,9 @@ endmodule
     CHECK(diags[9].code == diag::QueryOnDynamicType);
     CHECK(diags[10].code == diag::DynamicDimensionIndex);
     CHECK(diags[11].code == diag::TooManyArguments);
-    CHECK(diags[12].code == diag::BadSystemSubroutineArg);
-    CHECK(diags[13].code == diag::QueryOnDynamicType);
+    CHECK(diags[12].code == diag::QueryOnDynamicType);
+    CHECK(diags[13].code == diag::QueryOnAssociativeWildcard);
     CHECK(diags[14].code == diag::QueryOnAssociativeWildcard);
-    CHECK(diags[15].code == diag::QueryOnAssociativeWildcard);
 }
 
 TEST_CASE("$printtimescale, $timeunit, $timeprecision") {
@@ -2529,4 +2528,35 @@ endmodule
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::InvalidStringArg);
     CHECK(diags[1].code == diag::InvalidStringArg);
+}
+
+TEST_CASE("Dimension counts of nonarray types") {
+    auto tree = SyntaxTree::fromText(R"(
+class C; endclass
+module m;
+    typedef struct { int member; } S;
+    real r;
+    shortreal sr;
+    realtime rt;
+    S s;
+    C c;
+    function real result(); return 1.5; endfunction
+    localparam int a = $dimensions(r);
+    localparam int b = $unpacked_dimensions(sr);
+    localparam int d = $dimensions(rt);
+    localparam int e = $dimensions(s);
+    localparam int f = $unpacked_dimensions(c);
+    localparam int g = $dimensions(real);
+    localparam int h = $unpacked_dimensions(S);
+    localparam int i = $dimensions(C);
+    localparam int j = $dimensions(result());
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    for (auto name : {"m.a", "m.b", "m.d", "m.e", "m.f", "m.g", "m.h", "m.i", "m.j"}) {
+        auto& param = compilation.getRoot().lookupName<ParameterSymbol>(name);
+        CHECK(param.getValue().integer() == 0);
+    }
 }

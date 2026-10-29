@@ -508,11 +508,10 @@ public:
             return comp.getErrorType();
 
         auto& type = *args[0]->type;
-        if (!type.isIntegral() && !type.isUnpackedArray() && !type.isString())
-            return badArg(context, *args[0]);
-
-        // Spec says we have to disallow this case.
-        if (!type.hasFixedRange() && args[0]->kind == ExpressionKind::DataType) {
+        // IEEE 1800-2023 20.7: nonarray types have zero dimensions. Only
+        // dynamically sized array and string type operands are disallowed.
+        if ((type.isUnpackedArray() || type.isString()) && !type.hasFixedRange() &&
+            args[0]->kind == ExpressionKind::DataType) {
             context.addDiag(diag::QueryOnDynamicType, args[0]->sourceRange) << name;
             return comp.getErrorType();
         }
