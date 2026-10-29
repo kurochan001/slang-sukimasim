@@ -2560,3 +2560,20 @@ endmodule
         CHECK(param.getValue().integer() == 0);
     }
 }
+
+TEST_CASE("Binary file reads into unpacked aggregates") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    struct { byte head; shortint data[2]; } record_value;
+    union { byte data[2]; shortint word; } union_value;
+    integer fd, count;
+    initial begin
+        count = $fread(record_value, fd);
+        count = $fread(union_value, fd);
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
