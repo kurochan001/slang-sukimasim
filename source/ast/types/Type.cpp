@@ -1447,6 +1447,16 @@ const Type& Type::getPredefinedType(Compilation& compilation, SyntaxKind kind, b
         predef.as<PredefinedIntegerType>().integerKind, isSigned);
 }
 
+const Type* getDiagnosticTypeArg(const Diagnostic& diagnostic, size_t index) {
+    if (index >= diagnostic.args.size())
+        return nullptr;
+    auto custom = std::get_if<Diagnostic::CustomArgType>(&diagnostic.args[index]);
+    if (!custom)
+        return nullptr;
+    auto type = std::any_cast<const Type*>(&custom->second);
+    return type ? *type : nullptr;
+}
+
 Diagnostic& operator<<(Diagnostic& diag, const Type& arg) {
     SLANG_ASSERT(!arg.isError());
     diag.args.emplace_back(Diagnostic::CustomArgType{SLANG_TYPEOF(const Type*), &arg});

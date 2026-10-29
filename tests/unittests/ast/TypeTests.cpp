@@ -2976,3 +2976,17 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ExpectedNetDelay);
 }
+
+TEST_CASE("Type-valued diagnostic arguments cross the library boundary") {
+    Compilation compilation;
+    Diagnostic diagnostic(diag::InvalidMemberAccess, SourceLocation());
+    diagnostic << compilation.getIntType();
+    REQUIRE(getDiagnosticTypeArg(diagnostic));
+    CHECK(getDiagnosticTypeArg(diagnostic) == &compilation.getIntType());
+    CHECK(getDiagnosticTypeArg(diagnostic)->isIntegral());
+    CHECK(getDiagnosticTypeArg(diagnostic, 1) == nullptr);
+
+    Diagnostic other(diag::UnknownMember, SourceLocation());
+    other << std::string_view("member");
+    CHECK(getDiagnosticTypeArg(other) == nullptr);
+}

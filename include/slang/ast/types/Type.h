@@ -381,6 +381,11 @@ private:
                                        const ASTContext& context, bool isTypedefTarget);
 };
 
+/// Gets a type-valued diagnostic argument, or nullptr for another argument kind.
+/// Extraction stays in the library that constructs the std::any payload so
+/// consumers do not depend on cross-visibility RTTI identity.
+SLANG_EXPORT const Type* getDiagnosticTypeArg(const Diagnostic& diagnostic, size_t index = 0);
+
 Diagnostic& operator<<(Diagnostic& diag, const Type& arg);
 
 } // namespace slang::ast
