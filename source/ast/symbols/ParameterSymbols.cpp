@@ -28,14 +28,26 @@ namespace slang::ast {
 using namespace syntax;
 using namespace parsing;
 
+// IEEE 1800-2023 §6.20.4 makes 'parameter' a synonym for 'localparam' only in a
+// generate block, package, class body or compilation-unit scope, and §23.10.2 says
+// "A parameter declared in a named block, task, or function can only be directly
+// redefined using a defparam statement". Such a parameter is therefore not local.
+static bool isDefparamTargetScope(const Scope& scope) {
+    auto kind = scope.asSymbol().kind;
+    return kind == SymbolKind::StatementBlock || kind == SymbolKind::Subroutine;
+}
+
 void ParameterSymbolBase::fromLocalSyntax(const Scope& scope,
                                           const ParameterDeclarationStatementSyntax& syntax,
                                           SmallVectorBase<Symbol*>& results) {
+    const bool isLocal = syntax.parameter->keyword.kind == TokenKind::LocalParamKeyword ||
+                         !isDefparamTargetScope(scope);
+
     auto paramBase = syntax.parameter;
     if (paramBase->kind == SyntaxKind::ParameterDeclaration) {
         SmallVector<ParameterSymbol*> params;
-        ParameterSymbol::fromSyntax(scope, paramBase->as<ParameterDeclarationSyntax>(),
-                                    /* isLocal */ true, /* isPort */ false, params);
+        ParameterSymbol::fromSyntax(scope, paramBase->as<ParameterDeclarationSyntax>(), isLocal,
+                                    /* isPort */ false, params);
         for (auto param : params) {
             param->setAttributes(scope, syntax.attributes);
             results.push_back(param);
@@ -51,8 +63,53 @@ void ParameterSymbolBase::fromLocalSyntax(const Scope& scope,
         }
     }
 
-    if (syntax.parameter->keyword.kind != TokenKind::LocalParamKeyword)
+    // Type parameters stay local everywhere here.
+    if ((isLocal || paramBase->kind != SyntaxKind::ParameterDeclaration) &&
+        syntax.parameter->keyword.kind != TokenKind::LocalParamKeyword) {
         scope.addDiag(diag::PreferLocalparam, syntax.parameter->keyword.range());
+    }
+}
+
+// Finds the defparam override for a parameter declared in a named block, task or
+// function of a module instance (see isDefparamTargetScope). Module-level parameters
+// get theirs from the ParameterBuilder when the instance body is created.
+//
+// The override is keyed by the parameter's syntax in the override node of the
+// instance (OpaqueInstancePath stops at the instance body), so a block inside a
+// conditional generate block is found the same way. The iterations of a loop
+// generate share that syntax and could not be told apart, so a parameter there
+// keeps its own value.
+static const HierarchyOverrideNode::ParamOverride* findBlockParamOverride(
+    const ParameterSymbol& param) {
+    auto syntax = param.getSyntax();
+    auto scope = param.getParentScope();
+    if (!syntax || !scope || !isDefparamTargetScope(*scope))
+        return nullptr;
+
+    while (scope) {
+        auto& sym = scope->asSymbol();
+        if (sym.kind == SymbolKind::InstanceBody) {
+            auto node = sym.as<InstanceBodySymbol>().hierarchyOverrideNode;
+            if (!node)
+                return nullptr;
+
+            auto it = node->paramOverrides.find(syntax);
+            if (it == node->paramOverrides.end() || it->second.expr)
+                return nullptr;
+            return &it->second;
+        }
+
+        auto parent = sym.getParentScope();
+        if (sym.kind == SymbolKind::GenerateBlock) {
+            if (!parent || parent->asSymbol().kind == SymbolKind::GenerateBlockArray)
+                return nullptr;
+        }
+        else if (sym.kind != SymbolKind::StatementBlock && sym.kind != SymbolKind::Subroutine) {
+            return nullptr;
+        }
+        scope = parent;
+    }
+    return nullptr;
 }
 
 void ParameterSymbolBase::checkDefaultExpression() const {
@@ -145,6 +202,16 @@ const ConstantValue& ParameterSymbol::getValue(SourceRange referencingRange) con
 
         evaluating = true;
         auto guard = ScopeGuard([this] { evaluating = false; });
+
+        // IEEE 1800-2023 §23.10.2: a parameter of a named block, task or function is
+        // redefined by a defparam statement; the value was already converted to the
+        // parameter's type when the defparam was resolved.
+        if (!isLocalParam() && !isPortParam()) {
+            if (auto override = findBlockParamOverride(*this)) {
+                value = scope->getCompilation().allocConstant(ConstantValue(override->cv));
+                return *value;
+            }
+        }
 
         // If no value has been explicitly set, try to set it
         // from our initializer.
