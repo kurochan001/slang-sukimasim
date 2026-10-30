@@ -727,11 +727,14 @@ public:
             auto indexType = args[0]->type->getAssociativeIndexType();
             if (indexType) {
                 // IEEE 1800-2023 §7.9.8: the index argument "shall be assignment compatible
-                // with the index type", not equivalent to it -- a narrower integral variable
-                // is legal (the function returns -1 and truncates the key).  bindRefArg
-                // rejected it with diag::RefTypeMismatch at elaboration.
-                (void)indexType;
-                return Expression::bindLValue(syntax, context);
+                // with the index type of the array", not equivalent to it -- a narrower
+                // integral variable is legal (the function returns -1 and truncates the
+                // key).  bindRefArg rejected it with diag::RefTypeMismatch at elaboration.
+                // Bind it as the target of an assignment from the index type so that an
+                // argument that is not assignment compatible (e.g. a real variable for a
+                // string index) is still rejected.
+                return Expression::bindLValue(syntax, *indexType, context,
+                                              /* isInout */ false);
             }
         }
 
