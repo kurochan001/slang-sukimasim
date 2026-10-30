@@ -828,6 +828,7 @@ warning string-int-concat ConcatWithStringInt "cannot mix strings and integers i
 warning range-select-reversed RangeSelectReversed "range of selection [{}:{}] from {} is reversed"
 warning assign-in-cont-assign AssignmentInContAssign "assignment expressions are not allowed in a continuous assignment or a procedural continuous assignment"
 warning auto-in-proc-assign AutoFromProcAssign "cannot refer to automatic variable '{}' from a procedural continuous assignment"
+warning event-formal-decl EventFormalNotEventExpr "argument of type 'event' can only be used in places where event expressions are allowed"
 
 subsystem Statements
 error ReturnNotInSubroutine "return statement is only valid inside task and function blocks"
@@ -1191,7 +1192,7 @@ note NoteAliasedTo "which is aliased to"
 note NoteAliasDeclaration "previous alias declaration here"
 note NoteHierarchicalRef "hierarchical reference here"
 warning missing-top NoTopModules "no top-level modules found in design"
-warning duplicate-defparam DuplicateDefparam "parameter already has a defparam override applied; ignoring this one"
+warning duplicate-defparam DuplicateDefparam "parameter is also the target of a later defparam in the source text; ignoring this one"
 
 subsystem Analysis
 error AssertionNoClock "{} has no explicit clocking event and one cannot be inferred from context"

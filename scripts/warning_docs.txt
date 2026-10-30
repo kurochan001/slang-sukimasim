@@ -977,8 +977,10 @@ endclass
 ```
 
 -Wduplicate-defparam
-More than one defparam targets the same parameter. The LRM specifies that this is undefined
-behavior. slang takes the value from the first defparam it sees and ignores the rest.
+More than one defparam targets the same parameter. The LRM specifies that the parameter
+takes the value of the last defparam in the source text, so the earlier ones are ignored.
+When the defparams are in different source files the choice is undefined, and slang takes
+the value from the first defparam it sees.
 ```
 module m;
     parameter p = 1;
@@ -3075,4 +3077,17 @@ endclass
 class holder_c #(type C = box_c);
   C::item_t bad;
 endclass
+```
+
+-Wevent-formal-decl
+A formal argument of type event of a sequence or property is used in a place where an
+event expression is not allowed, in a declaration that is never instantiated. The LRM
+prohibits this for every declaration; an instantiation is always reported as an error.
+```
+module m;
+  logic a;
+  sequence s(event ev);
+    a ##1 ev;
+  endsequence
+endmodule
 ```
