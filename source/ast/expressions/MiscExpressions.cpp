@@ -1332,6 +1332,17 @@ Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRa
     if (!propExpr) {
         // The expression can be null when making default instances of
         // sequences and properties. Just return an invalid expression.
+        //
+        // IEEE 1800-2023 §16.8.1 restricts every reference to an 'event' formal
+        // to places where an event expression may be written, whatever the actual
+        // argument is, so the rule applies to a declaration that is never
+        // instantiated as well. Report that case as a warning (an instance reports
+        // the EventExprAssertionArg error below).
+        if (typeKind == SymbolKind::EventType &&
+            !(instanceCtx.flags.has(ASTFlags::EventExpression) &&
+              instanceCtx.flags.has(ASTFlags::AllowClockingBlock))) {
+            instanceCtx.addDiag(diag::EventFormalNotEventExpr, range);
+        }
         return badExpr(comp, nullptr);
     }
 
