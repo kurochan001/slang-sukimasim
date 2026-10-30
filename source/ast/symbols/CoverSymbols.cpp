@@ -621,6 +621,27 @@ CoverageBinSymbol& CoverageBinSymbol::fromSyntax(const Scope& scope,
     return *result;
 }
 
+// IEEE 1800-2023 §19.5: besides constant expressions and class constants, the
+// non-ref arguments of the covergroup may be used as variables in a
+// covergroup_expression. Their values come from the new() call, so an
+// expression that reads one cannot be evaluated at elaboration time.
+static bool readsCovergroupArgument(const Expression& expr) {
+    bool found = false;
+    expr.visitSymbolReferences([&](const Expression&, const Symbol& symbol) {
+        if (symbol.kind != SymbolKind::FormalArgument)
+            return;
+
+        auto& arg = symbol.as<FormalArgumentSymbol>();
+        auto parent = arg.getParentScope();
+        if (parent && parent->asSymbol().kind == SymbolKind::CovergroupType &&
+            arg.direction != ArgumentDirection::Ref &&
+            !arg.flags.has(VariableFlags::CoverageSampleFormal)) {
+            found = true;
+        }
+    });
+    return found;
+}
+
 static const Expression& bindCovergroupExpr(const ExpressionSyntax& syntax,
                                             const ASTContext& context,
                                             const Type* lvalueType = nullptr,
@@ -632,7 +653,8 @@ static const Expression& bindCovergroupExpr(const ExpressionSyntax& syntax,
         expr = &Expression::bind(syntax, context, extraFlags);
 
     // NOTE: CovergroupExpr flag has been removed from EvalFlags
-    context.eval(*expr, EvalFlags::None);
+    if (!readsCovergroupArgument(*expr))
+        context.eval(*expr, EvalFlags::None);
     return *expr;
 }
 
