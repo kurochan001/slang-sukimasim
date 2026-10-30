@@ -679,10 +679,17 @@ void EnumValueSymbol::serializeTo(ASTSerializer& serializer) const {
     serializer.write("value", getValue());
 }
 
+// IEEE 1800-2023 §7.4.1: "If a packed array is declared as signed, then the
+// array viewed as a single vector shall be signed. The individual elements of
+// the array are unsigned unless they are of a named type declared as signed."
+// The `signed` keyword of `logic signed [1:0][3:0]` reaches every level through
+// the scalar element, so an array of an unnamed element keeps its signedness.
+// An array of a named element type (`snib_t [1:0]` with a signed `snib_t`) is
+// not declared signed: the elements are signed, the whole array is unsigned.
 PackedArrayType::PackedArrayType(const Type& elementType, ConstantRange range,
                                  bitwidth_t fullWidth) :
     IntegralType(SymbolKind::PackedArrayType, "", SourceLocation(), fullWidth,
-                 elementType.isSigned(), elementType.isFourState()),
+                 elementType.isSigned() && !elementType.isAlias(), elementType.isFourState()),
     elementType(elementType), range(range) {
 }
 
