@@ -663,6 +663,17 @@ public:
         if (inAssignmentRhs && expr.hasOutputArgs())
             body.addDiag(diag::CheckerFuncArg, expr.sourceRange);
 
+        // IEEE 1800-2023 §17.6: covergroup "declarations and instances shall not appear
+        // in any procedural block in the checker", but "A covergroup may also be
+        // triggered by a procedural call to its sample() method", so a method call on a
+        // covergroup instance does not count as a reference to the covergroup; only
+        // check its arguments.
+        if (auto thisClass = expr.thisClass(); thisClass && thisClass->type->isCovergroup()) {
+            for (auto arg : expr.arguments())
+                arg->visit(*this);
+            return;
+        }
+
         visitDefault(expr);
     }
 
