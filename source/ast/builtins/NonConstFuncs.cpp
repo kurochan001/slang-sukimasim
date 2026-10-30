@@ -10,6 +10,8 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/SysFuncsDiags.h"
@@ -635,10 +637,42 @@ public:
         return comp.getIntType();
     }
 
-    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
-                       const CallExpression::SystemCallInfo&) const final {
-        notConst(context, range);
-        return nullptr;
+    ConstantValue eval(EvalContext& context, const Args& args, SourceRange range,
+                       const CallExpression::SystemCallInfo& callInfo) const final {
+        // IEEE 1800-2023 §11.2.1: calls of "the timescale system functions listed in
+        // 20.4" are constant system function calls. §20.4.1: without an argument the
+        // result is the time unit or precision "of the design element that is the
+        // current scope"; with $unit it is that of the compilation unit, and with a
+        // module instance that of the instance. With $root it is the simulation time
+        // unit (§3.14.3), the finest precision of the whole design, which is not a
+        // property of one scope, so that form stays non-constant here.
+        std::optional<TimeScale> timeScale;
+        if (args.empty()) {
+            timeScale = callInfo.scope->getTimeScale();
+        }
+        else {
+            auto& sym = *args[0]->as<ArbitrarySymbolExpression>().symbol;
+            if (sym.kind == SymbolKind::Instance)
+                timeScale = sym.as<InstanceSymbol>().body.getTimeScale();
+            else if (sym.kind == SymbolKind::CompilationUnit)
+                timeScale = sym.as<CompilationUnitSymbol>().getTimeScale();
+        }
+
+        if (!timeScale) {
+            notConst(context, range);
+            return nullptr;
+        }
+
+        // Table 20-2: the value is the power of ten of the unit or precision in seconds.
+        auto& value = knownNameId == KnownSystemName::TimeUnit ? timeScale->base
+                                                               : timeScale->precision;
+        int32_t exponent = -3 * int32_t(value.unit);
+        if (value.magnitude == TimeScaleMagnitude::Ten)
+            exponent += 1;
+        else if (value.magnitude == TimeScaleMagnitude::Hundred)
+            exponent += 2;
+
+        return SVInt(32, uint64_t(int64_t(exponent)), /* isSigned */ true);
     }
 
 private:
