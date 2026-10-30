@@ -186,12 +186,10 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
             auto& rightOperand = parseSubExpression(options, newPrecedence);
 
             // IEEE 1800-2023 §10.4: Chained assignments like a = b = c = 10 are allowed
-            // The value of an assignment is the RHS value after conversion
-            // Only flag <= ambiguity between nonblocking assignment and comparison
-            if (opKind == SyntaxKind::NonblockingAssignmentExpression &&
-                rightOperand.kind == SyntaxKind::LessThanEqualExpression) {
-                addDiag(diag::ChainedAssignment, rightOperand.sourceRange());
-            }
+            // The value of an assignment is the RHS value after conversion.
+            // A '<=' after a nonblocking '<=' is not a chained assignment: the
+            // ProceduralAssignmentContext option is cleared above, so the right operand
+            // of 'r <= x <= y' parses as the relational x <= y (§10.4.2 / §11.4.4).
 
             left = &factory.binaryExpression(opKind, *left, opToken, attributes, rightOperand);
 
