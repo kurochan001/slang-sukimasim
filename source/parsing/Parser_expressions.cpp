@@ -226,7 +226,26 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
             auto& lhs = parseSubExpression(options, logicalOrPrecedence - 1);
             auto colon = expect(TokenKind::Colon);
             auto& rhs = parseSubExpression(options, logicalOrPrecedence - 1);
-            left = &factory.conditionalExpression(predicate, question, attributes, lhs, colon, rhs);
+
+            // IEEE 1800-2023 §11.3.2 (Table 11-2): the conditional operator has a
+            // higher precedence than -> and <->, so "a ? b : c -> d" is
+            // "(a ? b : c) -> d".  The third operand is parsed at the precedence of
+            // -> so that a nested (right-associative) conditional is taken, which
+            // also takes a trailing -> or <->; hoist that operator above the
+            // conditional.  A parenthesized operand is a ParenthesizedExpression.
+            if (rhs.kind == SyntaxKind::LogicalImplicationExpression ||
+                rhs.kind == SyntaxKind::LogicalEquivalenceExpression) {
+                auto& implication = rhs.as<BinaryExpressionSyntax>();
+                auto& conditional = factory.conditionalExpression(predicate, question, attributes,
+                                                                  lhs, colon, *implication.left);
+                left = &factory.binaryExpression(rhs.kind, conditional,
+                                                 implication.operatorToken,
+                                                 implication.attributes, *implication.right);
+            }
+            else {
+                left = &factory.conditionalExpression(predicate, question, attributes, lhs, colon,
+                                                      rhs);
+            }
         }
     }
 
