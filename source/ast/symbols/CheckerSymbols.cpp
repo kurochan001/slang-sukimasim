@@ -849,6 +849,21 @@ public:
                         return notAllowed();
                     }
                     break;
+                case StatementKind::VariableDeclaration: {
+                    // IEEE 1800-2023 §17.5: checker always procedures may contain loop
+                    // statements (12.7), so the loop variable a for loop declares
+                    // (§12.7.1) is allowed. A variable declared in a sequential block
+                    // is allowed too when it is static: §17.7 "All variables defined in
+                    // a checker body shall have static lifetimes".
+                    auto& var = stmt.template as<VariableDeclStatement>().symbol;
+                    auto varScope = var.getParentScope();
+                    auto varScopeSyntax = varScope ? varScope->asSymbol().getSyntax() : nullptr;
+                    bool isLoopVar = varScopeSyntax &&
+                                     varScopeSyntax->kind == SyntaxKind::ForLoopStatement;
+                    if (!isLoopVar && var.lifetime != VariableLifetime::Static)
+                        return notAllowed();
+                    break;
+                }
                 case StatementKind::ImmediateAssertion:
                 case StatementKind::ConcurrentAssertion:
                 case StatementKind::ProceduralChecker:
