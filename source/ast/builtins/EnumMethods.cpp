@@ -18,8 +18,8 @@ using namespace syntax;
 
 class EnumFirstLastMethod : public SystemSubroutine {
 public:
-    EnumFirstLastMethod(KnownSystemName knownNameId, bool /* first */) :
-        SystemSubroutine(knownNameId, SubroutineKind::Function) {}
+    EnumFirstLastMethod(KnownSystemName knownNameId, bool first) :
+        SystemSubroutine(knownNameId, SubroutineKind::Function), first(first) {}
 
     // The receiver's value is never read; only its type matters.
     bool isArgUnevaluated(size_t index) const final { return index == 0; }
@@ -35,10 +35,38 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        // Phase 2.2: Disable constant evaluation - let SukimaSim handle at runtime
-        // Enum values depend on runtime state and should not be constant-evaluated
-        return nullptr;
+        // IEEE 1800-2023 §6.19.5.1 / §6.19.5.2: first() and last() return the first and
+        // last member of the enumeration, which depend only on the type, so they fold in
+        // constant expressions (a generate condition or a localparam, §11.2.1).  The
+        // receiver is never evaluated (isArgUnevaluated).
+        if (!noHierarchical(context, *args[0]))
+            return nullptr;
+
+        const EnumType& type = args[0]->type->getCanonicalType().as<EnumType>();
+
+        auto range = type.values();
+        if (range.begin() == range.end())
+            return nullptr;
+
+        const EnumValueSymbol* value;
+        if (first) {
+            value = &*range.begin();
+        }
+        else {
+            for (auto it = range.begin();;) {
+                auto prev = it++;
+                if (it == range.end()) {
+                    value = &*prev;
+                    break;
+                }
+            }
+        }
+
+        return value->getValue();
     }
+
+private:
+    bool first;
 };
 
 class EnumNextPrevMethod : public SystemSubroutine {
@@ -90,9 +118,14 @@ public:
 
     ConstantValue eval(EvalContext& context, const Args& args, SourceRange,
                        const CallExpression::SystemCallInfo&) const final {
-        // Phase 2.2: Disable constant evaluation - let SukimaSim handle at runtime
-        // Enum values depend on runtime state and should not be constant-evaluated
-        return nullptr;
+        // IEEE 1800-2023 §6.19.5.5: num() returns the number of elements in the
+        // enumeration, which depends only on the type, so it folds in constant
+        // expressions.  The receiver is never evaluated (isArgUnevaluated).
+        if (!noHierarchical(context, *args[0]))
+            return nullptr;
+
+        const EnumType& type = args[0]->type->getCanonicalType().as<EnumType>();
+        return SVInt(32, (uint64_t)std::ranges::distance(type.values()), true);
     }
 };
 
