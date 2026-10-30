@@ -108,6 +108,19 @@ Expression& ValueExpressionBase::fromSymbol(const ASTContext& context, const Sym
             // Some tools allow this, so the diagnostic can be downgraded.
             context.addDiag(diag::RefArgForkJoin, sourceRange) << symbol.name;
         }
+
+        // IEEE 1800-2023 §13.3.2: variables of an automatic task "shall not be assigned
+        // values using nonblocking assignments or procedural continuous assignments" and
+        // "shall not be referenced by assign or force procedural continuous
+        // assignments" (§6.21 has the same rule for automatic variables in general).
+        // force/assign bind with ProceduralForceAssign instead of NonProcedural so that
+        // existing designs using a loop index there keep working, so report a warning
+        // here rather than AutoFromNonProcedural.
+        if (flags.has(ASTFlags::ProceduralForceAssign) &&
+            !var.flags.has(VariableFlags::RefStatic) && symbol.kind != SymbolKind::ClassProperty &&
+            var.kind != SymbolKind::PatternVar && var.kind != SymbolKind::Iterator) {
+            context.addDiag(diag::AutoFromProcAssign, sourceRange) << symbol.name;
+        }
     }
     else if (symbol.kind == SymbolKind::ConstraintBlock) {
         if (!symbol.as<ConstraintBlockSymbol>().flags.has(ConstraintBlockFlags::Static))
