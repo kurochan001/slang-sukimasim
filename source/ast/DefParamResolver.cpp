@@ -589,11 +589,28 @@ void Compilation::resolveDefParamsAndBinds() {
                 entry.targetSyntax,
                 HierarchyOverrideNode::ParamOverride{entry.value, nullptr, entry.defparamSyntax});
 
-            if (!inserted && isFinal) {
+            if (!inserted) {
                 SLANG_ASSERT(it->second.defparam);
-                auto& diag = c.root->addDiag(diag::DuplicateDefparam,
-                                             entry.defparamSyntax->sourceRange());
-                diag.addNote(diag::NotePreviousDefinition, it->second.defparam->sourceRange());
+
+                // IEEE 1800-2023 §23.10.1: "In the case of multiple defparams for a
+                // single parameter, the parameter takes the value of the last defparam
+                // statement encountered in the source text." Defparams are found in
+                // elaboration order, so compare their positions. Across source files
+                // the choice is undefined; keep the first one found there.
+                auto prevLoc = it->second.defparam->sourceRange().start();
+                auto newLoc = entry.defparamSyntax->sourceRange().start();
+                bool newIsLater = prevLoc.buffer() == newLoc.buffer() &&
+                                  prevLoc.offset() < newLoc.offset();
+
+                auto ignored = entry.defparamSyntax;
+                if (newIsLater) {
+                    ignored = it->second.defparam;
+                    it->second = HierarchyOverrideNode::ParamOverride{entry.value, nullptr,
+                                                                      entry.defparamSyntax};
+                }
+
+                if (isFinal)
+                    c.root->addDiag(diag::DuplicateDefparam, ignored->sourceRange());
             }
         }
 
