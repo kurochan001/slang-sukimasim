@@ -345,7 +345,16 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
         type = &comp.getType(width, operand->type->getIntegralFlags());
     }
 
-    if (!type->isCastCompatible(*operand->type)) {
+    // IEEE 1800-2023 §5.9: "String literals can also be cast to a packed or unpacked
+    // array type, which shall follow the same rules as assigning a string literal to a
+    // packed or unpacked array."  A string literal assigned to an unpacked array of
+    // bytes is left justified (isImplicitlyAssignableTo accepts it), so the cast is not
+    // a bit-stream cast and must not be held to the bit-stream size rule.
+    const bool isStringLiteralToByteArray = type->isByteArray() &&
+                                            operand->type->isIntegral() &&
+                                            operand->isImplicitString();
+
+    if (!type->isCastCompatible(*operand->type) && !isStringLiteralToByteArray) {
         if (!Bitstream::checkClassAccess(*type, context, targetExpr.sourceRange)) {
             return badExpr(comp, result(*operand));
         }
