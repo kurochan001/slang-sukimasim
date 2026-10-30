@@ -40,9 +40,17 @@ public:
         if (!checkArgCount(context, true, args, range, 0, 0))
             return comp.getErrorType();
 
+        // IEEE 1800-2023 §7.12.3: "If a with clause is specified, the corresponding
+        // arithmetic or Boolean reduction operation shall be defined for the type of
+        // the expression." sum() and product() are arithmetic and also work on real
+        // values, but and(), or() and xor() are bitwise, which §11.3.1 does not allow
+        // on real operands, so they need integral values.
+        const bool allowFloating = knownNameId == KnownSystemName::Sum ||
+                                   knownNameId == KnownSystemName::Product;
+
         if (iterExpr) {
-            // IEEE 1800-2023 §7.12.3: sum() and product() work on integral or real types
-            if (!iterExpr->type->isIntegral() && !iterExpr->type->isFloating()) {
+            if (!iterExpr->type->isIntegral() &&
+                !(allowFloating && iterExpr->type->isFloating())) {
                 context.addDiag(diag::ArrayMethodIntegral, iterExpr->sourceRange) << name;
                 return comp.getErrorType();
             }
@@ -53,8 +61,7 @@ public:
             auto elemType = args[0]->type->getArrayElementType();
             SLANG_ASSERT(elemType);
 
-            // IEEE 1800-2023 §7.12.3: sum() and product() work on integral or real types
-            if (!elemType->isIntegral() && !elemType->isFloating()) {
+            if (!elemType->isIntegral() && !(allowFloating && elemType->isFloating())) {
                 context.addDiag(diag::ArrayMethodIntegral, args[0]->sourceRange) << name;
                 return comp.getErrorType();
             }
