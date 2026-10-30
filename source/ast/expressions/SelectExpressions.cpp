@@ -1019,6 +1019,24 @@ Expression& MemberAccessExpression::fromSelector(
                 // fall through with scope = &ct
             }
 
+            // IEEE 1800-2023 §18.8: "If the random variable is an object handle, only
+            // the mode of the variable is changed, not the mode of random variables
+            // within that object." A rand class handle selected through its object
+            // (o.h.rand_mode(...)) is such a random variable, and the nonvoid form
+            // without an argument (h.rand_mode()) exists only for a random variable,
+            // so bind both to the property's rand_mode. A bare handle called with an
+            // argument (h.rand_mode(0)) keeps naming the object-wide method.
+            if (selector.name == "rand_mode"sv) {
+                bool noArgs = !invocation || !invocation->arguments ||
+                              invocation->arguments->parameters.empty();
+                if (noArgs || expr.kind == ExpressionKind::MemberAccess) {
+                    if (auto result = tryBindSpecialMethod(comp, expr, selector, invocation,
+                                                           withClause, context)) {
+                        return *result;
+                    }
+                }
+            }
+
             scope = &ct;
             break;
         }
