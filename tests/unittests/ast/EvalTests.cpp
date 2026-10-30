@@ -2058,7 +2058,9 @@ TEST_CASE("Array query functions") {
     NO_SESSION_ERRORS;
 }
 
-TEST_CASE("Static variables aren't initialized in consteval") {
+TEST_CASE("Static variables are initialized in every consteval call") {
+    // IEEE 1800-2023 §13.4.3: a constant function call has no effect on the initial
+    // values of the variables among multiple invocations at elaboration time.
     ScriptSession session;
 
     session.eval(R"(
@@ -2068,12 +2070,12 @@ function int foo;
 endfunction
 )");
     session.eval("localparam int i = foo();");
+    session.eval("localparam int k = foo();");
 
-    CHECK(session.eval("i").integer() == 1);
+    CHECK(session.eval("i").integer() == 2);
+    CHECK(session.eval("k").integer() == 2);
 
-    auto diags = session.getDiagnostics();
-    REQUIRE(diags.size() == 1);
-    CHECK(diags[0].code == diag::ConstEvalStaticSkipped);
+    NO_SESSION_ERRORS;
 }
 
 TEST_CASE("Complicated lvalue path") {
