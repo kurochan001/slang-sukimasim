@@ -83,6 +83,17 @@ static void checkForVectoredSelect(const Expression& value, SourceRange range,
     }
 }
 
+// The number of unpacked array levels at the top of the given type.
+static size_t unpackedDepth(const Type& type) {
+    size_t depth = 0;
+    auto ct = &type.getCanonicalType();
+    while (ct->isUnpackedArray()) {
+        depth++;
+        ct = &ct->getArrayElementType()->getCanonicalType();
+    }
+    return depth;
+}
+
 template<typename T>
 bool requireLValueHelper(const T& expr, const ASTContext& context, SourceLocation location,
                          bitmask<AssignFlags> flags) {
@@ -98,8 +109,15 @@ bool requireLValueHelper(const T& expr, const ASTContext& context, SourceLocatio
     }
 
     if (auto sym = val.getSymbolReference(); sym && sym->isValue()) {
+        // IEEE 1800-2023 §10.3.2: "the left-hand side of a continuous assignment to a
+        // net of a user-defined nettype shall not contain any indexing or select
+        // operations into the data type of the nettype."  A select of the net's own
+        // unpacked dimensions (an element or a slice of an array of such nets) drives
+        // whole nets and is legal; only a select that reaches into the nettype's data
+        // type is a partial driver.
         if (auto net = sym->template as_if<NetSymbol>();
-            net && net->netType.netKind == NetType::UserDefined) {
+            net && net->netType.netKind == NetType::UserDefined &&
+            unpackedDepth(*val.type) <= unpackedDepth(net->netType.getDataType())) {
             context.addDiag(diag::UserDefPartialDriver, expr.sourceRange) << sym->name;
             return false;
         }
