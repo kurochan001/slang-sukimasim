@@ -2846,7 +2846,9 @@ SequenceDeclarationSyntax& Parser::parseSequenceDeclaration(AttrList attributes)
         declarations.push_back(decl);
     pendingInlineLocalVarStack.pop_back();
 
-    auto semi2 = expect(TokenKind::Semicolon);
+    // IEEE 1800-2023 §16.8 (Syntax 16-9): sequence_expr [ ; ] -- the semicolon
+    // after the body is optional, as it is for a property_spec.
+    auto semi2 = consumeIf(TokenKind::Semicolon);
     auto end = expect(TokenKind::EndSequenceKeyword);
 
     auto blockName = parseNamedBlockClause();
