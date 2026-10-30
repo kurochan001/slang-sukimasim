@@ -611,7 +611,11 @@ void GenerateBlockSymbol::fromSyntax(Compilation& compilation, const IfGenerateS
                                      SmallVectorBase<GenerateBlockSymbol*>& results) {
     std::optional<bool> selector;
     auto& cond = Expression::bind(*syntax.condition, context);
-    ConstantValue cv = context.eval(cond);
+
+    // IEEE 1800-2023 §6.20.5: a specparam "can appear in any expression that is not
+    // assigned to a parameter and is not part of the range specification of a
+    // declaration", so a generate condition may use one.
+    ConstantValue cv = context.eval(cond, EvalFlags::SpecparamsAllowed);
     if (cv && context.requireBooleanConvertible(cond) && !isUninstantiated)
         selector = cv.isTrue();
     createCondGenBlock(compilation, *syntax.block, context, constructIndex,
@@ -660,8 +664,10 @@ void GenerateBlockSymbol::fromSyntax(Compilation& compilation, const CaseGenerat
     auto boundIt = bound.begin();
     auto condExpr = *boundIt++;
 
+    // IEEE 1800-2023 §6.20.5: the case expression and the case item expressions of a
+    // case generate construct may use specparams (see the if generate above).
     const Type* condType = nullptr;
-    ConstantValue condVal = context.eval(*condExpr);
+    ConstantValue condVal = context.eval(*condExpr, EvalFlags::SpecparamsAllowed);
     if (!condVal) {
         if (condExpr->kind == ExpressionKind::TypeReference)
             condType = &condExpr->as<TypeReferenceExpression>().targetType;
@@ -690,7 +696,7 @@ void GenerateBlockSymbol::fromSyntax(Compilation& compilation, const CaseGenerat
             // Have to keep incrementing the iterator here so that we stay in sync.
             auto expr = *boundIt++;
             itemExprs.push_back(expr);
-            ConstantValue val = context.eval(*expr);
+            ConstantValue val = context.eval(*expr, EvalFlags::SpecparamsAllowed);
 
             bool match = val && val == condVal;
             if (!val && condType && expr->kind == ExpressionKind::TypeReference)
