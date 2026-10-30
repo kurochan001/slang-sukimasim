@@ -2189,6 +2189,10 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
         }
     }
 
+    // An unreferenced import candidate that a wildcard export would expose (see below).
+    const Symbol* exportCandidate = nullptr;
+    const WildcardImportSymbol* exportCandidateImport = nullptr;
+
     // Look through any wildcard imports prior to the lookup point and see if their packages
     // contain the name we're looking for.
     if (auto wildcardImportData = scope.getWildcardImportData()) {
@@ -2227,9 +2231,22 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
                     continue;
                 }
 
-                const Symbol* imported = package->findForImport(name);
-                if (imported && importDedup.emplace(imported).second)
+                // IEEE 1800-2023 §26.6: a wildcard export makes available only the
+                // declarations the exporting package actually imported; "Symbols that are
+                // candidates for import but not actually imported are not made available."
+                // Remember such a candidate and use it only if no enclosing scope declares
+                // the name, so that code relying on the old lenient lookup still binds.
+                const Symbol* imported =
+                    package->findForImport(name, /* allowUnreferencedCandidates */ false);
+                if (imported && importDedup.emplace(imported).second) {
                     imports.emplace_back(Import{imported, import});
+                }
+                else if (!imported && !exportCandidate) {
+                    if (auto candidate = package->findForImport(name)) {
+                        exportCandidate = candidate;
+                        exportCandidateImport = import;
+                    }
+                }
             }
 
             if (!imports.empty()) {
@@ -2281,10 +2298,23 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
         }
     }
 
+    auto useExportCandidate = [&] {
+        if (!exportCandidate || result.found || result.systemSubroutine || result.hasError())
+            return;
+
+        result.flags |= LookupResultFlags::WasImported;
+        result.found = exportCandidate;
+        scope.getCompilation().noteReference(*exportCandidateImport);
+        if (auto wildcardImportData = scope.getWildcardImportData())
+            wildcardImportData->importedSymbols.try_emplace(exportCandidate->name, exportCandidate);
+    };
+
     // Continue up the scope chain via our parent.
     location = LookupLocation::after(scope.asSymbol());
-    if (!location.getScope())
+    if (!location.getScope()) {
+        useExportCandidate();
         return;
+    }
 
     // If this scope was an out-of-block subroutine, tell the next recursive call about it.
     // Otherwise, if our previous call was for such a situation and we didn't find the symbol
@@ -2320,11 +2350,13 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
 
     if (flags.has(LookupFlags::DisallowUnitReferences) &&
         location.getScope()->asSymbol().kind == SymbolKind::CompilationUnit) {
+        useExportCandidate();
         return;
     }
 
-    return unqualifiedImpl(*location.getScope(), name, location, sourceRange, flags,
-                           outOfBlockIndex, result, originalScope, originalSyntax);
+    unqualifiedImpl(*location.getScope(), name, location, sourceRange, flags, outOfBlockIndex,
+                    result, originalScope, originalSyntax);
+    useExportCandidate();
 }
 
 void Lookup::qualified(const ScopedNameSyntax& syntax, const ASTContext& context,

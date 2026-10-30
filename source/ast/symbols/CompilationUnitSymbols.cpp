@@ -285,7 +285,8 @@ static const Symbol& findOwningPackage(const Symbol& symbol) {
     }
 }
 
-const Symbol* PackageSymbol::findForImport(std::string_view lookupName) const {
+const Symbol* PackageSymbol::findForImport(std::string_view lookupName,
+                                           bool allowUnreferencedCandidates) const {
     // A plain member (or forwarding typedef) is resolved without consulting exports,
     // so handle those before resolving exports. This matters because resolveExports
     // can re-enter findForImport on other packages; resolving eagerly for every
@@ -373,6 +374,13 @@ const Symbol* PackageSymbol::findForImport(std::string_view lookupName) const {
     // unqualified wildcard import lookup that populates importedSymbols above.
     // IEEE 1800 packages can nevertheless re-export wildcard-imported names via
     // "export other_pkg::*", so resolve those candidates directly here.
+    // IEEE 1800-2023 §26.6: "Symbols that are candidates for import but not
+    // actually imported are not made available." This is an extension, so an
+    // unqualified lookup through a wildcard import asks for it only when nothing
+    // else in the enclosing scopes has the name.
+    if (!allowUnreferencedCandidates)
+        return nullptr;
+
     for (auto import : wildcardData->wildcardImports) {
         auto package = import->getPackage();
         if (!package)

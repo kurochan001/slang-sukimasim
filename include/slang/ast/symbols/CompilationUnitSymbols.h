@@ -58,7 +58,14 @@ public:
     /// Searches for a symbol by name, in the context of importing from the package.
     /// This is similar to a call to find() but also includes symbols that have been
     /// exported from the package.
-    const Symbol* findForImport(std::string_view name) const;
+    ///
+    /// If @a allowUnreferencedCandidates is set, a wildcard export (`export p::*` or
+    /// `export *::*`) also makes visible the candidates of the matching wildcard import
+    /// that the package never actually imported. IEEE 1800-2023 §26.6 does not export
+    /// those; the extension is used for qualified `pkg::name` references and as a
+    /// last resort for unqualified lookups.
+    const Symbol* findForImport(std::string_view name,
+                                bool allowUnreferencedCandidates = true) const;
 
     /// Validates this package's export declarations and populates the export maps.
     /// Idempotent; does nothing if the package has no export declarations.
