@@ -721,6 +721,28 @@ void Scope::handleNameConflict(const Symbol& member, const Symbol*& existing) co
         }
     }
 
+    // IEEE 1800-2023 §3.13 f): the specify construct introduces its own block name space,
+    // so a specparam declared in a specify block does not clash with a module item of the
+    // same name (or with a specparam of another specify block). Its visibility in the
+    // module scope is an extension; the module's own declaration takes precedence.
+    auto isSpecifyBlockSpecparam = [](const Symbol& sym) {
+        if (sym.kind != SymbolKind::TransparentMember)
+            return false;
+
+        auto& wrapped = sym.as<TransparentMemberSymbol>().wrapped;
+        auto wrappedScope = wrapped.getParentScope();
+        return wrapped.kind == SymbolKind::Specparam && wrappedScope &&
+               wrappedScope->asSymbol().kind == SymbolKind::SpecifyBlock;
+    };
+
+    if (isSpecifyBlockSpecparam(member))
+        return;
+
+    if (isSpecifyBlockSpecparam(*existing)) {
+        existing = &member;
+        return;
+    }
+
     if (existing->kind == SymbolKind::ExplicitImport && member.kind == SymbolKind::ExplicitImport) {
         // These can't be checked until we can resolve the imports and
         // see if they point to the same symbol.
