@@ -171,7 +171,6 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "vectored", TokenKind::VectoredKeyword }, \
     { "wait", TokenKind::WaitKeyword },\
     { "wand", TokenKind::WAndKeyword },\
-    { "weak", TokenKind::WeakKeyword },\
     { "weak0", TokenKind::Weak0Keyword },\
     { "weak1", TokenKind::Weak1Keyword },\
     { "while", TokenKind::WhileKeyword },\
@@ -289,7 +288,6 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "solve", TokenKind::SolveKeyword },\
     { "static", TokenKind::StaticKeyword },\
     { "string", TokenKind::StringKeyword },\
-    { "strong", TokenKind::StrongKeyword },\
     { "struct", TokenKind::StructKeyword },\
     { "super", TokenKind::SuperKeyword },\
     { "tagged", TokenKind::TaggedKeyword },\
