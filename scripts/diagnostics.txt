@@ -826,6 +826,8 @@ warning nonstandard-string-concat NonstandardStringConcat "string concatenation 
 warning inc-dec-bit IncDecBit "increment/decrement of a 1-bit operand"
 warning string-int-concat ConcatWithStringInt "cannot mix strings and integers in a concatenation (use a cast if this is desired)"
 warning range-select-reversed RangeSelectReversed "range of selection [{}:{}] from {} is reversed"
+warning assign-in-cont-assign AssignmentInContAssign "assignment expressions are not allowed in a continuous assignment or a procedural continuous assignment"
+warning auto-in-proc-assign AutoFromProcAssign "cannot refer to automatic variable '{}' from a procedural continuous assignment"
 
 subsystem Statements
 error ReturnNotInSubroutine "return statement is only valid inside task and function blocks"
@@ -968,6 +970,7 @@ error RecursiveClassSpecialization "potentially infinitely recursive specializat
 error MaxClassSpecializationDepth "specialization of class '{}' exceeded maximum dependency depth of {}"
 error TypeRefVoid "cannot create a type reference to the 'void' type"
 warning enum-range EnumRangeLiteral "enum element ranges must be integer literals"
+warning typeref-dynamic-element TypeRefDynamicElement "'type' expression cannot reference an element or member of a dynamic array, queue, associative array, or class object"
 
 subsystem Lookup
 warning redefinition Redefinition "redefinition of '{}'"
@@ -1044,6 +1047,7 @@ warning dup-import DuplicateImport "duplicate import declaration is redundant"
 warning duplicate-definition DuplicateDefinition "duplicate definition of '{}'"
 warning randomize-var-shadow RandomizeConstraintShadow "'{}' in randomize constraint block refers to class member of '{}', but a variable with the same name exists in an enclosing scope; disambiguate with 'local::{}' to reference the enclosing scope variable or 'this.{}' for the class member"
 warning upward-name UpwardHierarchicalName "'{}' is an upward hierarchical name reference"
+warning scope-restricted-type ScopeRestrictedType "a type selected through a type parameter or an interface-based typedef prefix can only be used in a typedef, a type operator, or a type parameter assignment"
 
 subsystem SysFuncs
 error BadSystemSubroutineArg "invalid argument type {} to system {}"
