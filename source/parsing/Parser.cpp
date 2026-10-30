@@ -241,6 +241,13 @@ PortHeaderSyntax& Parser::parsePortHeader(Token constKeyword, Token direction) {
     if (!constKeyword) {
         if (isNetType(kind)) {
             auto netType = consume();
+
+            // IEEE 1800-2023 §6.7.1: "A lexical restriction applies to the use of the reg
+            // keyword in a net or port declaration. A net type keyword shall not be followed
+            // directly by the reg keyword." (e.g. "inout wire reg p;")
+            if (peek(TokenKind::RegKeyword))
+                addDiag(diag::RegAfterNettype, peek().location());
+
             auto& dataType = parseDataType(TypeOptions::AllowImplicit);
 
             if (netType.kind == TokenKind::InterconnectKeyword &&
