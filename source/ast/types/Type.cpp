@@ -1182,6 +1182,37 @@ const Type* Type::getCommonBase(const Type& left, const Type& right) {
     }
 }
 
+// IEEE 1800-2023 §6.23: finds a reference to an element of a dynamic array, queue or
+// associative array, or to a member of a class object, in a type operator's expression.
+struct TypeRefDynamicElementVisitor {
+    const Expression* found = nullptr;
+
+    template<typename T>
+    void visit(const T& expr) {
+        if constexpr (std::is_base_of_v<Expression, T>) {
+            if (found)
+                return;
+
+            if constexpr (std::is_same_v<T, ElementSelectExpression> ||
+                          std::is_same_v<T, RangeSelectExpression>) {
+                if (expr.value().type->isDynamicallySizedArray()) {
+                    found = &expr;
+                    return;
+                }
+            }
+            else if constexpr (std::is_same_v<T, MemberAccessExpression>) {
+                if (expr.value().type->isClass()) {
+                    found = &expr;
+                    return;
+                }
+            }
+
+            if constexpr (HasVisitExprs<T, TypeRefDynamicElementVisitor>)
+                expr.visitExprs(*this);
+        }
+    }
+};
+
 const Type& Type::fromSyntax(Compilation& compilation, const DataTypeSyntax& node,
                              const ASTContext& context, const Type* typedefTarget) {
     switch (node.kind) {
@@ -1256,6 +1287,16 @@ const Type& Type::fromSyntax(Compilation& compilation, const DataTypeSyntax& nod
 
                 if (expr.type->isVoid())
                     context.addDiag(diag::TypeRefVoid, exprSyntax.sourceRange());
+
+                // IEEE 1800-2023 §6.23: "The expression shall not be evaluated and shall
+                // not contain any hierarchical references or references to elements of
+                // dynamic objects."  Report a select into a dynamic array, queue or
+                // associative array and a member of a class object; only a warning, so
+                // that existing designs keep elaborating.
+                TypeRefDynamicElementVisitor visitor;
+                expr.visit(visitor);
+                if (visitor.found)
+                    context.addDiag(diag::TypeRefDynamicElement, visitor.found->sourceRange);
             }
 
             return *expr.type;
