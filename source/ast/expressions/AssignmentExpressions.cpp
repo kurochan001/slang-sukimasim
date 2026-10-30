@@ -29,6 +29,8 @@
 #include "slang/diagnostics/TypesDiags.h"
 #include "slang/numeric/MathUtils.h"
 #include "slang/syntax/AllSyntax.h"
+#include "slang/syntax/SyntaxFacts.h"
+#include "slang/syntax/SyntaxVisitor.h"
 
 namespace slang::ast {
 
@@ -331,6 +333,32 @@ Expression& AssignmentExpression::fromSyntax(Compilation& compilation,
     }
 
     const ExpressionSyntax* rightExpr = syntax.right;
+
+    // IEEE 1800-2023 §11.3.6: "It shall be illegal to include an assignment operator
+    // in an event expression, in an expression within a procedural continuous
+    // assignment, or in an expression that is not within a procedural statement."
+    // Allowing chained assignments above also lets an assignment nested in the
+    // right-hand side of a continuous assignment or of assign/force bind; keep
+    // accepting it but report a warning for each directly nested one (a nested
+    // assignment reports the ones nested in its own right-hand side).
+    if (context.flags.has(ASTFlags::NonProcedural) ||
+        context.flags.has(ASTFlags::ProceduralForceAssign)) {
+        struct NestedAssignmentVisitor : public SyntaxVisitor<NestedAssignmentVisitor> {
+            const ASTContext& context;
+            explicit NestedAssignmentVisitor(const ASTContext& context) : context(context) {}
+
+            void handle(const BinaryExpressionSyntax& expr) {
+                if (SyntaxFacts::isAssignmentOperator(expr.kind)) {
+                    context.addDiag(diag::AssignmentInContAssign, expr.sourceRange());
+                    return;
+                }
+                visitDefault(expr);
+            }
+        };
+
+        NestedAssignmentVisitor visitor(context);
+        rightExpr->visit(visitor);
+    }
 
     // If we're in a top-level statement, check for an intra-assignment timing control.
     // Otherwise, we'll let this fall through to the default handler which will issue an error.
