@@ -2049,11 +2049,13 @@ const RandSeqProductionSymbol::CaseProd& RandSeqProductionSymbol::createCaseProd
         switch (item->kind) {
             case SyntaxKind::StandardRsCaseItem: {
                 auto& sci = item->as<StandardRsCaseItemSyntax>();
-                auto pi = createProdItem(*sci.item, context);
-                for (auto es : sci.expressions) {
+                // One production per case item (not per item expression):
+                // the second loop below advances prodIt once per item, so a
+                // comma-separated item list must not push duplicates or a later
+                // item would inherit an earlier item's production (§18.17.3).
+                prods.push_back(createProdItem(*sci.item, context));
+                for (auto es : sci.expressions)
                     expressions.push_back(es);
-                    prods.push_back(pi);
-                }
                 break;
             }
             case SyntaxKind::DefaultRsCaseItem:
