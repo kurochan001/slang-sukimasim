@@ -363,10 +363,14 @@ struct DefParamVisitor : public ASTVisitor<DefParamVisitor> {
     }
 
     void handle(const InstanceSymbol& symbol) {
-        if (symbol.name.empty() || symbol.body.flags.has(InstanceFlags::Uninstantiated) ||
-            hierarchyProblem) {
+        if (symbol.name.empty())
             return;
-        }
+        visitInstance(symbol);
+    }
+
+    void visitInstance(const InstanceSymbol& symbol) {
+        if (symbol.body.flags.has(InstanceFlags::Uninstantiated) || hierarchyProblem)
+            return;
 
         // If we hit max depth we have a problem -- setting the hierarchyProblem
         // member will cause other functions to early out so that we complete
@@ -432,6 +436,22 @@ struct DefParamVisitor : public ASTVisitor<DefParamVisitor> {
             if (hierarchyProblem)
                 return;
             member.visit(*this);
+        }
+    }
+
+    // IEEE 1800-2023 §23.10.1: a defparam written inside a module applies in
+    // every instance of that module, so the elements of an instance array are
+    // searched too (`elem arr[1:0]();` with `defparam m.P = 3;` inside `elem`).
+    // The elements have no name of their own (an unnamed instance is skipped
+    // above); nested dimensions are InstanceArraySymbols and recurse here.
+    void handle(const InstanceArraySymbol& symbol) {
+        for (auto element : symbol.elements) {
+            if (hierarchyProblem)
+                return;
+            if (element->kind == SymbolKind::Instance)
+                visitInstance(element->as<InstanceSymbol>());
+            else
+                element->visit(*this);
         }
     }
 
