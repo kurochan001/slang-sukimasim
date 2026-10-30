@@ -127,20 +127,32 @@ int NumberParser::append(Token token, bool isFirst) {
             }
 
             // As mentioned above, this loop is just for checking errors.
-            for (char c : chars) {
-                if (isLogicDigit(c) || isDecimalDigit(c)) {
-                    if (hasUnknown) {
-                        addDiag(diag::DecimalDigitMultipleUnknown, location + index);
+            // IEEE 1800-2023 §5.7.1: "In a decimal literal constant, the unsigned number
+            // token shall not contain any x, z, or ? digits, unless there is exactly one
+            // digit in the token", so an x or z digit after a decimal digit is an error
+            // too (e.g. 8'd1x, where the fast path above consumed the leading "1"
+            // token).  Earlier tokens of this literal are at the front of 'text'.
+            {
+                std::string_view earlier(text.data(), text.size() - chars.size());
+                bool seenDigit = std::ranges::any_of(
+                    earlier, [](char c) { return isLogicDigit(c) || isDecimalDigit(c); });
+
+                for (char c : chars) {
+                    if (isLogicDigit(c) || isDecimalDigit(c)) {
+                        if (hasUnknown || (seenDigit && isLogicDigit(c))) {
+                            addDiag(diag::DecimalDigitMultipleUnknown, location + index);
+                            return -1;
+                        }
+
+                        hasUnknown = isLogicDigit(c);
+                        seenDigit = true;
+                    }
+                    else if (c != '_') {
+                        addDiag(diag::BadDecimalDigit, location + index);
                         return -1;
                     }
-
-                    hasUnknown = isLogicDigit(c);
+                    index++;
                 }
-                else if (c != '_') {
-                    addDiag(diag::BadDecimalDigit, location + index);
-                    return -1;
-                }
-                index++;
             }
             break;
         case LiteralBase::Hex:
