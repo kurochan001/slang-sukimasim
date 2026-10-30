@@ -1621,7 +1621,9 @@ endmodule
     CHECK(diags[1].code == diag::RefPortUnconnected);
 }
 
-TEST_CASE("inout uwire port errors") {
+TEST_CASE("inout uwire ports and connections are legal") {
+    // IEEE 1800-2023 §6.6.2 / §23.3.3.6: only multiple drivers and pass switch
+    // terminals are errors for a uwire, so the port direction is not checked.
     auto tree = SyntaxTree::fromText(R"(
 module m(a);
     inout uwire a;
@@ -1649,11 +1651,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 4);
-    CHECK(diags[0].code == diag::InOutUWirePort);
-    CHECK(diags[1].code == diag::InOutUWirePort);
-    CHECK(diags[2].code == diag::PortConcatInOut);
-    CHECK(diags[3].code == diag::InOutUWireConn);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::PortConcatInOut);
 }
 
 TEST_CASE("Interconnect ports") {

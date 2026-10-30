@@ -279,12 +279,12 @@ private:
         port->setAttributes(scope, attrs);
 
         if (!port->name.empty()) {
+            // IEEE 1800-2023 §6.6.2 / §23.3.3.6 do not forbid an inout uwire port: a
+            // uwire allows only one driver (MultipleUWireDrivers) and only a connection
+            // to a bidirectional pass switch terminal is an error, so the port
+            // direction alone is not checked.
             if (port->direction == ArgumentDirection::InOut && !netType) {
                 scope.addDiag(diag::InOutPortCannotBeVariable, port->location) << port->name;
-            }
-            else if (port->direction == ArgumentDirection::InOut &&
-                     netType->netKind == NetType::UWire) {
-                scope.addDiag(diag::InOutUWirePort, port->location) << port->name;
             }
             else if (port->direction == ArgumentDirection::Ref && netType) {
                 scope.addDiag(diag::RefPortMustBeVariable, port->location) << port->name;
@@ -638,11 +638,6 @@ private:
         const bool isNet = info.internalSymbol && info.internalSymbol->kind == SymbolKind::Net;
         if (info.direction == ArgumentDirection::Ref && isNet)
             scope.addDiag(diag::RefPortMustBeVariable, declLoc) << name;
-
-        if (info.direction == ArgumentDirection::InOut && isNet &&
-            info.internalSymbol->as<NetSymbol>().netType.netKind == NetType::UWire) {
-            scope.addDiag(diag::InOutUWirePort, declLoc) << name;
-        }
 
         if ((info.direction != ArgumentDirection::Out || isNet) && decl.initializer)
             scope.addDiag(diag::DisallowedPortDefault, decl.initializer->sourceRange());

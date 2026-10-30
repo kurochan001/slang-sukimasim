@@ -2104,6 +2104,22 @@ std::span<const Expression* const> PrimitiveInstanceSymbol::getPortConnections()
                     results.push_back(
                         &Expression::bindArgument(logic_t, dir, {}, *conns[i], context));
                 }
+
+                // IEEE 1800-2023 §6.6.2: "It shall be an error to connect a uwire net
+                // to a bidirectional terminal of a bidirectional pass switch." The
+                // inout terminals of the built-in primitives are those of tran,
+                // tranif0/1, rtran and rtranif0/1. (A module inout port is not such
+                // a terminal.)
+                if (dir == ArgumentDirection::InOut) {
+                    results.back()->visitSymbolReferences(
+                        [&](const Expression& expr, const Symbol& sym) {
+                            if (sym.kind == SymbolKind::Net &&
+                                sym.as<NetSymbol>().netType.netKind == NetType::UWire) {
+                                context.addDiag(diag::InOutUWireConn, expr.sourceRange)
+                                    << sym.name;
+                            }
+                        });
+                }
             }
 
             // Additional checking for bidi switches: the first two ports

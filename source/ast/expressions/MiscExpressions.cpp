@@ -267,12 +267,10 @@ bool ValueExpressionBase::checkLValue(const ASTContext& context, const ValueSymb
             return false;
         }
 
-        if (symbol.kind == SymbolKind::Net &&
-            symbol.as<NetSymbol>().netType.netKind == NetType::UWire &&
-            flags.has(AssignFlags::InOutPort)) {
-            context.addDiag(diag::InOutUWireConn, varRange) << symbol.name;
-            return false;
-        }
+        // A uwire net connected to an inout port is legal; IEEE 1800-2023 §6.6.2
+        // forbids only more than one driver and a connection to a bidirectional pass
+        // switch terminal, and §23.3.3.6 asks only for a warning when the nets on the
+        // two sides of the port are not merged.
     }
     else if (!context.flags.has(ASTFlags::ProceduralForceAssign)) {
         // Nets can't be assigned in procedural contexts, except for force/assign
