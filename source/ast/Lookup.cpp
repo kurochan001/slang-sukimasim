@@ -2049,6 +2049,12 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
                     break;
                 case SymbolKind::Variable:
                 case SymbolKind::FormalArgument:
+                // IEEE 1800-2023 §19.5: a coverpoint name is not visible in a
+                // covergroup expression, so a coverpoint declared later in the
+                // covergroup (e.g. the implicit coverpoint a later `cross a, b`
+                // creates) must not hide an outer variable of the same name.
+                case SymbolKind::Coverpoint:
+                case SymbolKind::CoverCross:
                     // If we find a variable that's declared before use, then use that instead of
                     // the one that's declared after use. We only need to do this if
                     // AllowDeclaredAfter is enabled because if it's not, then we end up looking
