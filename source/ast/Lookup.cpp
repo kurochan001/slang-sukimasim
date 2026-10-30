@@ -168,6 +168,28 @@ const Symbol* unwrapTypeParam(const Scope& scope, const Symbol* symbol) {
     return symbol;
 }
 
+// IEEE 1800-2023 §8.23 / §6.18: a type parameter, or a typedef whose target names a
+// type through an interface port (an interface-based typedef: typedef p.cls_t t;).
+bool isRestrictedScopePrefix(const Symbol& symbol) {
+    if (symbol.kind == SymbolKind::TypeParameter)
+        return true;
+
+    if (symbol.kind != SymbolKind::TypeAlias)
+        return false;
+
+    auto syntax = symbol.getSyntax();
+    if (!syntax || syntax->kind != SyntaxKind::TypedefDeclaration)
+        return false;
+
+    auto& type = *syntax->as<TypedefDeclarationSyntax>().type;
+    if (type.kind != SyntaxKind::NamedType)
+        return false;
+
+    auto& typeName = *type.as<NamedTypeSyntax>().name;
+    return typeName.kind == SyntaxKind::ScopedName &&
+           typeName.as<ScopedNameSyntax>().separator.kind == TokenKind::Dot;
+}
+
 std::optional<bool> isClassType(const Symbol& symbol) {
     if (symbol.isType()) {
         auto& type = symbol.as<Type>();
@@ -797,6 +819,10 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
                        const ASTContext& context) {
     // Unwrap the symbol if it's a type parameter, and bail early if it's an error type.
     const Symbol* symbol = std::exchange(result.found, nullptr);
+
+    // IEEE 1800-2023 §8.23: a type parameter or a type defined by an interface-based
+    // typedef used as the prefix restricts where a selected type may be used.
+    bool restrictedPrefix = symbol && isRestrictedScopePrefix(*symbol);
     if (symbol) {
         symbol = unwrapTypeParam(*context.scope, symbol);
         if (!symbol)
@@ -906,6 +932,7 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
         }
 
         auto& part = nameParts.back();
+        restrictedPrefix |= isRestrictedScopePrefix(*symbol);
         symbol = unwrapTypeParam(*context.scope, symbol);
         if (!symbol)
             return false;
@@ -987,6 +1014,18 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
         !flags.has(LookupFlags::AllowIncompleteForwardTypedefs) && symbol->isType()) {
         result.flags &= ~LookupResultFlags::FromForwardTypedef;
         result.addDiag(*context.scope, diag::ScopeIncompleteTypedef, name.range);
+    }
+
+    // IEEE 1800-2023 §8.23: "While incomplete forward types, types defined by an
+    // interface-based typedef (see 6.18), and type parameters (see 6.20.3) may resolve to
+    // class types, use of the class scope resolution operator to select a type with such
+    // a prefix shall be restricted to typedef declarations (see 6.18), the type operator
+    // (see 6.23), and type parameter assignments."  Those three contexts are the ones that
+    // allow incomplete forward typedefs above.  Only a warning, so that existing designs
+    // keep elaborating.
+    if (restrictedPrefix && !flags.has(LookupFlags::AllowIncompleteForwardTypedefs) &&
+        symbol->isType()) {
+        result.addDiag(*context.scope, diag::ScopeRestrictedType, name.range);
     }
 
     result.found = symbol;
