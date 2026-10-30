@@ -1232,7 +1232,14 @@ InstanceBodySymbol::InstanceBodySymbol(Compilation& compilation, const Definitio
     Scope(compilation, this), hierarchyOverrideNode(hierarchyOverrideNode), flags(flags),
     definition(definition) {
 
-    setParent(*definition.getParentScope(), definition.getIndex());
+    // The definition's index is its lookup location (one past the last member that
+    // precedes the declaration, see Scope::addMembers), so it is also the index the next
+    // member of the parent scope receives. Lookups out of the body continue at
+    // LookupLocation::after(body), so place the body one before that index; otherwise
+    // the member declared right after the module would be visible from inside it.
+    // IEEE 1800-2023 §3.12.1 and §6.18 require compilation-unit items to be declared
+    // before they are referenced.
+    setParent(*definition.getParentScope(), SymbolIndex(uint32_t(definition.getIndex()) - 1));
 }
 
 InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
