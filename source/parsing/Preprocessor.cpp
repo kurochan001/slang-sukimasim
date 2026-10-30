@@ -1407,6 +1407,23 @@ Trivia Preprocessor::handleDefaultTriregStrengthDirective(Token directive) {
     return Trivia(TriviaKind::Directive, result);
 }
 
+// IEEE 1800-2023 §22.6: "Although the names of compiler directives are contained
+// in the same name space as text macro names, the names of compiler directives
+// are considered not to be defined by `ifdef and `elsif." A directive name that
+// is also a reserved keyword (`include, `else) lexes as a keyword in a
+// conditional directive operand; turn it back into an identifier so the
+// condition parses and evaluates as not defined.
+static Token conditionalNameToken(BumpAllocator& alloc, Token token) {
+    if (token.kind == TokenKind::Identifier || !LF::isKeyword(token.kind))
+        return token;
+
+    if (LF::getDirectiveKind(token.rawText(), false) == SyntaxKind::MacroUsage)
+        return token;
+
+    return Token(alloc, TokenKind::Identifier, token.trivia(), token.rawText(),
+                 token.location());
+}
+
 ConditionalDirectiveExpressionSyntax* Preprocessor::parseConditionalExpr(int minPrec) {
     // Operator precedence (higher binds tighter)
     auto getPrec = [](TokenKind kind) {
@@ -1438,6 +1455,11 @@ ConditionalDirectiveExpressionSyntax* Preprocessor::parseConditionalExpr(int min
                                                                                     closeParen);
         }
         else {
+            if (auto name = conditionalNameToken(alloc, token); name.kind != token.kind) {
+                consume();
+                return alloc.emplace<NamedConditionalDirectiveExpressionSyntax>(name);
+            }
+
             auto id = expect(TokenKind::Identifier);
             return alloc.emplace<NamedConditionalDirectiveExpressionSyntax>(id);
         }
@@ -1479,6 +1501,12 @@ ConditionalDirectiveExpressionSyntax& Preprocessor::parseConditionalExprTop() {
                 << toString(options.languageVersion);
         }
         return *result;
+    }
+
+    auto token = peek();
+    if (auto name = conditionalNameToken(alloc, token); name.kind != token.kind) {
+        consume();
+        return *alloc.emplace<NamedConditionalDirectiveExpressionSyntax>(name);
     }
 
     auto id = expect(TokenKind::Identifier);
