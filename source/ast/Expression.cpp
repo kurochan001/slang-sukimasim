@@ -34,8 +34,12 @@ struct Expression::EvalVisitor {
         if (expr.getConstant())
             return *expr.getConstant();
 
+        // IEEE 1800-2023 8.4: class-valued expressions hold object handles.
+        // Do not inspect the object's payload merely to speculate on a handle;
+        // evalImpl retains the constant-expression checks for that handle.
         if (expr.bad() ||
-            !context.checkBitCount(expr.type->getBitstreamWidth(), expr.sourceRange)) {
+            (!expr.type->isClass() &&
+             !context.checkBitCount(expr.type->getBitstreamWidth(), expr.sourceRange))) {
             if (context.cacheResults()) {
                 SLANG_ASSERT(!context.getCompilation().isFrozen());
                 expr.constant = &ConstantValue::Invalid;

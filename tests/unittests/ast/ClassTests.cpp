@@ -5,6 +5,7 @@
 
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/Expression.h"
+#include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
@@ -1648,6 +1649,109 @@ endmodule
     CHECK(diags[2].code == diag::BadConversion);
     CHECK(diags[3].code == diag::BadConversion);
     CHECK(diags[4].code == diag::BadConversion);
+}
+
+TEST_CASE("Class handle constant probes do not compute object payload widths") {
+    auto tree = SyntaxTree::fromText(R"(
+class leaf #(type T = byte);
+    T value;
+endclass
+
+class payload;
+    leaf #(byte) child;
+endclass
+
+payload object_handle;
+module top;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& unit = *compilation.getCompilationUnits()[0];
+    auto& leaf = unit.find<GenericClassDefSymbol>("leaf");
+    auto& objectHandle = unit.find<VariableSymbol>("object_handle");
+    REQUIRE(leaf.numSpecializations() == 0);
+    NamedValueExpression expression(objectHandle, {});
+    EvalContext context(objectHandle);
+    CHECK_FALSE(expression.eval(context));
+    CHECK(leaf.numSpecializations() == 0);
+    CHECK(objectHandle.getType().getBitstreamWidth() == 8);
+    CHECK(leaf.numSpecializations() == 1);
+}
+
+TEST_CASE("Dynamic class width does not specialize later member types") {
+    auto tree = SyntaxTree::fromText(R"(
+class leaf #(type T = byte);
+    T value;
+endclass
+
+class payload;
+    string text;
+    leaf #(byte) child;
+endclass
+
+module top;
+    payload object_handle;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& unit = *compilation.getCompilationUnits()[0];
+    auto& leaf = unit.find<GenericClassDefSymbol>("leaf");
+    auto& payload = unit.find<ClassType>("payload");
+    REQUIRE(leaf.numSpecializations() == 0);
+    CHECK(payload.getBitstreamWidth() == 0);
+    CHECK(leaf.numSpecializations() == 0);
+    NO_COMPILATION_ERRORS;
+    CHECK(leaf.numSpecializations() >= 1);
+}
+
+TEST_CASE("Fixed class width and bitstream casts remain available") {
+    auto tree = SyntaxTree::fromText(R"(
+class fixed_payload;
+    byte first;
+    byte second;
+endclass
+
+module top;
+    localparam int WIDTH = $bits(fixed_payload);
+    typedef bit [15:0] packed_t;
+    fixed_payload object_handle;
+    packed_t packed_value;
+    initial packed_value = packed_t'(object_handle);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& type = compilation.getCompilationUnits()[0]->find<ClassType>("fixed_payload");
+    CHECK(type.getBitstreamWidth() == 16);
+    auto& width = compilation.getRoot().topInstances[0]->body.find<ParameterSymbol>("WIDTH");
+    CHECK(width.getValue().integer() == 16);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Dynamic class width preserves later declaration diagnostics") {
+    auto tree = SyntaxTree::fromText(R"(
+class payload;
+    string text;
+    missing_property_type child;
+endclass
+
+module top;
+    payload object_handle;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& type = compilation.getCompilationUnits()[0]->find<ClassType>("payload");
+    CHECK(type.getBitstreamWidth() == 0);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
 }
 
 TEST_CASE("Class lookup from package") {

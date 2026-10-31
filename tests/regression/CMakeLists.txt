@@ -11,6 +11,10 @@ add_subdirectory(ast)
 add_subdirectory(cst)
 add_subdirectory(driver)
 
+add_test(NAME regression_class_payload_width_control
+         COMMAND slang::driver "${CMAKE_CURRENT_LIST_DIR}/class_payload_width_control.sv"
+                 "--std=1800-2023")
+
 if(SLANG_INCLUDE_UVM_TEST)
   FetchContent_Declare(
     uvm

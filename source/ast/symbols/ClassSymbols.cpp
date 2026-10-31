@@ -884,11 +884,13 @@ void ClassType::computeSize() const {
     // Note: no worry of class cycles here because we set cachedBitstreamWidth
     // to zero up above, which will avoid re-entering this function.
     uint64_t totalWidth = 0;
-    bool hasDynamic = false;
     for (auto& prop : properties()) {
         uint64_t width = prop.getType().getBitstreamWidth();
+        // One dynamic member fixes the type width at zero. Resolving further
+        // lazy member types cannot change that result and can expand an
+        // arbitrarily large family of generic specializations.
         if (width == 0)
-            hasDynamic = true;
+            return;
 
         totalWidth += width;
         if (totalWidth > MaxBitWidth) {
@@ -897,8 +899,7 @@ void ClassType::computeSize() const {
         }
     }
 
-    if (!hasDynamic)
-        cachedBitstreamWidth = totalWidth;
+    cachedBitstreamWidth = totalWidth;
 }
 
 static bool typeHasCycles(const Type& type) {
