@@ -198,6 +198,45 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("Class prototypes inherit omitted formal argument types") {
+    auto tree = SyntaxTree::fromText(R"(
+class C;
+    extern local function void process(string cfg, bit is_int, is_bitstream);
+    extern function void defaults(string name = "x", log_file = "y");
+endclass
+function void C::process(string cfg, bit is_int, bit is_bitstream);
+endfunction
+function void C::defaults(string name = "x", string log_file = "y");
+endfunction
+virtual class Base;
+    pure virtual function void update(int first, second);
+endclass
+class Derived extends Base;
+    virtual function void update(int first, int second);
+    endfunction
+endclass
+module m;
+    C c;
+    Derived d;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("DPI imports preserve unnamed typedef arguments") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef int word_t;
+    import "DPI-C" function void probe(input word_t, output int, input word_t named);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("DPI Imports") {
     auto tree = SyntaxTree::fromText(R"(
 module m;

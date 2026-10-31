@@ -732,21 +732,10 @@ FunctionPortBaseSyntax& Parser::parseFunctionPort(bitmask<FunctionOptions> optio
 
     // The data type is fully optional; if we see an identifier here we need
     // to disambiguate. Otherwise see if we have a port name or nothing at all.
-    // For DPI-C prototypes (IsPrototype), always parse data type to support
-    // argument declarations without names (e.g., "output int" in DPI-C imports).
-    //
-    // 2026-04-14 CVA6 Issue 3: IEEE 1800-2023 §13.3 allows type elision for
-    // arguments that follow an argument with an explicit data type (the trailing
-    // argument inherits the preceding argument's type). This is commonly used in
-    // class extern method prototypes like
-    //   extern function new(string name = "x", log_file = "y");
-    // When the identifier is immediately followed by '=' (a default value), it
-    // unambiguously identifies the identifier as the port NAME (you cannot give a
-    // type a default value), so we should skip the IsPrototype override in that
-    // case. This preserves DPI-C "unnamed type" semantics for shapes like
-    // "input my_type_t," / "input my_type_t)" while fixing type-elided class
-    // extern formals.
-    bool forceDataTypeForPrototype = options.has(FunctionOptions::IsPrototype);
+    // DPI imports accept unnamed typedef arguments. Other prototypes must
+    // preserve type elision, e.g. extern function f(bit first, second).
+    // IEEE 1800-2023 13.3: an omitted formal type can inherit the preceding type.
+    bool forceDataTypeForPrototype = options.has(FunctionOptions::IsDpiImport);
     if (forceDataTypeForPrototype && peek(TokenKind::Identifier) && isPlainPortName()) {
         uint32_t scanIdx = 1;
         while (peek(scanIdx).kind == TokenKind::OpenBracket) {
@@ -2666,8 +2655,10 @@ DPIImportSyntax& Parser::parseDPIImport(AttrList attributes) {
         equals = expect(TokenKind::Equals);
     }
 
-    auto& method = parseFunctionPrototype(
-        SyntaxKind::Unknown, FunctionOptions::AllowImplicitReturn | FunctionOptions::IsPrototype);
+    auto& method = parseFunctionPrototype(SyntaxKind::Unknown,
+                                          FunctionOptions::AllowImplicitReturn |
+                                              FunctionOptions::IsPrototype |
+                                              FunctionOptions::IsDpiImport);
 
     if (property.kind == TokenKind::PureKeyword && method.keyword.kind == TokenKind::TaskKeyword)
         addDiag(diag::DPIPureTask, method.keyword.range()) << property.range();

@@ -121,9 +121,12 @@ enum class FunctionOptions {
     AllowDefaultArg = 1 << 2,
 
     /// Allow override specifiers to be declared on the function prototype.
-    AllowOverrideSpecifiers = 1 << 3
+    AllowOverrideSpecifiers = 1 << 3,
+
+    /// Disambiguate bare type names in DPI imports as unnamed arguments.
+    IsDpiImport = 1 << 4
 };
-SLANG_BITMASK(FunctionOptions, AllowOverrideSpecifiers)
+SLANG_BITMASK(FunctionOptions, IsDpiImport)
 
 } // namespace detail
 
