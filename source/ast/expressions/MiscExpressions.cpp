@@ -8,10 +8,11 @@
 #include "slang/ast/expressions/MiscExpressions.h"
 
 #include "slang/ast/ASTSerializer.h"
-#include "slang/ast/Patterns.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/Patterns.h"
+#include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/diagnostics/AnalysisDiags.h"
 #include "slang/diagnostics/ConstEvalDiags.h"
@@ -1237,6 +1238,46 @@ struct CheckerArgVisitor : public ASTVisitor<CheckerArgVisitor, VisitFlags::AllG
 static const PropertyExprSyntax* EvaluatingPlaceholder =
     reinterpret_cast<const PropertyExprSyntax*>(UINTPTR_MAX);
 
+// IEEE 1800-2023 §16.8: variable_lvalue actuals retain their reference identity.
+// This is a syntactic classification; const and assignment-context diagnostics
+// remain the responsibility of the eventual lvalue use.
+static bool isAssertionVariableLValue(const Expression& expression) {
+    const auto& expr = expression.unwrapImplicitConversions();
+    switch (expr.kind) {
+        case ExpressionKind::NamedValue:
+        case ExpressionKind::HierarchicalValue:
+            return VariableSymbol::isKind(expr.as<ValueExpressionBase>().symbol.kind);
+        case ExpressionKind::ElementSelect:
+        case ExpressionKind::RangeSelect: {
+            const auto& base = expr.kind == ExpressionKind::ElementSelect
+                                   ? expr.as<ElementSelectExpression>().value()
+                                   : expr.as<RangeSelectExpression>().value();
+            return base.kind != ExpressionKind::Concatenation &&
+                   base.kind != ExpressionKind::Streaming && isAssertionVariableLValue(base);
+        }
+        case ExpressionKind::MemberAccess: {
+            const auto& member = expr.as<MemberAccessExpression>();
+            const auto& type = member.value().type->getCanonicalType();
+            return type.isObjectHandleType() || type.isVoid()
+                       ? VariableSymbol::isKind(member.member.kind)
+                       : isAssertionVariableLValue(member.value());
+        }
+        case ExpressionKind::Concatenation:
+            return expr.type->isIntegral() &&
+                   std::ranges::all_of(expr.as<ConcatenationExpression>().operands(),
+                                       [](const auto* operand) {
+                                           return isAssertionVariableLValue(*operand);
+                                       });
+        case ExpressionKind::Streaming:
+            return std::ranges::all_of(expr.as<StreamingConcatenationExpression>().streams(),
+                                       [](const auto& stream) {
+                                           return isAssertionVariableLValue(*stream.operand);
+                                       });
+        default:
+            return false;
+    }
+}
+
 Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRange range,
                                                   const ASTContext& instanceCtx) {
     Compilation& comp = instanceCtx.getCompilation();
@@ -1376,6 +1417,35 @@ Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRa
                 auto& result = selfDetermined(comp, *regExpr, argCtx, argCtx.flags);
                 CheckerArgVisitor(instanceCtx, formal, result, range);
                 result.sourceRange = range;
+                // IEEE 1800-2023 §16.8: preserve the actual's self-determined
+                // type before substituting it into a sequence or property.
+                // A non-propagated identity conversion prevents a later
+                // comparison from widening arithmetic inside the actual.
+                const auto* declarationScope = formal.getParentScope();
+                const bool assertionDeclaration =
+                    declarationScope &&
+                    (declarationScope->asSymbol().kind == SymbolKind::Sequence ||
+                     declarationScope->asSymbol().kind == SymbolKind::Property);
+                // Assertion and clocking arguments carry sequence / clock
+                // identity, rather than a data value that can be cast.
+                const auto actualKind = result.type->getCanonicalType().kind;
+                const bool dataExpression = !result.type->isVoid() &&
+                                            actualKind != SymbolKind::SequenceType &&
+                                            actualKind != SymbolKind::PropertyType &&
+                                            actualKind != SymbolKind::EventType;
+                // Inferred defaults are markers resolved at the assertion site.
+                const auto& unwrapped = result.unwrapImplicitConversions();
+                const auto* call = unwrapped.as_if<CallExpression>();
+                const bool inferredMarker = call && call->isSystemCall() &&
+                                            (call->getSubroutineName() == "$inferred_clock" ||
+                                             call->getSubroutineName() == "$inferred_disable");
+                if (assertionDeclaration && dataExpression && !inferredMarker && !result.bad() &&
+                    unwrapped.kind != ExpressionKind::UnboundedLiteral &&
+                    !isAssertionVariableLValue(result)) {
+                    return *comp.emplace<ConversionExpression>(*result.type,
+                                                               ConversionKind::Implicit, result,
+                                                               range);
+                }
                 return result;
             }
             else if (instanceCtx.flags.has(ASTFlags::EventExpression) &&

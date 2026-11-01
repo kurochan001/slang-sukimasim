@@ -4,7 +4,97 @@
 #include "Test.h"
 #include <fmt/format.h>
 
+#include "slang/ast/ASTVisitor.h"
+#include "slang/ast/EvalContext.h"
+#include "slang/ast/expressions/AssertionExpr.h"
+#include "slang/ast/expressions/CallExpression.h"
+#include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/statements/MiscStatements.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/diagnostics/StatementsDiags.h"
+
+TEST_CASE("Untyped assertion actuals preserve their expression width") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    logic a, b;
+    logic [7:0] wideValue, incrementValue;
+    property two_untyped(x); x == 2'd2; endproperty
+    property two_typed(logic [1:0] x); x == 2'd2; endproperty
+    property eight_untyped(x); x == 9'h100; endproperty
+    property concat_untyped(x); {1'b1, x} == 9'h100; endproperty
+
+    assert property (two_untyped(a + b));
+    assert property (two_typed(2'(a + b)));
+    assert property ((a + b) == 2'd2);
+    assert property (eight_untyped(wideValue + incrementValue));
+    assert property (eight_untyped({wideValue + incrementValue}));
+    assert property (concat_untyped(wideValue + incrementValue));
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    REQUIRE(compilation.getAllDiagnostics().empty());
+
+    auto& module = compilation.getRoot().topInstances[0]->body;
+    EvalContext evalContext{ASTContext(module, LookupLocation::max), EvalFlags::IsScript};
+    evalContext.pushEmptyFrame();
+    evalContext.createLocal(&module.find<VariableSymbol>("a"), SVInt(1, 1, false));
+    evalContext.createLocal(&module.find<VariableSymbol>("b"), SVInt(1, 1, false));
+    evalContext.createLocal(&module.find<VariableSymbol>("wideValue"), SVInt(8, 255, false));
+    evalContext.createLocal(&module.find<VariableSymbol>("incrementValue"), SVInt(8, 1, false));
+    const bool expected[] = {false, true, true, false, false, true};
+    size_t caseIndex = 0;
+    auto visitor = makeVisitor([&](auto&, const ConcurrentAssertionStatement& statement) {
+        auto* assertion = &statement.propertySpec;
+        auto* expression = &assertion->as<SimpleAssertionExpr>().expr;
+        while (expression->kind == ExpressionKind::AssertionInstance) {
+            assertion = &expression->as<AssertionInstanceExpression>().body;
+            expression = &assertion->as<SimpleAssertionExpr>().expr;
+        }
+        CAPTURE(caseIndex);
+        REQUIRE(caseIndex < std::size(expected));
+        auto value = expression->eval(evalContext);
+        REQUIRE(value.isInteger());
+        CHECK(value.integer() == unsigned(expected[caseIndex]));
+        caseIndex++;
+    });
+    module.visit(visitor);
+    CHECK(caseIndex == std::size(expected));
+}
+
+TEST_CASE("Inferred assertion defaults retain marker identity") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    bit clk, rst;
+    default clocking @(posedge clk); endclocking
+    default disable iff rst;
+    property p(ck = $inferred_clock, dis = $inferred_disable);
+        @(ck) disable iff (dis) 1;
+    endproperty
+    assert property (p());
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    size_t markers = 0;
+    auto markerVisitor = makeVisitor([&](auto&, const DisableIffAssertionExpr& assertion) {
+        markers++;
+        REQUIRE(assertion.condition.kind == ExpressionKind::Call);
+        CHECK(assertion.condition.as<CallExpression>().getSubroutineName() == "$inferred_disable");
+    });
+    auto visitor = makeVisitor([&](auto&, const ConcurrentAssertionStatement& statement) {
+        const auto& instance =
+            statement.propertySpec.as<SimpleAssertionExpr>().expr.as<AssertionInstanceExpression>();
+        instance.body.visit(markerVisitor);
+    });
+    compilation.getRoot().topInstances[0]->body.visit(visitor);
+    CHECK(markers == 1);
+}
 
 TEST_CASE("Named sequences") {
     auto tree = SyntaxTree::fromText(R"(
