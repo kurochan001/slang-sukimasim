@@ -62,6 +62,7 @@ private:
     const ASTContext* instanceContext = nullptr;
     const HierarchyOverrideNode* overrideNode = nullptr;
     const Scope* configScope = nullptr;
+    bool resetAllFromConfig = false;
     bool forceInvalidValues = false;
     bool suppressErrors = false;
     bool anyErrors = false;

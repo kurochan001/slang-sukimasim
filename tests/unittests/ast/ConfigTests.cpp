@@ -6,6 +6,8 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
+#include "slang/ast/types/Type.h"
 #include "slang/driver/Driver.h"
 
 using namespace slang::driver;
@@ -1415,4 +1417,56 @@ endconfig
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::InfoTask);
+}
+
+TEST_CASE("Empty configuration reset suppresses defparams on all parameters") {
+    auto tree = SyntaxTree::fromText(R"(
+module leaf #(parameter int W=1, Q=5, parameter type T=int);
+    T payload;
+endmodule
+module branch;
+    leaf #(.W(2), .Q(11), .T(byte)) u();
+    leaf #(.W(8)) guard();
+    defparam u.W=3, u.Q=13, guard.W=9;
+endmodule
+module top;
+    branch wrapped();
+endmodule
+config cfg_reset;
+    design work.top;
+    instance top.wrapped.u use #();
+endconfig
+config cfg_named;
+    design work.top;
+    instance top.wrapped.u use #(.W(7));
+endconfig
+config cfg_one_default;
+    design work.top;
+    instance top.wrapped.u use #(.W());
+endconfig
+config cfg_ordinary;
+    design work.top;
+endconfig
+)");
+    auto check = [&](const std::string& name, int width, int q, int bits) {
+        CompilationOptions options;
+        options.topModules.emplace(name);
+        Compilation compilation(options);
+        compilation.addSyntaxTree(tree);
+        NO_COMPILATION_ERRORS;
+        auto value = [&](std::string_view path) {
+            return compilation.getRoot().lookupName<ParameterSymbol>(path).getValue();
+        };
+        CHECK(value("top.wrapped.u.W").integer() == width);
+        CHECK(value("top.wrapped.u.Q").integer() == q);
+        CHECK(value("top.wrapped.guard.W").integer() == 9);
+        CHECK(compilation.getRoot()
+                  .lookupName<VariableSymbol>("top.wrapped.u.payload")
+                  .getType()
+                  .getBitWidth() == bits);
+    };
+    check("cfg_reset", 1, 5, 32);
+    check("cfg_named", 7, 13, 8);
+    check("cfg_one_default", 1, 13, 8);
+    check("cfg_ordinary", 3, 13, 8);
 }

@@ -29,6 +29,7 @@ void ParameterBuilder::setAssignments(const ParameterValueAssignmentSyntax& synt
     // syntax list is empty, we set all params back to their defaults.
     if (isFromConfig && syntax.parameters.empty()) {
         assignments.clear();
+        resetAllFromConfig = true;
         return;
     }
 
@@ -156,6 +157,9 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
     bool isFromConfig = false;
     if (auto it = assignments.find(decl.name); it != assignments.end())
         std::tie(newInitializer, isFromConfig) = it->second;
+    else if (resetAllFromConfig)
+        // IEEE 1800-2023 33.4.3: use #() overrides defparams with declaration defaults.
+        isFromConfig = true;
 
     if (decl.isTypeParam) {
         auto typeRestriction = ForwardTypeRestriction::None;
