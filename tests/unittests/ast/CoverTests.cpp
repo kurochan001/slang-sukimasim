@@ -1039,3 +1039,45 @@ endmodule
     CHECK(diags[0].code == diag::CoverCrossItems);
     CHECK(diags[1].code == diag::InvalidBinsTarget);
 }
+
+TEST_CASE("Covergroup sample defaults bind after the enclosing scope is installed") {
+    auto tree = SyntaxTree::fromText(R"(
+int unitValue;
+function automatic int unitDefault(); return unitValue; endfunction
+covergroup unitCg with function sample(int value=unitDefault());
+    coverpoint value;
+endgroup
+module m;
+    int moduleValue;
+    function automatic int moduleDefault(); return moduleValue; endfunction
+    covergroup cg with function sample(int a=4, int b=moduleDefault());
+        coverpoint a;
+        coverpoint b;
+    endgroup
+    covergroup variableCg with function sample(int a=moduleValue);
+        coverpoint a;
+    endgroup
+    cg c=new;
+    variableCg v=new;
+    unitCg u=new;
+    initial begin
+        c.sample(4);
+        c.sample(4, 3);
+        v.sample();
+        u.sample();
+    end
+endmodule
+class C;
+    int classValue;
+    function int classDefault(); return classValue; endfunction
+    covergroup cg with function sample(int a=classDefault());
+        coverpoint a;
+    endgroup
+    function new(); cg=new; endfunction
+    function void take(); cg.sample(); endfunction
+endclass
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

@@ -117,6 +117,8 @@ public:
         defaultValSyntax = nullptr;
     }
 
+    const syntax::ExpressionSyntax* getDefaultValueSyntax() const { return defaultValSyntax; }
+
     const Expression* getDefaultValue() const;
 
     FormalArgumentSymbol& clone(Compilation& compilation) const;

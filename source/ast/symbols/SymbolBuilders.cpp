@@ -62,7 +62,12 @@ FormalArgumentSymbol& MethodBuilder::copyArg(const FormalArgumentSymbol& fromArg
     auto arg = compilation.emplace<FormalArgumentSymbol>(fromArg.name, fromArg.location,
                                                          fromArg.direction, fromArg.lifetime);
     arg->flags = fromArg.flags;
-    arg->setDefaultValue(fromArg.getDefaultValue());
+    // IEEE 1800-2023 13.5.3 / 19.8.1: keep declaration-scope lookup lazy until
+    // the copied argument's method and its enclosing scope have been installed.
+    if (auto syntax = fromArg.getDefaultValueSyntax())
+        arg->setDefaultValueSyntax(*syntax);
+    else
+        arg->setDefaultValue(fromArg.getDefaultValue());
     symbol.addMember(*arg);
     args.push_back(arg);
 
