@@ -3546,3 +3546,70 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("Embedded covergroups allow this expressions", "[issue3120]") {
+    auto tree = SyntaxTree::fromText(R"(
+class C;
+    bit value, enabled;
+    covergroup cg;
+        cp: coverpoint this.value iff (this.enabled);
+        methodPoint: coverpoint this.readValue();
+        paired: cross cp, methodPoint iff (this.enabled);
+        binGuarded: cross cp, methodPoint {
+            bins selected = binsof(cp) iff (this.enabled);
+        }
+    endgroup
+    function bit readValue(); return this.value; endfunction
+    function new(); cg = new; endfunction
+endclass
+module m;
+    C c = new;
+    initial c.cg.sample();
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Embedded this lookup retains invalid context diagnostics", "[issue3120]") {
+    auto tree = SyntaxTree::fromText(R"(
+module nonclass;
+    bit value;
+    covergroup cg;
+        cp: coverpoint this.value;
+    endgroup
+    cg c = new;
+endmodule
+module static_context;
+    class C;
+        bit value;
+        static function bit bad(); return this.value; endfunction
+    endclass
+    initial $display("%b", C::bad());
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::InvalidThisHandle);
+    CHECK(diags[1].code == diag::InvalidThisHandle);
+}
+
+TEST_CASE("v1800-2023: type(this) remains legal in a static method return", "[issue3120]") {
+    auto options = optionsFor(LanguageVersion::v1800_2023);
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    class C;
+        static function type(this) nullValue(); return null; endfunction
+    endclass
+    C c;
+    initial c = C::nullValue();
+endmodule
+)",
+                                     options);
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

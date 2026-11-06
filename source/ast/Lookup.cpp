@@ -1149,10 +1149,15 @@ const Symbol* findThisHandle(const Scope& scope, bitmask<LookupFlags> flags, Sou
             return &parent->as<ClassType>();
     }
     else {
-        // Find the parent method, if we can.
+        // IEEE 1800-2023 8.11: this is also permitted in an embedded covergroup.
+        // Traverse its coverage scopes without crossing a method/static boundary.
         const Symbol* parent = &scope.asSymbol();
         while (parent->kind == SymbolKind::StatementBlock ||
-               parent->kind == SymbolKind::RandSeqProduction) {
+               parent->kind == SymbolKind::RandSeqProduction ||
+               parent->kind == SymbolKind::Coverpoint || parent->kind == SymbolKind::CoverCross ||
+               parent->kind == SymbolKind::CoverCrossBody ||
+               parent->kind == SymbolKind::CovergroupBody ||
+               parent->kind == SymbolKind::CovergroupType) {
             auto parentScope = parent->getParentScope();
             SLANG_ASSERT(parentScope);
             parent = &parentScope->asSymbol();
@@ -1218,6 +1223,7 @@ bool withinCovergroup(const Symbol& symbol, const Scope& initialScope) {
             case SymbolKind::CovergroupBody:
             case SymbolKind::Coverpoint:
             case SymbolKind::CoverCross:
+            case SymbolKind::CoverCrossBody:
                 if (symbol.getParentScope() == nextScope)
                     return true;
 
@@ -1676,6 +1682,7 @@ std::pair<const ClassType*, bool> Lookup::getContainingClass(const Scope& scope)
             case SymbolKind::CovergroupType:
             case SymbolKind::Coverpoint:
             case SymbolKind::CoverCross:
+            case SymbolKind::CoverCrossBody:
                 return true;
             default:
                 return false;
