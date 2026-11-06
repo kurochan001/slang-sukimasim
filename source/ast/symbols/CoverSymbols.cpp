@@ -412,6 +412,24 @@ void CovergroupType::inheritMembers(function_ref<void(const Symbol&)> insertCB) 
         if (member.kind == SymbolKind::TransparentMember)
             toWrap = &member.as<TransparentMemberSymbol>().wrapped;
 
+        // IEEE 1800-2023 §19.4.1 (#3003): a same-named derived cross
+        // replaces the inherited cross. Crosses are deferred members and
+        // therefore do not yet appear in the unelaborated name map above.
+        if (toWrap->kind == SymbolKind::CoverCross) {
+            bool overridden = false;
+            for (const auto* ownMember : cds.members) {
+                if (ownMember->kind == SyntaxKind::CoverCross) {
+                    const auto& ownCross = ownMember->as<CoverCrossSyntax>();
+                    if (ownCross.label && ownCross.label->name.valueText() == member.name) {
+                        overridden = true;
+                        break;
+                    }
+                }
+            }
+            if (overridden)
+                continue;
+        }
+
         // All symbols get inserted into the beginning of the scope using the
         // provided insertion callback. We insert them as TransparentMemberSymbols
         // so that we can trace a path back to the actual location they are declared.
