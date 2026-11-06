@@ -20,6 +20,7 @@ add_executable(
   ast/ConfigTests.cpp
   ast/ConstraintTests.cpp
   ast/CoverTests.cpp
+  ast/Issue3135Tests.cpp
   ast/EvalTests.cpp
   ast/ExpressionTests.cpp
   ast/HierarchyTests.cpp

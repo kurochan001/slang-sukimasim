@@ -7,8 +7,12 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/symbols/CoverSymbols.h"
 
+#include <unordered_set>
+
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/TypeProvider.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
@@ -23,8 +27,10 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
+#include "slang/diagnostics/SysFuncsDiags.h"
 #include "slang/numeric/SVInt.h"
 #include "slang/syntax/AllSyntax.h"
+#include "slang/text/SourceManager.h"
 #include "slang/util/String.h"
 
 namespace {
@@ -660,6 +666,294 @@ static bool readsCovergroupArgument(const Expression& expr) {
     return found;
 }
 
+// These expressions are evaluated at construction, so evaluating the call now
+// would confuse a legal class constant with an elaboration constant. Check the
+// real declaration instead (IEEE 1800-2023 19.5).
+class CovergroupFunctionValidator
+    : public ASTVisitor<CovergroupFunctionValidator, VisitFlags::AllGood> {
+public:
+    explicit CovergroupFunctionValidator(const ASTContext& context) : context_(context) {}
+
+    void handle(const NamedValueExpression& value) {
+        checkVariable(value.symbol, value.sourceRange);
+    }
+    void handle(const HierarchicalValueExpression& value) {
+        checkVariable(value.symbol, value.sourceRange);
+    }
+    void handle(const MemberAccessExpression& access) {
+        if (access.member.kind == SymbolKind::ClassProperty)
+            checkVariable(access.member, access.sourceRange);
+        visitDefault(access);
+    }
+
+    void handle(const CallExpression& call) {
+        visitDefault(call);
+        if (call.isSystemCall()) {
+            checkSystemCall(call);
+            return;
+        }
+        const auto& function = *std::get<0>(call.subroutine);
+        bool valid = function.subroutineKind == SubroutineKind::Function &&
+                     !function.flags.has(MethodFlags::DPIImport | MethodFlags::Constructor |
+                                         MethodFlags::Virtual | MethodFlags::Pure |
+                                         MethodFlags::BuiltIn | MethodFlags::InterfaceExtern |
+                                         MethodFlags::ModportExport | MethodFlags::ModportImport);
+        for (auto argument : function.getArguments()) {
+            valid &= argument->direction == ArgumentDirection::In ||
+                     (argument->direction == ArgumentDirection::Ref &&
+                      argument->flags.has(VariableFlags::Const));
+        }
+        if (!valid) {
+            context_.addDiag(diag::CoverageFunctionEffects, call.sourceRange) << function.name;
+            return;
+        }
+        if (!visited_.insert(&function).second)
+            return;
+        auto previous = std::exchange(function_, &function);
+        function.getBody().visit(*this);
+        function_ = previous;
+    }
+
+    void handle(const AssignmentExpression& assignment) {
+        if (function_ && assignment.isNonBlocking())
+            context_.addDiag(diag::CoverageFunctionEffects, assignment.sourceRange)
+                << function_->name;
+        visitDefault(assignment);
+    }
+    void handle(const EventTriggerStatement& trigger) { rejectEffect(trigger.sourceRange); }
+    void handle(const TimedStatement& timed) { rejectEffect(timed.sourceRange); }
+    void handle(const BlockStatement& block) {
+        if (block.blockKind != StatementBlockKind::Sequential)
+            rejectEffect(block.sourceRange);
+        visitDefault(block);
+    }
+
+private:
+    const ASTContext& context_;
+    const SubroutineSymbol* function_ = nullptr;
+    std::unordered_set<const SubroutineSymbol*> visited_;
+
+    void rejectEffect(SourceRange range) {
+        if (function_)
+            context_.addDiag(diag::CoverageFunctionEffects, range) << function_->name;
+    }
+
+    void checkVariable(const Symbol& symbol, SourceRange range) {
+        if (!function_ || !VariableSymbol::isKind(symbol.kind))
+            return;
+        const auto& variable = symbol.as<VariableSymbol>();
+        if (variable.flags.has(VariableFlags::Const) || &symbol == function_->thisVar)
+            return;
+        auto scope = symbol.getParentScope();
+        while (scope && scope != function_)
+            scope = scope->asSymbol().getParentScope();
+        const bool callOwned = symbol.kind == SymbolKind::FormalArgument ||
+                               &symbol == function_->returnValVar ||
+                               variable.lifetime == VariableLifetime::Automatic;
+        if (!scope || !callOwned)
+            context_.addDiag(diag::CoverageFunctionEffects, range) << function_->name;
+    }
+
+    void checkSystemCall(const CallExpression& call) {
+        const auto& info = std::get<1>(call.subroutine);
+        if (info.subroutine->kind == SubroutineKind::Task) {
+            context_.addDiag(diag::SysFuncNotConst, call.sourceRange) << info.subroutine->name;
+            return;
+        }
+        EvalContext eval(context_);
+        // Reuse each builtin's existing constant-evaluation admission rule. A
+        // deferred argument can prevent computing its value; that is not a
+        // reason to reject this construction-time expression. Do not cache or
+        // publish such speculative values / unrelated value diagnostics.
+        info.subroutine->eval(eval, call.arguments(), call.sourceRange, info);
+        for (const auto& diagnostic : eval.getAllDiagnostics()) {
+            if (diagnostic.code == diag::SysFuncNotConst)
+                context_.addDiag(diag::SysFuncNotConst, call.sourceRange) << info.subroutine->name;
+        }
+    }
+};
+
+static bool writesClassConstant(const Expression& expression, const ClassPropertySymbol& property) {
+    switch (expression.kind) {
+        case ExpressionKind::ElementSelect:
+            return writesClassConstant(expression.as<ElementSelectExpression>().value(), property);
+        case ExpressionKind::RangeSelect:
+            return writesClassConstant(expression.as<RangeSelectExpression>().value(), property);
+        case ExpressionKind::MemberAccess: {
+            const auto& member = expression.as<MemberAccessExpression>();
+            return &member.member == &property || (member.member.kind == SymbolKind::Field &&
+                                                   writesClassConstant(member.value(), property));
+        }
+        case ExpressionKind::Concatenation:
+            for (auto operand : expression.as<ConcatenationExpression>().operands()) {
+                if (writesClassConstant(*operand, property))
+                    return true;
+            }
+            return false;
+        default:
+            return expression.getSymbolReference() == &property;
+    }
+}
+
+// IEEE 1800-2023 19.5: instance-constant initialization must precede
+// construction and cannot share a loop / fork-join_none body with it.
+static void checkInstanceConstantInitialization(const ClassPropertySymbol& property,
+                                                const CovergroupType& covergroup,
+                                                const ASTContext& context) {
+    if (property.getInitializer())
+        return;
+    auto constructor = property.getParentScope()->asSymbol().as<ClassType>().getConstructor();
+    if (!constructor)
+        return;
+
+    struct Occurrence {
+        SourceRange range;
+        std::vector<const Statement*> restrictedContainers;
+    };
+    std::vector<const Statement*> restrictedContainers;
+    std::vector<Occurrence> initializers;
+    std::vector<Occurrence> constructions;
+    auto visitor = makeVisitor(
+        [&](auto& v, const AssignmentExpression& assignment) {
+            if (writesClassConstant(assignment.left(), property))
+                initializers.push_back({assignment.sourceRange, restrictedContainers});
+            v.visitDefault(assignment);
+        },
+        [&](auto&, const NewCovergroupExpression& construction) {
+            if (&construction.type->getCanonicalType() == &covergroup)
+                constructions.push_back({construction.sourceRange, restrictedContainers});
+        },
+        [&](auto& v, const std::derived_from<Statement> auto& statement) {
+            bool restricted = statement.kind == StatementKind::ForLoop ||
+                              statement.kind == StatementKind::RepeatLoop ||
+                              statement.kind == StatementKind::ForeachLoop ||
+                              statement.kind == StatementKind::WhileLoop ||
+                              statement.kind == StatementKind::DoWhileLoop ||
+                              statement.kind == StatementKind::ForeverLoop;
+            if constexpr (std::is_same_v<std::decay_t<decltype(statement)>, BlockStatement>)
+                restricted |= statement.blockKind == StatementBlockKind::JoinNone;
+            if (restricted)
+                restrictedContainers.push_back(&statement);
+            v.visitDefault(statement);
+            if (restricted)
+                restrictedContainers.pop_back();
+        });
+    constructor->getBody().visit(visitor);
+    if (initializers.empty())
+        return;
+    auto sourceManager = context.getCompilation().getSourceManager();
+    SLANG_ASSERT(sourceManager);
+
+    for (const auto& construction : constructions) {
+        bool initializedBefore = true;
+        bool forbiddenPlacement = false;
+        for (const auto& initializer : initializers) {
+            for (auto container : construction.restrictedContainers) {
+                if (std::find(initializer.restrictedContainers.begin(),
+                              initializer.restrictedContainers.end(),
+                              container) != initializer.restrictedContainers.end()) {
+                    forbiddenPlacement = true;
+                }
+            }
+            initializedBefore &= sourceManager
+                                     ->isBeforeInCompilationUnit(initializer.range.start(),
+                                                                 construction.range.start())
+                                     .value_or(false);
+        }
+        if (forbiddenPlacement)
+            context.addDiag(diag::CoverageConstInitPlacement, construction.range) << property.name;
+        else if (!initializedBefore)
+            context.addDiag(diag::CoverageConstInitOrder, construction.range) << property.name;
+    }
+}
+
+static void visitFunctionReferences(const Expression& expression,
+                                    function_ref<void(const Symbol&)> record) {
+    std::unordered_set<const SubroutineSymbol*> visitedFunctions;
+    auto functions = makeVisitor([&](auto& visitor, const CallExpression& call) {
+        visitor.visitDefault(call);
+        if (call.isSystemCall())
+            return;
+        auto function = std::get<0>(call.subroutine);
+        if (!visitedFunctions.insert(function).second)
+            return;
+        const auto& body = function->getBody();
+        body.visit(makeVisitor([&](auto& v, const auto& node) {
+            if constexpr (std::is_base_of_v<Expression, std::decay_t<decltype(node)>>) {
+                if (auto symbol = node.getSymbolReference())
+                    record(*symbol);
+            }
+            v.visitDefault(node);
+        }));
+        body.visit(visitor);
+    });
+    expression.visit(functions);
+}
+
+// IEEE 1800-2023 19.5 and 8.19: enclosing class constants are values supplied
+// at covergroup construction, not elaboration-time constant expressions.
+static std::optional<bool> readsEnclosingClassConstant(const Expression& expr,
+                                                       const ASTContext& context) {
+    const CovergroupType* covergroup = nullptr;
+    const Scope* scope = context.scope;
+    while (scope && scope->asSymbol().kind != SymbolKind::ClassType) {
+        if (scope->asSymbol().kind == SymbolKind::CovergroupType)
+            covergroup = &scope->asSymbol().as<CovergroupType>();
+        scope = scope->asSymbol().getParentScope();
+    }
+    if (!scope || !covergroup)
+        return std::nullopt;
+
+    const auto& enclosing = scope->asSymbol().as<ClassType>();
+    bool found = false;
+    bool validReferences = true;
+    SmallVector<const ClassPropertySymbol*> referencedConstants;
+    auto recordConstant = [&](const Symbol& symbol) {
+        if (symbol.kind != SymbolKind::ClassProperty)
+            return false;
+        const auto& property = symbol.as<ClassPropertySymbol>();
+        const ClassType* owner = &enclosing;
+        while (owner && property.getParentScope() != owner) {
+            auto base = owner->getBaseClass();
+            owner = base && base->isClass() ? &base->getCanonicalType().as<ClassType>() : nullptr;
+        }
+        if (!owner || !property.flags.has(VariableFlags::Const))
+            return false;
+        found = true;
+        if (std::find(referencedConstants.begin(), referencedConstants.end(), &property) ==
+            referencedConstants.end()) {
+            referencedConstants.push_back(&property);
+        }
+        return true;
+    };
+    expr.visitSymbolReferences([&](const Expression&, const Symbol& symbol) {
+        if (symbol.kind == SymbolKind::ClassProperty)
+            validReferences &= recordConstant(symbol);
+        else if (VariableSymbol::isKind(symbol.kind) && symbol.kind != SymbolKind::Field) {
+            if (&symbol == enclosing.thisVar)
+                return;
+            if (symbol.kind == SymbolKind::FormalArgument) {
+                const auto& argument = symbol.as<FormalArgumentSymbol>();
+                auto parent = argument.getParentScope();
+                if (parent && parent->asSymbol().kind == SymbolKind::CovergroupType &&
+                    argument.direction != ArgumentDirection::Ref &&
+                    !argument.flags.has(VariableFlags::CoverageSampleFormal)) {
+                    return;
+                }
+            }
+            validReferences = false;
+        }
+    });
+    visitFunctionReferences(expr, [&](const Symbol& symbol) { recordConstant(symbol); });
+    if (found && validReferences) {
+        for (auto property : referencedConstants)
+            checkInstanceConstantInitialization(*property, *covergroup, context);
+    }
+    if (!found)
+        return std::nullopt;
+    return validReferences;
+}
+
 static const Expression& bindCovergroupExpr(const ExpressionSyntax& syntax,
                                             const ASTContext& context,
                                             const Type* lvalueType = nullptr,
@@ -671,7 +965,12 @@ static const Expression& bindCovergroupExpr(const ExpressionSyntax& syntax,
         expr = &Expression::bind(syntax, context, extraFlags);
 
     // NOTE: CovergroupExpr flag has been removed from EvalFlags
-    if (!readsCovergroupArgument(*expr))
+    auto classConstant = readsEnclosingClassConstant(*expr, context);
+    if (classConstant.value_or(false)) {
+        CovergroupFunctionValidator validator(context);
+        expr->visit(validator);
+    }
+    if (classConstant.has_value() ? !*classConstant : !readsCovergroupArgument(*expr))
         context.eval(*expr, EvalFlags::None);
     return *expr;
 }
