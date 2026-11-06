@@ -842,8 +842,19 @@ void CoverageBinSymbol::resolve() const {
             // `bins b = <array>` names a runtime array of values (IEEE 1800-2023
             // §19.5.1); it is not required to be a constant expression, so bind
             // without the const-eval step that bindCovergroupExpr performs.
-            setCoverageExpr = &Expression::bind(
-                *init->as<ExpressionCoverageBinInitializerSyntax>().expr, context);
+            // IEEE 1800-2023 §19.5.1.2 (#2999): names declared inside
+            // the covergroup are not visible in a set_covergroup_expression.
+            // Bind from its enclosing declaration scope instead.
+            {
+                const Scope* enclosing = scope;
+                while (enclosing && (enclosing->asSymbol().kind == SymbolKind::Coverpoint ||
+                                     enclosing->asSymbol().kind == SymbolKind::CovergroupBody)) {
+                    enclosing = enclosing->asSymbol().getParentScope();
+                }
+                ASTContext setContext(enclosing ? *enclosing : *scope, LookupLocation::max);
+                setCoverageExpr = &Expression::bind(
+                    *init->as<ExpressionCoverageBinInitializerSyntax>().expr, setContext);
+            }
 
             if (!setCoverageExpr->bad()) {
                 auto& t = *setCoverageExpr->type;
